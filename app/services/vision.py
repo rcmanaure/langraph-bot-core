@@ -93,6 +93,23 @@ una verificación de presencia literal del texto, no un juicio de plausibilidad.
 
 _VERIFY_JSON_SUFFIX = '\nReply ONLY with JSON: {"text_visible": <true|false>}'
 
+# Appended to the verify prompt only when specialization_context was used for
+# extraction — found via /qa 2026-07-24: on a hard-to-read image, the
+# specialization hint can steer the extraction toward a plausible domain term
+# that the verify pass then "confirms" is present, when an unbiased
+# extraction of the SAME image read something else entirely. The base verify
+# prompt already warns against plausibility judgments in general; this raises
+# the bar specifically for the case that caused it, without a second LLM call
+# or new schema field. No-op (not appended) when specialization_context is
+# empty — byte-identical verify prompt for every tenant that doesn't use it.
+_VERIFY_SPECIALIZATION_CAVEAT = """
+ADVERTENCIA: el texto a verificar pudo haber sido influenciado por jerga \
+específica del negocio durante la extracción. Sé especialmente estricto acá — \
+si tenés cualquier duda de que el texto exacto esté escrito en la imagen (en vez \
+de sonar simplemente "razonable" para este tipo de negocio), marcá \
+text_visible=false.
+"""
+
 
 def _strip_fences(content: str) -> str:
     content = content.strip()
@@ -345,9 +362,11 @@ async def extract_procedure_query(
     img_b64 = base64.b64encode(img_bytes).decode()
     prompt = f"{caption}\n\n{_VISION_EXTRACT_PROMPT}" if caption else _VISION_EXTRACT_PROMPT
     if specialization_context:
-        # Extraction prompt only — the verify pass below stays domain-agnostic
-        # by design, to protect the anti-hallucination two-pass design (see
-        # docstring above).
+        # Extraction prompt only — the verify pass below never receives the
+        # actual jargon text (stays domain-agnostic, protecting the
+        # anti-hallucination two-pass design), but DOES get a stricter
+        # scrutiny instruction (_VERIFY_SPECIALIZATION_CAVEAT below) since a
+        # biased extraction needs a higher bar to pass verification.
         prompt = f"Contexto del negocio: {specialization_context}\n\n{prompt}"
         logger.debug("vision_specialization_applied len=%d", len(specialization_context))
 
@@ -375,6 +394,8 @@ async def extract_procedure_query(
     # never contains the full interrogative sentence, only the term itself.
     verify_claim = extraction.procedure_name or extraction.price_question
     verify_prompt = _VERIFY_PROMPT_TEMPLATE.format(claim=verify_claim)
+    if specialization_context:
+        verify_prompt += _VERIFY_SPECIALIZATION_CAVEAT
     try:
         verification: VisionVerification = await _call_with_rate_limit_retry(
             _structured_or_json, llm, model_name, verify_prompt, img_b64, VisionVerification, _VERIFY_JSON_SUFFIX

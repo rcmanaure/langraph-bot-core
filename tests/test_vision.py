@@ -109,6 +109,37 @@ async def test_specialization_context_prefixed_to_extraction_prompt_not_verify()
 
 
 @pytest.mark.asyncio
+async def test_specialization_context_adds_stricter_verify_scrutiny():
+    """Found via /qa 2026-07-24: on hard-to-read images, specialization_context
+    can bias the extraction toward a plausible domain term. The verify pass
+    still never receives the jargon text itself, but gets an extra scrutiny
+    caveat appended when specialization_context was used — raising the bar
+    without a second LLM call or reintroducing bias into verification."""
+    from app.services.vision import _VERIFY_SPECIALIZATION_CAVEAT
+
+    captured_prompts = {}
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        captured_prompts[schema] = prompt
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?")
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA"
+        )
+
+    assert _VERIFY_SPECIALIZATION_CAVEAT in captured_prompts[VisionVerification]
+    # Verify prompt still doesn't leak the actual jargon text — only the caveat.
+    assert "jerga médica: IGRA" not in captured_prompts[VisionVerification]
+
+
+@pytest.mark.asyncio
 async def test_empty_specialization_context_leaves_prompt_unchanged():
     """Regression guard: empty specialization_context (the default for every
     existing call site) must produce the byte-identical prompt as before
