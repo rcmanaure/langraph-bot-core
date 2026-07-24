@@ -389,6 +389,32 @@ async def extract_procedure_query(
         else:
             await _store_vision_result(cache_key, VISION_UNCERTAIN)
             return VISION_UNCERTAIN
+    elif specialization_context:
+        # Consensus check (found via /qa 2026-07-24, live re-test with the
+        # same image confirmed sampling variance): specialization_context can
+        # steer extraction toward a plausible domain term on hard-to-read
+        # images, and the model's own confidence is unreliable — but
+        # disagreement between two INDEPENDENT samples is a direct, measured
+        # signal, not a proxy. Only paid when specialization_context is set
+        # (the condition that triggers the risk) and only on the confident
+        # direct-read path — the OCR-fallback branch above is a different,
+        # non-LLM-biased signal and doesn't need a second opinion.
+        try:
+            extraction_2: VisionExtraction = await _call_with_rate_limit_retry(
+                _structured_or_json, llm, model_name, prompt, img_b64, VisionExtraction, _EXTRACT_JSON_SUFFIX
+            )
+        except Exception as exc:
+            logger.warning("vision_consensus_sample_failed=%s defaulting to uncertain", exc)
+            return VISION_UNCERTAIN  # transient — not cached, retry may succeed
+
+        name_1 = (extraction.procedure_name or extraction.price_question or "").strip().lower()
+        name_2 = (extraction_2.procedure_name or extraction_2.price_question or "").strip().lower()
+        if name_1 != name_2:
+            logger.warning("vision_consensus_disagreement first=%s second=%s", name_1[:60], name_2[:60])
+            # Deliberately NOT cached — same stochastic-rejection reasoning as
+            # the verification rejection below; one unlucky pair of samples
+            # must not become a permanent wrong answer for this image.
+            return VISION_UNCERTAIN
 
     # Verify the bare literal term, not the formatted question — a document
     # never contains the full interrogative sentence, only the term itself.

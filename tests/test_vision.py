@@ -140,6 +140,92 @@ async def test_specialization_context_adds_stricter_verify_scrutiny():
 
 
 @pytest.mark.asyncio
+async def test_specialization_context_disagreeing_samples_returns_uncertain():
+    """Consensus check: two independent extraction samples that disagree on
+    the procedure name → VISION_UNCERTAIN, verify pass never runs. Found via
+    /qa 2026-07-24 — live re-test showed the same hard-to-read image
+    producing 3 different confident reads across 3 calls."""
+    extraction_calls = iter([
+        VisionExtraction(is_legible=True, procedure_name="Trompa uterina derecha",
+                          price_question="¿Cuánto cuesta una trompa uterina derecha?"),
+        VisionExtraction(is_legible=True, procedure_name="Hoja de biopsia",
+                          price_question="¿Cuánto cuesta una hoja de biopsia?"),
+    ])
+    verify_called = False
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        nonlocal verify_called
+        if schema is VisionExtraction:
+            return next(extraction_calls)
+        verify_called = True
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA"
+        )
+
+    assert result == VISION_UNCERTAIN
+    assert verify_called is False  # disagreement short-circuits before the verify pass
+
+
+@pytest.mark.asyncio
+async def test_specialization_context_agreeing_samples_proceeds_to_verify():
+    """Consensus check: two independent samples that DO agree (case-insensitive)
+    proceed normally to the verify pass and return the extracted question."""
+    extraction_calls = iter([
+        VisionExtraction(is_legible=True, procedure_name="Hoja de Biopsia",
+                          price_question="¿Cuánto cuesta una hoja de biopsia?"),
+        VisionExtraction(is_legible=True, procedure_name="hoja de biopsia",
+                          price_question="¿Cuánto cuesta una hoja de biopsia?"),
+    ])
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return next(extraction_calls)
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA"
+        )
+
+    assert result == "¿Cuánto cuesta una hoja de biopsia?"
+
+
+@pytest.mark.asyncio
+async def test_empty_specialization_context_skips_consensus_check():
+    """Regression/cost guard: without specialization_context, only ONE
+    extraction call happens — no consensus sampling, no extra cost/latency
+    for tenants who don't use the field."""
+    call_count = {"extraction": 0}
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            call_count["extraction"] += 1
+            return VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?")
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(b"fake image bytes", "")
+
+    assert result == "¿Cuánto cuesta un examen de IGRA?"
+    assert call_count["extraction"] == 1
+
+
+@pytest.mark.asyncio
 async def test_empty_specialization_context_leaves_prompt_unchanged():
     """Regression guard: empty specialization_context (the default for every
     existing call site) must produce the byte-identical prompt as before
