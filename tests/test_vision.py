@@ -386,6 +386,33 @@ async def test_multi_sample_partial_verification_not_cached():
 
 
 @pytest.mark.asyncio
+async def test_multi_sample_verification_capped_at_max():
+    """Regression: /python-review 2026-07-24 — extraction.samples is
+    model-controlled with no upper bound; verification fan-out must be
+    capped so a mis-parsed image can't trigger an unbounded concurrent
+    call burst against the rate-limited vision model."""
+    from app.services.vision import _MAX_MULTI_SAMPLE_VERIFY
+
+    many_samples = [f"Muestra {i}" for i in range(_MAX_MULTI_SAMPLE_VERIFY + 5)]
+    verify_call_count = {"n": 0}
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, samples=many_samples)
+        verify_call_count["n"] += 1
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        await extract_procedure_query(b"fake image bytes", "")
+
+    assert verify_call_count["n"] == _MAX_MULTI_SAMPLE_VERIFY
+
+
+@pytest.mark.asyncio
 async def test_multi_sample_document_all_rejected_returns_uncertain():
     async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
         if schema is VisionExtraction:

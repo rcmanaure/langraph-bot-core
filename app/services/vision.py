@@ -170,6 +170,15 @@ _structured_output_ok: dict[str, bool] = {}
 _RATE_LIMIT_MAX_RETRIES = 2
 _RATE_LIMIT_BASE_DELAY = 1.5  # seconds
 
+# Multi-sample verification fans out one concurrent LLM call per sample
+# (found in /python-review) — extraction.samples is model-controlled with no
+# upper bound, so a mis-parsed image (or a burst of multi-sample photos in
+# one media group) could otherwise trigger an unbounded concurrent-call
+# spike against the same rate-limited vision model. 20 comfortably covers
+# any realistic multi-sample order; ceiling upgrade if that ever proves too
+# small — cap it, not the underlying gather logic.
+_MAX_MULTI_SAMPLE_VERIFY = 20
+
 
 def _is_rate_limited(exc: BaseException) -> bool:
     return isinstance(exc, openai.RateLimitError) or getattr(exc, "status_code", None) == 429
@@ -496,11 +505,18 @@ async def extract_procedure_query(
             logger.warning("vision_sample_verification_rejected sample=%s", sample[:60])
             return None
 
+        samples_to_verify = extraction.samples[:_MAX_MULTI_SAMPLE_VERIFY]
+        if len(extraction.samples) > _MAX_MULTI_SAMPLE_VERIFY:
+            logger.warning(
+                "vision_multi_sample_truncated total=%d cap=%d",
+                len(extraction.samples), _MAX_MULTI_SAMPLE_VERIFY,
+            )
+
         # Concurrent, not sequential (found in /code-review) — each sample's
         # verification is an independent LLM call with no shared state that
         # requires ordering, so N samples cost one round-trip's latency
         # instead of N.
-        results = await asyncio.gather(*(_verify_sample(s) for s in extraction.samples))
+        results = await asyncio.gather(*(_verify_sample(s) for s in samples_to_verify))
         verified_samples = [s for s in results if s is not None]
 
         if not verified_samples:
@@ -517,7 +533,7 @@ async def extract_procedure_query(
             f"- {s}" for s in verified_samples
         )
 
-        if len(verified_samples) < len(extraction.samples):
+        if len(verified_samples) < len(samples_to_verify):
             # Partial result — one or more samples failed verification, which
             # the file's own docstring documents as stochastic (identical
             # image+claim pairs flip between accepted/rejected across
