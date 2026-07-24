@@ -174,6 +174,36 @@ async def test_specialization_context_disagreeing_samples_returns_uncertain():
 
 
 @pytest.mark.asyncio
+async def test_specialization_context_accent_only_difference_counts_as_agreement():
+    """Regression: /qa 2026-07-24 with WhatsApp-exported real images found the
+    consensus check rejecting two samples that read the SAME term but
+    differed only in accent marks ("anatomia patologica" vs "anatomía
+    patológica") — a real false positive, not a real disagreement."""
+    extraction_calls = iter([
+        VisionExtraction(is_legible=True, procedure_name="anatomia patologica",
+                          price_question="¿Cuánto cuesta anatomia patologica?"),
+        VisionExtraction(is_legible=True, procedure_name="anatomía patológica",
+                          price_question="¿Cuánto cuesta anatomía patológica?"),
+    ])
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return next(extraction_calls)
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA"
+        )
+
+    assert result != VISION_UNCERTAIN
+
+
+@pytest.mark.asyncio
 async def test_specialization_context_agreeing_samples_proceeds_to_verify():
     """Consensus check: two independent samples that DO agree (case-insensitive)
     proceed normally to the verify pass and return the extracted question."""

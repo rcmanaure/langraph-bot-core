@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import shutil
+import unicodedata
 from pathlib import Path
 
 import openai
@@ -115,6 +116,15 @@ def _strip_fences(content: str) -> str:
     content = content.strip()
     content = re.sub(r"^```[a-zA-Z]*\s*", "", content)
     return re.sub(r"\s*```$", "", content).strip()
+
+
+def _normalize_for_comparison(text_value: str) -> str:
+    """Lowercase + accent-strip (NFKD, drop combining marks) so two
+    independent vision samples that read the SAME term but differ only in
+    accent marks (e.g. "anatomia patologica" vs "anatomía patológica" — real
+    /qa 2026-07-24 finding) aren't misclassified as a consensus disagreement."""
+    normalized = unicodedata.normalize("NFKD", text_value.strip().lower())
+    return "".join(c for c in normalized if not unicodedata.combining(c))
 
 
 # Per-model memo of whether with_structured_output actually works. Live
@@ -407,8 +417,8 @@ async def extract_procedure_query(
             logger.warning("vision_consensus_sample_failed=%s defaulting to uncertain", exc)
             return VISION_UNCERTAIN  # transient — not cached, retry may succeed
 
-        name_1 = (extraction.procedure_name or extraction.price_question or "").strip().lower()
-        name_2 = (extraction_2.procedure_name or extraction_2.price_question or "").strip().lower()
+        name_1 = _normalize_for_comparison(extraction.procedure_name or extraction.price_question or "")
+        name_2 = _normalize_for_comparison(extraction_2.procedure_name or extraction_2.price_question or "")
         if name_1 != name_2:
             logger.warning("vision_consensus_disagreement first=%s second=%s", name_1[:60], name_2[:60])
             # Deliberately NOT cached — same stochastic-rejection reasoning as
