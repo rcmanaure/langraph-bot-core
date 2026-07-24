@@ -118,6 +118,7 @@ async def test_image_extracted_query_sent_to_graph(mock_db, mock_send, mock_grap
     """Vision extraction succeeds → extracted question becomes the graph input."""
     with (
         patch("app.channels.whatsapp.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.whatsapp.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.whatsapp._get_media_info", new_callable=AsyncMock,
               return_value={"url": "https://example.com/media", "file_size": 1024}),
         patch("app.channels.whatsapp._fetch_media_bytes", new_callable=AsyncMock, return_value=b"img"),
@@ -140,6 +141,7 @@ async def test_image_uncertain_extraction_asks_user_to_type(mock_db, mock_send, 
 
     with (
         patch("app.channels.whatsapp.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.whatsapp.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.whatsapp._get_media_info", new_callable=AsyncMock,
               return_value={"url": "https://example.com/media", "file_size": 1024}),
         patch("app.channels.whatsapp._fetch_media_bytes", new_callable=AsyncMock, return_value=b"img"),
@@ -171,6 +173,7 @@ async def test_image_extraction_failure_sends_error(mock_db, mock_send, mock_gra
     """Vision API call raises → user gets a Spanish error, no graph call, no 500."""
     with (
         patch("app.channels.whatsapp.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.whatsapp.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.whatsapp._get_media_info", new_callable=AsyncMock,
               return_value={"url": "https://example.com/media", "file_size": 1024}),
         patch("app.channels.whatsapp._fetch_media_bytes", new_callable=AsyncMock, return_value=b"img"),

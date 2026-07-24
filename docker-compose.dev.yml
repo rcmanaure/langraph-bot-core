@@ -32,6 +32,11 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
+      # Named volume so the container's own (Linux) venv, built during image
+      # build, isn't shadowed by the bind mount above pulling in the host's
+      # .venv (Windows binaries under WSL/Docker Desktop won't run in the
+      # Linux container — this is what "No module named uvicorn" means).
+      - api-venv:/app/.venv
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,6 +51,7 @@ services:
 
 volumes:
   pgdata:
+  api-venv:
 
 networks:
   lgbot-dev:

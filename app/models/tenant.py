@@ -26,6 +26,12 @@ class Tenant(Base):
     tone_description = Column(
         Text, nullable=False, default=DEFAULT_TONE_DESCRIPTION, server_default=DEFAULT_TONE_DESCRIPTION
     )
+    # Free-text domain/jargon context fed into the RAG and vision prompts so the
+    # model interprets vertical-specific terminology (e.g. medical/lab jargon).
+    # Separate from expertise_area (which stays short — it doubles as a display
+    # label in greetings/off-topic messages and the admin table) — see
+    # tone_description above for the same short-label-vs-long-content split.
+    specialization_context = Column(Text, nullable=False, default="", server_default="")
     contact_url = Column(String(512), nullable=True)
     example_questions = Column(JSON, nullable=True)
     operator_chat_id = Column(String(64), nullable=True)

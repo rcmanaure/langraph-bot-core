@@ -587,6 +587,7 @@ async def test_photo_extracted_query_sent_to_graph(mock_db, mock_http, mock_grap
     """Vision extraction succeeds → extracted question becomes the graph input."""
     with (
         patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
         patch("app.channels.telegram._extract_procedure_query", new_callable=AsyncMock,
               return_value="¿Cuánto cuesta un examen de IGRA?"),
@@ -608,6 +609,7 @@ async def test_photo_uncertain_extraction_asks_user_to_type(mock_db, mock_http, 
 
     with (
         patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
         patch("app.channels.telegram._extract_procedure_query", new_callable=AsyncMock,
               return_value=_VISION_UNCERTAIN),
@@ -641,6 +643,7 @@ async def test_photo_extraction_failure_sends_error(mock_db, mock_http, mock_gra
     """Vision API call raises → user gets a Spanish error, no graph call, no 500."""
     with (
         patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
         patch("app.channels.telegram._extract_procedure_query", new_callable=AsyncMock,
               side_effect=RuntimeError("Vision API returned 500")),
@@ -681,11 +684,12 @@ async def test_media_group_photos_combined_into_single_graph_call(mock_db, mock_
     replies."""
     queries = iter(["¿Cuánto cuesta un examen de IGRA?", "¿Cuánto cuesta una biopsia?"])
 
-    async def fake_extract(img_bytes, caption):
+    async def fake_extract(img_bytes, caption, tenant_slug="", specialization_context=""):
         return next(queries)
 
     with (
         patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.telegram._MEDIA_GROUP_DEBOUNCE", 0.05),
         patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
         patch("app.channels.telegram._extract_procedure_query", side_effect=fake_extract),
@@ -713,6 +717,7 @@ async def test_media_group_all_uncertain_sends_single_message(mock_db, mock_http
 
     with (
         patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.telegram._MEDIA_GROUP_DEBOUNCE", 0.05),
         patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
         patch("app.channels.telegram._extract_procedure_query", new_callable=AsyncMock,
@@ -733,11 +738,12 @@ async def test_media_group_all_uncertain_sends_single_message(mock_db, mock_http
 @pytest.mark.asyncio
 async def test_different_media_groups_not_mixed(mock_db, mock_http, mock_graph):
     """Two distinct albums arriving close together must not merge into one turn."""
-    async def fake_extract(img_bytes, caption):
+    async def fake_extract(img_bytes, caption, tenant_slug="", specialization_context=""):
         return "¿Cuánto cuesta un examen X?"
 
     with (
         patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.telegram._MEDIA_GROUP_DEBOUNCE", 0.05),
         patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
         patch("app.channels.telegram._extract_procedure_query", side_effect=fake_extract),

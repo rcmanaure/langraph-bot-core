@@ -129,6 +129,10 @@
               <input x-model="newTenant.expertise_area" type="text" placeholder="histological diagnosis" class="field">
             </div>
             <div class="sm:col-span-2">
+              <label class="block text-xs font-medium text-gray-700 mb-1">Specialization context (jargon/glossary for the model)</label>
+              <textarea x-model="newTenant.specialization_context" maxlength="1000" rows="3" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." class="field"></textarea>
+            </div>
+            <div class="sm:col-span-2">
               <label class="block text-xs font-medium text-gray-700 mb-1">Contact URL</label>
               <input x-model="newTenant.contact_url" type="url" placeholder="https://wa.me/..." class="field">
             </div>
@@ -352,6 +356,10 @@
                               <div>
                                 <label class="block text-xs font-medium text-gray-700 mb-1" :for="'expertise-' + t.id">Expertise area</label>
                                 <input :id="'expertise-' + t.id" type="text" x-model="editForm.expertise_area" @input="markDirty()" :disabled="editLoading" placeholder="histological diagnosis" class="field">
+                              </div>
+                              <div class="sm:col-span-2">
+                                <label class="block text-xs font-medium text-gray-700 mb-1" :for="'specialization-' + t.id">Specialization context (jargon/glossary for the model)</label>
+                                <textarea :id="'specialization-' + t.id" x-model="editForm.specialization_context" maxlength="1000" rows="3" @input="markDirty()" :disabled="editLoading" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." class="field"></textarea>
                               </div>
                               <div class="sm:col-span-2">
                                 <label class="block text-xs font-medium text-gray-700 mb-1" :for="'contact-' + t.id">Contact URL</label>
@@ -798,7 +806,7 @@
         tenants: [],
         tenantsLoading: false,
         showAddTenant: false,
-        newTenant: { slug:'', bot_token:'', webhook_secret:'', expertise_area:'', contact_url:'', plan:'free' },
+        newTenant: { slug:'', bot_token:'', webhook_secret:'', expertise_area:'', specialization_context:'', contact_url:'', plan:'free' },
         tenantLoading: false,
         tenantError: '',
         tenantSuccess: '',
@@ -931,7 +939,7 @@
         },
 
         resetTenantForm() {
-          this.newTenant = { slug:'', bot_token:'', webhook_secret:'', expertise_area:'', contact_url:'', plan:'free' }
+          this.newTenant = { slug:'', bot_token:'', webhook_secret:'', expertise_area:'', specialization_context:'', contact_url:'', plan:'free' }
           this.tenantError = ''
         },
 
@@ -965,6 +973,7 @@
           this.editForm = {
             plan: t.plan,
             expertise_area: t.expertise_area || '',
+            specialization_context: t.specialization_context || '',
             contact_url: t.contact_url || '',
             active: t.active,
             bot_token: '',
@@ -997,6 +1006,7 @@
           const payload = {
             plan: this.editForm.plan,
             expertise_area: this.editForm.expertise_area || null,
+            specialization_context: this.editForm.specialization_context || null,
             contact_url: this.editForm.contact_url || null,
             active: this.editForm.active,
           }
@@ -1020,6 +1030,7 @@
               Object.assign(t, {
                 plan: data.plan ?? this.editForm.plan,
                 expertise_area: data.expertise_area ?? this.editForm.expertise_area,
+                specialization_context: data.specialization_context ?? this.editForm.specialization_context,
                 contact_url: data.contact_url ?? this.editForm.contact_url,
                 active: data.active ?? this.editForm.active,
               })

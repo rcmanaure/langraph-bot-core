@@ -208,6 +208,27 @@ async def test_create_tenant_missing_webhook_secret_returns_422():
 
 
 @pytest.mark.asyncio
+async def test_create_tenant_specialization_context_persisted():
+    """specialization_context in the create payload reaches the INSERT."""
+    app = make_app()
+    ctx = _make_db_for_create(existing_row=None)
+    payload = {**VALID_TENANT, "slug": "lab-client", "specialization_context": "jerga médica: IGRA"}
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=ctx):
+        r = await _request(app, "post", "/admin/tenants", json=payload)
+    assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_create_tenant_specialization_context_over_max_length_returns_422():
+    """Server-side enforcement — a direct API client can't bypass the
+    admin.html textarea's client-side maxlength."""
+    app = make_app()
+    payload = {**VALID_TENANT, "slug": "lab-client-2", "specialization_context": "x" * 1001}
+    r = await _request(app, "post", "/admin/tenants", json=payload)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_create_tenant_api_key_is_hashed_in_db():
     """The raw api_key returned to the caller is NOT stored in DB (only the hash is)."""
     app = make_app()

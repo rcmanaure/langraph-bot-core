@@ -14,6 +14,7 @@ from app.channels.base import ChannelEvent
 from app.config import settings
 from app.crypto import decrypt_value
 from app.db import AsyncSessionLocal
+from app.services.tenant_context import get_tenant_specialization
 from app.services.vision import MAX_MEDIA_BYTES, VISION_UNCERTAIN, extract_procedure_query
 
 logger = logging.getLogger(__name__)
@@ -310,7 +311,10 @@ async def _handle_message(
                             "Imagen demasiado grande (máx 10MB).")
                 return
             img_bytes = await _fetch_media_bytes(info["url"], access_token)
-            procedure_query = await extract_procedure_query(img_bytes, caption)
+            specialization = await get_tenant_specialization(tenant_slug)
+            procedure_query = await extract_procedure_query(
+                img_bytes, caption, tenant_slug=tenant_slug, specialization_context=specialization
+            )
         except Exception as exc:
             logger.warning("wa_vision_failed from=%s err=%s", from_id, exc)
             await _send(phone_number_id, access_token, from_id,

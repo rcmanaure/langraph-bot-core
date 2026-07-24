@@ -7,7 +7,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
@@ -39,7 +39,8 @@ async def list_tenants(_: None = Depends(verify_operator_key)):
     async with AsyncSessionLocal() as db:
         rows = await db.execute(
             text("""
-                SELECT id, slug, expertise_area, tone_description, contact_url, plan, active, created_at
+                SELECT id, slug, expertise_area, tone_description, specialization_context,
+                       contact_url, plan, active, created_at
                   FROM tenants ORDER BY created_at DESC
             """)
         )
@@ -52,6 +53,7 @@ class TenantCreate(BaseModel):
     webhook_secret: str
     expertise_area: str = ""
     tone_description: str = DEFAULT_TONE_DESCRIPTION
+    specialization_context: str = Field("", max_length=1000)
     contact_url: str = ""
     plan: str = "free"
 
@@ -73,10 +75,10 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
             text("""
                 INSERT INTO tenants
                     (slug, api_key_hash, webhook_secret, bot_token, plan,
-                     expertise_area, tone_description, contact_url, active)
+                     expertise_area, tone_description, specialization_context, contact_url, active)
                 VALUES
                     (:slug, :api_key_hash, :webhook_secret, :bot_token, :plan,
-                     :expertise_area, :tone_description, :contact_url, true)
+                     :expertise_area, :tone_description, :specialization_context, :contact_url, true)
             """),
             {
                 "slug": body.slug,
@@ -86,6 +88,7 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
                 "plan": body.plan,
                 "expertise_area": body.expertise_area,
                 "tone_description": body.tone_description,
+                "specialization_context": body.specialization_context,
                 "contact_url": body.contact_url,
             },
         )
@@ -98,6 +101,7 @@ class TenantPatch(BaseModel):
     plan: Literal["free", "basic", "pro"] | None = None
     expertise_area: str | None = None
     tone_description: str | None = None
+    specialization_context: str | None = Field(None, max_length=1000)
     contact_url: str | None = None
     active: bool | None = None
     # Credential fields — only updated when non-empty string is provided
@@ -127,6 +131,8 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
             t.expertise_area = body.expertise_area
         if "tone_description" in fields:
             t.tone_description = body.tone_description
+        if "specialization_context" in fields:
+            t.specialization_context = body.specialization_context
         if "contact_url" in fields:
             t.contact_url = body.contact_url
         if "active" in fields:
@@ -178,6 +184,7 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
         "plan": t.plan,
         "expertise_area": t.expertise_area,
         "tone_description": t.tone_description,
+        "specialization_context": t.specialization_context,
         "contact_url": t.contact_url,
         "active": t.active,
         "webhook_registered": webhook_registered,

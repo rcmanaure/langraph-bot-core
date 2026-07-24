@@ -61,7 +61,7 @@ async def req(app, method, path, **kwargs):
 
 def _tenant(
     id=1, slug="acme", plan="free", expertise_area="consulting",
-    contact_url=None, active=True, bot_token="123:TOKEN",
+    specialization_context="", contact_url=None, active=True, bot_token="123:TOKEN",
     webhook_secret="wh-secret", api_key_hash="oldhash",
 ):
     t = MagicMock()
@@ -69,6 +69,7 @@ def _tenant(
     t.slug = slug
     t.plan = plan
     t.expertise_area = expertise_area
+    t.specialization_context = specialization_context
     t.contact_url = contact_url
     t.active = active
     t.bot_token = bot_token
@@ -147,6 +148,34 @@ async def test_patch_success_returns_safe_fields():
     assert "slug" in body
     assert "plan" in body
     assert "active" in body
+
+
+@pytest.mark.asyncio
+async def test_patch_specialization_context_round_trips():
+    """PATCH with specialization_context persists it and returns it in the
+    response — the exact class of bug an earlier draft of this plan's spec
+    review caught (field write with no round-trip confirmation)."""
+    app = make_app()
+    t = _tenant()
+    sess = _session(execute=AsyncMock(return_value=_orm_result(t)))
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)), \
+         patch("app.routes.admin.set_webhook", new_callable=AsyncMock, return_value=None), \
+         patch("app.routes.admin.delete_webhook", new_callable=AsyncMock):
+        r = await req(app, "patch", "/admin/tenants/acme",
+                      json={"specialization_context": "jerga médica: IGRA, antro gástrico"})
+    assert r.status_code == 200
+    assert r.json()["specialization_context"] == "jerga médica: IGRA, antro gástrico"
+    assert t.specialization_context == "jerga médica: IGRA, antro gástrico"
+
+
+@pytest.mark.asyncio
+async def test_patch_specialization_context_over_max_length_returns_422():
+    """Server-side enforcement (Pydantic max_length) — not just the admin.html
+    textarea's client-side maxlength, which any direct API client bypasses."""
+    app = make_app()
+    r = await req(app, "patch", "/admin/tenants/acme",
+                  json={"specialization_context": "x" * 1001})
+    assert r.status_code == 422
 
 
 @pytest.mark.asyncio

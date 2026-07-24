@@ -83,6 +83,57 @@ def _mock_llm(by_schema: dict, raw_content_by_schema: dict | None = None):
 
 
 @pytest.mark.asyncio
+async def test_specialization_context_prefixed_to_extraction_prompt_not_verify():
+    """specialization_context prepends the extraction prompt only — the
+    verify pass stays domain-agnostic by design (anti-hallucination guard)."""
+    captured_prompts = {}
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        captured_prompts[schema] = prompt
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?")
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA, antro gástrico"
+        )
+
+    assert result == "¿Cuánto cuesta un examen de IGRA?"
+    assert "jerga médica: IGRA, antro gástrico" in captured_prompts[VisionExtraction]
+    assert "jerga médica: IGRA, antro gástrico" not in captured_prompts[VisionVerification]
+
+
+@pytest.mark.asyncio
+async def test_empty_specialization_context_leaves_prompt_unchanged():
+    """Regression guard: empty specialization_context (the default for every
+    existing call site) must produce the byte-identical prompt as before
+    this feature — no dangling hint block."""
+    from app.services.vision import _VISION_EXTRACT_PROMPT
+
+    captured_prompts = {}
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        captured_prompts[schema] = prompt
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?")
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        await extract_procedure_query(b"fake image bytes", "")
+
+    assert captured_prompts[VisionExtraction] == _VISION_EXTRACT_PROMPT
+
+
+@pytest.mark.asyncio
 async def test_extract_returns_price_question_when_legible_and_verified():
     mock_llm = _mock_llm({
         VisionExtraction: VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?"),
@@ -476,6 +527,26 @@ def test_cache_key_differs_by_model_caption_and_bytes():
     key_c = vision_module._vision_cache_key("model-a", "caption", b"img1")
     key_d = vision_module._vision_cache_key("model-a", "", b"img2")
     assert len({key_a, key_b, key_c, key_d}) == 4
+
+
+def test_cache_key_differs_by_tenant_slug():
+    """Same image, same model/caption, different tenant → different key —
+    closes the cross-tenant cache-sharing gap found in the eng review."""
+    key_tenant_a = vision_module._vision_cache_key("model-a", "", b"img1", "tenant-a")
+    key_tenant_b = vision_module._vision_cache_key("model-a", "", b"img1", "tenant-b")
+    assert key_tenant_a != key_tenant_b
+
+
+def test_cache_key_folds_in_specialization_only_when_non_empty():
+    """Two tenants with the SAME empty specialization_context (the default)
+    get the SAME key for the same image — only a non-empty value changes it.
+    This is what keeps the zero-behavior-change guarantee for tenants who
+    never set the field."""
+    key_empty_1 = vision_module._vision_cache_key("model-a", "", b"img1", "tenant-a", "")
+    key_empty_2 = vision_module._vision_cache_key("model-a", "", b"img1", "tenant-a", "")
+    key_with_spec = vision_module._vision_cache_key("model-a", "", b"img1", "tenant-a", "jerga médica")
+    assert key_empty_1 == key_empty_2
+    assert key_empty_1 != key_with_spec
 
 
 @pytest.mark.asyncio

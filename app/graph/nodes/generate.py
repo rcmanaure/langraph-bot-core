@@ -25,7 +25,7 @@ Formato (OBLIGATORIO — compatible WhatsApp/Telegram):
 - Por ítem: - *CÓDIGO* Nombre: $precio"""
 
 _RAG_SYSTEM = """\
-Eres un asistente de {expertise}. Eres {tone_description}.{name_hint}
+Eres un asistente de {expertise}. Eres {tone_description}.{name_hint}{specialization_hint}
 Usa ÚNICAMENTE el contexto proporcionado. NO uses conocimiento propio fuera de ese contexto.
 
 Cada ítem del contexto ya viene etiquetado por el sistema de búsqueda como [COINCIDENCIA EXACTA] o
@@ -73,18 +73,31 @@ def _match_tag(similarity: float) -> str:
 async def _load_tenant(slug: str) -> dict:
     async with AsyncSessionLocal() as db:
         row = (await db.execute(
-            text("SELECT expertise_area, tone_description, contact_url FROM tenants WHERE slug = :s"),
+            text(
+                "SELECT expertise_area, tone_description, contact_url, specialization_context "
+                "FROM tenants WHERE slug = :s"
+            ),
             {"s": slug},
         )).first()
     if not row:
-        return {"expertise": "este negocio", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": ""}
+        return {
+            "expertise": "este negocio",
+            "tone_description": DEFAULT_TONE_DESCRIPTION,
+            "contact_hint": "",
+            "specialization_context": "",
+        }
     expertise = row.expertise_area or "este negocio"
     contact_hint = (f"\nSi necesitas más ayuda, contacta: {row.contact_url}" if row.contact_url else "")
     return {
         "expertise": expertise,
         "tone_description": row.tone_description or DEFAULT_TONE_DESCRIPTION,
         "contact_hint": contact_hint,
+        "specialization_context": row.specialization_context or "",
     }
+
+
+def _build_specialization_hint(specialization: str) -> str:
+    return f"\nContexto de especialización: {specialization}." if specialization else ""
 
 
 async def _load_name_hint(state: AgentState, runtime: Runtime | None) -> str:
@@ -147,7 +160,17 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
     template = _CATALOG_SYSTEM if is_catalog else _RAG_SYSTEM
     format_hint = _FORMAT_HINT.format(tone_description=tenant_ctx["tone_description"])
     name_hint = await _load_name_hint(state, runtime)
-    system = template.format(context=context, format_hint=format_hint, name_hint=name_hint, **tenant_ctx)
+    # Defensive .get(), not a bare {specialization_context} placeholder relying on
+    # **tenant_ctx always containing the key — existing tests mock _load_tenant()'s
+    # return dict directly and don't include this key; a missing key would KeyError.
+    specialization = tenant_ctx.get("specialization_context", "") or ""
+    specialization_hint = _build_specialization_hint(specialization) if not is_catalog else ""
+    if specialization:
+        logger.debug("generate_specialization_applied tenant=%s len=%d", state["tenant_id"], len(specialization))
+    system = template.format(
+        context=context, format_hint=format_hint, name_hint=name_hint,
+        specialization_hint=specialization_hint, **tenant_ctx,
+    )
 
     trimmed = trim_messages(
         state["messages"],

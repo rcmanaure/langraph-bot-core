@@ -554,6 +554,57 @@ async def test_generate_omits_name_line_when_no_profile(base_state):
     assert "se llama" not in system_content
 
 
+@pytest.mark.asyncio
+async def test_generate_includes_specialization_block_when_set(base_state):
+    """RAG mode: specialization_context present in tenant_ctx → block appears
+    in the system prompt (defensive .get(), not a bare **tenant_ctx key)."""
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_llm.model_name = "test-model"
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="ok"))
+
+    with (
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch(
+            "app.graph.nodes.generate._load_tenant",
+            AsyncMock(return_value={
+                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
+                "specialization_context": "IGRA = interferon gamma release assay",
+            }),
+        ),
+    ):
+        await generate(base_state, runtime=runtime)
+
+    system_content = mock_llm.ainvoke.await_args.args[0][0].content
+    assert "IGRA = interferon gamma release assay" in system_content
+    assert "Contexto de especialización" in system_content
+
+
+@pytest.mark.asyncio
+async def test_generate_omits_specialization_block_when_absent(base_state):
+    """Existing mocks that don't include specialization_context in their
+    _load_tenant() return dict must not KeyError, and must render the
+    byte-identical prompt shape as before this feature (regression guard)."""
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_llm.model_name = "test-model"
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="ok"))
+
+    with (
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch(
+            "app.graph.nodes.generate._load_tenant",
+            AsyncMock(return_value={
+                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
+            }),
+        ),
+    ):
+        await generate(base_state, runtime=runtime)
+
+    system_content = mock_llm.ainvoke.await_args.args[0][0].content
+    assert "Contexto de especialización" not in system_content
+
+
 # ---------------------------------------------------------------------------
 # generate — surfaces retrieval similarity so the LLM can't silently assert a
 # price for a weak/wrong match (the IGRA -> "biopsia de ganglio" bug: the model

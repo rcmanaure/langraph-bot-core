@@ -206,9 +206,19 @@ def _extract_with_ocr(img_bytes: bytes) -> str | None:
         return None
 
 
-def _vision_cache_key(model_name: str, caption: str, img_bytes: bytes) -> str:
+def _vision_cache_key(
+    model_name: str, caption: str, img_bytes: bytes,
+    tenant_slug: str = "", specialization_context: str = "",
+) -> str:
+    # tenant_slug always folded in (vision_cache is a global table with zero
+    # tenant scoping otherwise — two tenants sending a byte-identical image
+    # would share a cached result). specialization_context only folded in
+    # when non-empty so tenants who never set it don't pay a second cache
+    # invalidation on top of the one-time tenant_slug invalidation.
     h = hashlib.sha256()
-    h.update(f"{model_name}:{caption}:".encode())
+    h.update(f"{model_name}:{caption}:{tenant_slug}:".encode())
+    if specialization_context:
+        h.update(f"{specialization_context}:".encode())
     h.update(img_bytes)
     return h.hexdigest()
 
@@ -264,7 +274,10 @@ async def _structured_or_json(
     return schema.model_validate(json.loads(_strip_fences(resp.content)))
 
 
-async def extract_procedure_query(img_bytes: bytes, caption: str) -> str:
+async def extract_procedure_query(
+    img_bytes: bytes, caption: str,
+    tenant_slug: str = "", specialization_context: str = "",
+) -> str:
     """Vision-transcribe a document/product image into a literal price question.
 
     Shared by every channel (Telegram, WhatsApp, ...) that accepts image uploads,
@@ -318,7 +331,7 @@ async def extract_procedure_query(img_bytes: bytes, caption: str) -> str:
 
     img_bytes = _preprocess_image(img_bytes)
     model_name = settings.openai_vision_model
-    cache_key = _vision_cache_key(model_name, caption, img_bytes)
+    cache_key = _vision_cache_key(model_name, caption, img_bytes, tenant_slug, specialization_context)
     try:
         cached = await _get_cached_vision_result(cache_key)
     except Exception as exc:
@@ -331,6 +344,12 @@ async def extract_procedure_query(img_bytes: bytes, caption: str) -> str:
     llm = get_vision_llm()
     img_b64 = base64.b64encode(img_bytes).decode()
     prompt = f"{caption}\n\n{_VISION_EXTRACT_PROMPT}" if caption else _VISION_EXTRACT_PROMPT
+    if specialization_context:
+        # Extraction prompt only — the verify pass below stays domain-agnostic
+        # by design, to protect the anti-hallucination two-pass design (see
+        # docstring above).
+        prompt = f"Contexto del negocio: {specialization_context}\n\n{prompt}"
+        logger.debug("vision_specialization_applied len=%d", len(specialization_context))
 
     try:
         extraction: VisionExtraction = await _call_with_rate_limit_retry(

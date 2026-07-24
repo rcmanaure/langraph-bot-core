@@ -110,6 +110,7 @@ async def test_generate_uses_context():
         format_hint=_FORMAT_HINT.format(tone_description=DEFAULT_TONE_DESCRIPTION),
         tone_description=DEFAULT_TONE_DESCRIPTION,
         name_hint="",
+        specialization_hint="",
     )
     llm = _eval_llm()
     response = await llm.ainvoke([
@@ -135,6 +136,7 @@ async def test_generate_admits_missing_context():
         format_hint=_FORMAT_HINT.format(tone_description=DEFAULT_TONE_DESCRIPTION),
         tone_description=DEFAULT_TONE_DESCRIPTION,
         name_hint="",
+        specialization_hint="",
     )
     llm = _eval_llm()
     response = await llm.ainvoke([
