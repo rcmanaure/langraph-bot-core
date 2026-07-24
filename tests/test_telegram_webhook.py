@@ -710,6 +710,44 @@ async def test_media_group_photos_combined_into_single_graph_call(mock_db, mock_
 
 
 @pytest.mark.asyncio
+async def test_media_group_multi_sample_query_not_double_bulleted(mock_db, mock_http, mock_graph):
+    """Regression: /code-review 2026-07-24 — if one photo in the album is a
+    multi-sample document (vision.py returns its own multi-line combined
+    question), the media-group join must splice it in as-is, not wrap it in
+    an extra "- " bullet that nests its header/sub-bullets inside one bullet."""
+    multi_sample_query = (
+        "Veo varios ítems distintos en la imagen, ¿cuánto cuesta cada uno?\n"
+        "- Epiplón\n- Líquido peritoneal"
+    )
+    queries = iter(["¿Cuánto cuesta un examen de IGRA?", multi_sample_query])
+
+    async def fake_extract(img_bytes, caption, tenant_slug="", specialization_context=""):
+        return next(queries)
+
+    with (
+        patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
+        patch("app.channels.telegram._MEDIA_GROUP_DEBOUNCE", 0.05),
+        patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
+        patch("app.channels.telegram._extract_procedure_query", side_effect=fake_extract),
+    ):
+        app = make_app(mock_graph)
+        await _post(app, photo_group_update("p1", "grp-multi"))
+        await _post(app, photo_group_update("p2", "grp-multi"))
+        await asyncio.sleep(0.3)
+
+    call_input = mock_graph.ainvoke.call_args[0][0]
+    content = call_input["messages"][0].content
+    assert "- ¿Cuánto cuesta un examen de IGRA?" in content
+    # The multi-sample block's own header must NOT be prefixed with a bullet
+    # (it isn't a bare item, it's already a formatted multi-line answer).
+    assert "- Veo varios ítems" not in content
+    assert "Veo varios ítems distintos en la imagen" in content
+    assert "- Epiplón" in content
+    assert "- Líquido peritoneal" in content
+
+
+@pytest.mark.asyncio
 async def test_media_group_all_uncertain_sends_single_message(mock_db, mock_http, mock_graph):
     """Every photo in the album is illegible → one combined "can't read" message,
     not one per photo."""

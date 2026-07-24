@@ -169,6 +169,25 @@ async def test_patch_specialization_context_round_trips():
 
 
 @pytest.mark.asyncio
+async def test_patch_specialization_context_null_clears_to_empty_string():
+    """Regression: /code-review 2026-07-24 — admin.html sends JSON null when
+    the textarea is cleared (`|| null` payload builder). specialization_context
+    is NOT NULL, so writing None raised IntegrityError and returned a
+    misleading 409. Null must clear the field to "", not attempt a NULL write."""
+    app = make_app()
+    t = _tenant(specialization_context="jerga vieja")
+    sess = _session(execute=AsyncMock(return_value=_orm_result(t)))
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)), \
+         patch("app.routes.admin.set_webhook", new_callable=AsyncMock, return_value=None), \
+         patch("app.routes.admin.delete_webhook", new_callable=AsyncMock):
+        r = await req(app, "patch", "/admin/tenants/acme",
+                      json={"specialization_context": None})
+    assert r.status_code == 200
+    assert r.json()["specialization_context"] == ""
+    assert t.specialization_context == ""
+
+
+@pytest.mark.asyncio
 async def test_patch_specialization_context_over_max_length_returns_422():
     """Server-side enforcement (Pydantic max_length) — not just the admin.html
     textarea's client-side maxlength, which any direct API client bypasses."""

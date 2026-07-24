@@ -84,12 +84,14 @@ def _mock_llm(by_schema: dict, raw_content_by_schema: dict | None = None):
 
 @pytest.mark.asyncio
 async def test_specialization_context_prefixed_to_extraction_prompt_not_verify():
-    """specialization_context prepends the extraction prompt only — the
-    verify pass stays domain-agnostic by design (anti-hallucination guard)."""
-    captured_prompts = {}
+    """specialization_context prepends the PRIMARY extraction prompt only —
+    the consensus re-sample intentionally uses the unbiased base prompt (see
+    test_consensus_second_sample_uses_unbiased_prompt), and the verify pass
+    stays domain-agnostic by design (anti-hallucination guard)."""
+    captured_prompts: dict[type, list[str]] = {VisionExtraction: [], VisionVerification: []}
 
     async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
-        captured_prompts[schema] = prompt
+        captured_prompts[schema].append(prompt)
         if schema is VisionExtraction:
             return VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?")
         return VisionVerification(text_visible=True)
@@ -104,8 +106,37 @@ async def test_specialization_context_prefixed_to_extraction_prompt_not_verify()
         )
 
     assert result == "¿Cuánto cuesta un examen de IGRA?"
-    assert "jerga médica: IGRA, antro gástrico" in captured_prompts[VisionExtraction]
-    assert "jerga médica: IGRA, antro gástrico" not in captured_prompts[VisionVerification]
+    assert "jerga médica: IGRA, antro gástrico" in captured_prompts[VisionExtraction][0]
+    for verify_prompt in captured_prompts[VisionVerification]:
+        assert "jerga médica: IGRA, antro gástrico" not in verify_prompt
+
+
+@pytest.mark.asyncio
+async def test_consensus_second_sample_uses_unbiased_prompt():
+    """Regression: /code-review 2026-07-24 — the consensus re-sample must use
+    the prompt WITHOUT the specialization prefix (base_prompt), not the same
+    biased prompt as the primary extraction, or it can only catch random
+    sampling noise and never a consistent, prompt-driven steering bias."""
+    captured_prompts: list[str] = []
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            captured_prompts.append(prompt)
+            return VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?")
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA"
+        )
+
+    assert len(captured_prompts) == 2
+    assert "jerga médica: IGRA" in captured_prompts[0]
+    assert "jerga médica: IGRA" not in captured_prompts[1]
 
 
 @pytest.mark.asyncio
@@ -325,6 +356,33 @@ async def test_multi_sample_document_drops_unverified_samples():
     assert "Epiplón" in result
     assert "Ovario izquierdo" not in result
     assert "Líquido peritoneal" in result
+
+
+@pytest.mark.asyncio
+async def test_multi_sample_partial_verification_not_cached():
+    """Regression: /code-review 2026-07-24 — a multi-sample answer missing
+    one dropped (stochastically-rejected) item must NOT be cached, mirroring
+    the single-item path's "never cache a rejection" rule. Caching a partial
+    list would permanently shortchange every resend of the same photo."""
+    ctx, session = _cache_ctx(cached_row=None)
+    verify_calls = iter([True, False, True])  # sample 2 fails verification
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, samples=["Epiplón", "Ovario izquierdo", "Líquido peritoneal"])
+        return VisionVerification(text_visible=next(verify_calls))
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+        patch("app.services.vision.AsyncSessionLocal", return_value=ctx),
+    ):
+        result = await extract_procedure_query(b"fake image bytes", "")
+
+    assert "Epiplón" in result and "Ovario izquierdo" not in result
+    insert_calls = [c for c in session.execute.await_args_list if "INSERT" in str(c.args[0])]
+    assert insert_calls == []
 
 
 @pytest.mark.asyncio

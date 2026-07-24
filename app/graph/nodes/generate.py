@@ -71,6 +71,11 @@ def _match_tag(similarity: float) -> str:
 
 
 async def _load_tenant(slug: str) -> dict:
+    # Cross-reference note (found in /code-review): app/services/tenant_context.py's
+    # get_tenant_specialization() runs its own independent SELECT for just
+    # specialization_context (used by telegram.py/whatsapp.py before vision
+    # calls). If this WHERE clause changes (e.g. an `active = true` filter),
+    # check that function too — both read the same tenants row.
     async with AsyncSessionLocal() as db:
         row = (await db.execute(
             text(

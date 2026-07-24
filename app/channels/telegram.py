@@ -215,7 +215,13 @@ async def _process_media_group(group_id: str, tenant_slug: str, bot_token: str, 
         )
         return
 
-    combined_query = queries[0] if len(queries) == 1 else "\n".join(f"- {q}" for q in queries)
+    # A query that already spans multiple lines (vision.py's multi-sample
+    # combined_question — one photo listing several distinct items) is
+    # spliced in as-is, not re-bulleted, or its own header/sub-bullets would
+    # nest inside a single outer "- " bullet (found in /code-review).
+    combined_query = queries[0] if len(queries) == 1 else "\n".join(
+        q if "\n" in q else f"- {q}" for q in queries
+    )
     logger.warning("tg_vision_group_extracted tenant=%s count=%d", tenant_slug, len(queries))
     event = ChannelEvent(
         tenant_slug=tenant_slug, channel="telegram",

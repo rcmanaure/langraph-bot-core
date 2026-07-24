@@ -132,7 +132,10 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
         if "tone_description" in fields:
             t.tone_description = body.tone_description
         if "specialization_context" in fields:
-            t.specialization_context = body.specialization_context
+            # Column is NOT NULL — a client clearing the field sends JSON
+            # null (see admin.html's `|| null` payload builder); treat that
+            # as "clear to empty", not a NULL write (found in /code-review).
+            t.specialization_context = body.specialization_context or ""
         if "contact_url" in fields:
             t.contact_url = body.contact_url
         if "active" in fields:
