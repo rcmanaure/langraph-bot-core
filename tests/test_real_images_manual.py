@@ -9,7 +9,6 @@ from PIL import Image
 import app.services.vision as vision_module
 from app.services.vision import VISION_UNCERTAIN, extract_procedure_query
 
-
 # Real images from WhatsApp
 IMAGES = {
     "biopsy_1": Path("C:/Users/rcman/Downloads/WhatsApp Image 2026-07-21 at 9.48.45 AM.jpeg"),
@@ -19,11 +18,12 @@ IMAGES = {
 # End-to-end validation set: real biopsy request forms (handwritten, varying
 # legibility) used to check the generalized vision prompt against actual
 # hard cases via a real LLM call, not a mocked response.
+_REPO_ROOT = Path(__file__).parent.parent  # moved from repo root into tests/
 E2E_IMAGES = {
-    "real_1": Path(__file__).parent / "test_images" / "real_1.jpeg",
-    "real_2": Path(__file__).parent / "test_images" / "real_2.jpeg",
-    "real_3": Path(__file__).parent / "test_images" / "real_3.jpeg",
-    "real_4": Path(__file__).parent / "test_images" / "real_4.jpeg",
+    "real_1": _REPO_ROOT / "test_images" / "real_1.jpeg",
+    "real_2": _REPO_ROOT / "test_images" / "real_2.jpeg",
+    "real_3": _REPO_ROOT / "test_images" / "real_3.jpeg",
+    "real_4": _REPO_ROOT / "test_images" / "real_4.jpeg",
 }
 
 
@@ -61,7 +61,7 @@ def test_preprocess_real_images():
         print(f"  Aspect ratio: {orig_ratio:.3f} -> {proc_ratio:.3f} (diff: {ratio_diff:.3f})")
         assert ratio_diff < 0.05, f"Aspect ratio changed too much: {ratio_diff}"
 
-        print(f"  Result: OK\n")
+        print("  Result: OK\n")
 
 
 def test_ocr_text_extraction():
@@ -84,12 +84,12 @@ def test_ocr_text_extraction():
 
     for test in test_cases:
         print(f"Testing: {test['name']}")
-        lines = [l.strip() for l in test['text'].split("\n") if l.strip()]
-        procedure = next((l for l in lines if len(l) > 3), None)
+        lines = [line.strip() for line in test['text'].split("\n") if line.strip()]
+        procedure = next((line for line in lines if len(line) > 3), None)
         print(f"  Extracted: {procedure}")
         print(f"  Expected: {test['expected']}")
         assert procedure == test['expected'], f"Mismatch: {procedure} != {test['expected']}"
-        print(f"  Result: OK\n")
+        print("  Result: OK\n")
 
 
 async def run_real_extraction_end_to_end():
@@ -124,7 +124,7 @@ async def run_real_extraction_end_to_end():
             raise
 
         if result == VISION_UNCERTAIN:
-            print(f"  Result: VISION_UNCERTAIN (safe default on illegible/ambiguous input)\n")
+            print("  Result: VISION_UNCERTAIN (safe default on illegible/ambiguous input)\n")
         else:
             print(f"  Result: {result}\n")
         assert result, "extraction must never return empty/falsy"

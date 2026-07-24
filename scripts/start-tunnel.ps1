@@ -4,7 +4,7 @@
 
 param(
     [string]$LocalUrl = "http://localhost:8000",
-    [string]$EnvFile  = "$PSScriptRoot\.env"
+    [string]$EnvFile  = "$PSScriptRoot\..\.env"  # moved from repo root into scripts/
 )
 
 # Parse .env
