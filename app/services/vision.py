@@ -59,13 +59,12 @@ _VISION_EXTRACT_PROMPT = """\
 Analiza esta imagen (documento, orden, comprobante, etiqueta de producto, ficha...).
 
 Marca is_legible=true SOLO si podés leer con certeza el nombre del ítem o \
-procedimiento escrito en la imagen, letra por letra. Si el texto está borroso, cortado, \
-hay varios ítems distintos y no sabés cuál se pregunta, o tenés la MÍNIMA duda \
-sobre qué dice — marcá is_legible=false y dejá procedure_name y price_question \
-vacíos. NUNCA adivines ni asumas un ítem "parecido" solo porque el contexto \
-del negocio te resulte familiar.
+procedimiento escrito en la imagen, letra por letra. Si el texto está borroso, \
+cortado, o tenés la MÍNIMA duda sobre qué dice — marcá is_legible=false y dejá \
+procedure_name, price_question y samples vacíos. NUNCA adivines ni asumas un \
+ítem "parecido" solo porque el contexto del negocio te resulte familiar.
 
-Si is_legible=true, completá dos campos:
+CASO A — un solo ítem/procedimiento/muestra (el caso más común): completá:
 - procedure_name: el nombre EXACTO y LITERAL del ítem o procedimiento tal como \
 está escrito en la imagen, sin agregar palabras (ejemplo: "IGRA", "zapatilla \
 running talla 42").
@@ -73,11 +72,23 @@ running talla 42").
 ejemplo: "¿Cuánto cuesta un examen de IGRA?" o "¿Cuánto cuesta una zapatilla \
 running talla 42?". No traduzcas a un sinónimo ni asumas qué ítem "similar" \
 podría ser.
+- samples: dejalo vacío (null).
+
+CASO B — la imagen lista 2 O MÁS muestras/ítems DISTINTOS bajo una misma orden \
+(ejemplo: una solicitud de biopsia con "Muestra #1: Epiplón", "Muestra #2: \
+Líquido peritoneal", etc.) — NO es motivo para is_legible=false, es un caso \
+válido y frecuente:
+- procedure_name y price_question: dejalos vacíos (null).
+- samples: una lista con el nombre EXACTO y LITERAL de cada muestra/ítem, uno \
+por elemento, en el mismo orden en que aparecen (ejemplo: ["Epiplón", "TU de \
+ovario izquierdo (fracción)", "Líquido peritoneal"]). No incluyas valores de \
+laboratorio ni firmas, solo los nombres de muestra/ítem en sí.
 """
 
 _EXTRACT_JSON_SUFFIX = (
     '\nReply ONLY with JSON: {"is_legible": <true|false>, '
-    '"procedure_name": <string or null>, "price_question": <string or null>}'
+    '"procedure_name": <string or null>, "price_question": <string or null>, '
+    '"samples": <array of strings or null>}'
 )
 
 _VERIFY_PROMPT_TEMPLATE = """\
@@ -388,7 +399,9 @@ async def extract_procedure_query(
         logger.warning("vision_extraction_failed=%s defaulting to uncertain", exc)
         return VISION_UNCERTAIN  # transient — not cached, retry may succeed
 
-    if not extraction.is_legible or not extraction.price_question:
+    is_multi = bool(extraction.is_legible and extraction.samples and len(extraction.samples) >= 2)
+
+    if not extraction.is_legible or (not extraction.price_question and not is_multi):
         # Vision uncertain; try OCR fallback if Tesseract available
         ocr_text = _extract_with_ocr(img_bytes) if _TESSERACT_AVAILABLE else None
         if ocr_text and len(ocr_text) > 3:
@@ -396,10 +409,11 @@ async def extract_procedure_query(
             extraction.procedure_name = ocr_text
             extraction.price_question = f"¿Cuánto cuesta {ocr_text}?"
             extraction.is_legible = True
+            is_multi = False  # OCR fallback only ever produces one literal string
         else:
             await _store_vision_result(cache_key, VISION_UNCERTAIN)
             return VISION_UNCERTAIN
-    elif specialization_context:
+    elif specialization_context and not is_multi:
         # Consensus check (found via /qa 2026-07-24, live re-test with the
         # same image confirmed sampling variance): specialization_context can
         # steer extraction toward a plausible domain term on hard-to-read
@@ -409,6 +423,15 @@ async def extract_procedure_query(
         # (the condition that triggers the risk) and only on the confident
         # direct-read path — the OCR-fallback branch above is a different,
         # non-LLM-biased signal and doesn't need a second opinion.
+        #
+        # NOT applied to the multi-sample case (real /investigate 2026-07-24
+        # finding, live re-test with a real 6-sample image): requiring exact
+        # agreement across N independently re-read items compounds — one
+        # minor OCR variance in any single item (out of 6) rejects the whole
+        # request, even when 5 of 6 items matched perfectly. The per-sample
+        # verification loop below is a more precise, more granular check for
+        # the multi-item case, so this whole-set gate is skipped there
+        # (also saves an extraction call multi-sample doesn't need).
         try:
             extraction_2: VisionExtraction = await _call_with_rate_limit_retry(
                 _structured_or_json, llm, model_name, prompt, img_b64, VisionExtraction, _EXTRACT_JSON_SUFFIX
@@ -421,10 +444,48 @@ async def extract_procedure_query(
         name_2 = _normalize_for_comparison(extraction_2.procedure_name or extraction_2.price_question or "")
         if name_1 != name_2:
             logger.warning("vision_consensus_disagreement first=%s second=%s", name_1[:60], name_2[:60])
-            # Deliberately NOT cached — same stochastic-rejection reasoning as
-            # the verification rejection below; one unlucky pair of samples
-            # must not become a permanent wrong answer for this image.
+            # Deliberately NOT cached — same stochastic-rejection reasoning
+            # as the verification rejection below; one unlucky pair of
+            # samples must not become a permanent wrong answer.
             return VISION_UNCERTAIN
+
+    if is_multi:
+        # Multi-sample document (real /qa 2026-07-24 finding: a 6-sample
+        # biopsy request was silently collapsed to one question). Verify EACH
+        # sample independently — same anti-hallucination bar as the
+        # single-item path, applied per item, not skipped for the list case.
+        # A sample that fails verification is dropped, not fatal to the
+        # whole request (mirrors how the media-group loop in telegram.py
+        # already tolerates individual photo failures without failing the
+        # batch).
+        verified_samples: list[str] = []
+        for sample in extraction.samples:
+            verify_prompt = _VERIFY_PROMPT_TEMPLATE.format(claim=sample)
+            if specialization_context:
+                verify_prompt += _VERIFY_SPECIALIZATION_CAVEAT
+            try:
+                verification: VisionVerification = await _call_with_rate_limit_retry(
+                    _structured_or_json, llm, model_name, verify_prompt, img_b64,
+                    VisionVerification, _VERIFY_JSON_SUFFIX,
+                )
+            except Exception as exc:
+                logger.warning("vision_sample_verification_failed sample=%s err=%s", sample[:60], exc)
+                continue
+            if verification.text_visible:
+                verified_samples.append(sample)
+            else:
+                logger.warning("vision_sample_verification_rejected sample=%s", sample[:60])
+
+        if not verified_samples:
+            # Deliberately NOT cached — same stochastic-rejection reasoning as
+            # the single-item path below.
+            return VISION_UNCERTAIN
+
+        combined_question = "Tengo una orden con varias muestras, ¿cuánto cuesta cada una?\n" + "\n".join(
+            f"- {s}" for s in verified_samples
+        )
+        await _store_vision_result(cache_key, combined_question)
+        return combined_question
 
     # Verify the bare literal term, not the formatted question — a document
     # never contains the full interrogative sentence, only the term itself.
