@@ -24,7 +24,17 @@ E2E_IMAGES = {
     "real_2": _REPO_ROOT / "test_images" / "real_2.jpeg",
     "real_3": _REPO_ROOT / "test_images" / "real_3.jpeg",
     "real_4": _REPO_ROOT / "test_images" / "real_4.jpeg",
+    "whatsapp_1": _REPO_ROOT / "test_images" / "WhatsApp Image 2026-07-22 at 1.53.52 PM.jpeg",
+    "whatsapp_2": _REPO_ROOT / "test_images" / "WhatsApp Image 2026-07-22 at 11.39.57 AM (1).jpeg",
+    "whatsapp_3": _REPO_ROOT / "test_images" / "WhatsApp Image 2026-07-23 at 2.01.23 PM.jpeg",
+    "whatsapp_4": _REPO_ROOT / "test_images" / "WhatsApp Image 2026-07-24 at 10.39.23 AM.jpeg",
 }
+
+# "demo" is the actual lab tenant configured in dev (expertise_area:
+# "Patológia- Biopsias-Citologías" — pathology/biopsies/cytology), matching
+# the SP Unidad de Diagnóstico Histológico catalog. Exercises the real
+# per-tenant cache-key and specialization-context path instead of "".
+_LAB_TENANT_SLUG = "demo"
 
 
 def test_preprocess_real_images():
@@ -118,7 +128,7 @@ async def run_real_extraction_end_to_end():
         print(f"Testing {name} ({path.name})...")
         img_bytes = path.read_bytes()
         try:
-            result = await extract_procedure_query(img_bytes, "")
+            result = await extract_procedure_query(img_bytes, "", tenant_slug=_LAB_TENANT_SLUG)
         except Exception as exc:
             print(f"  FAIL: raised {exc!r} (must never crash)\n")
             raise
