@@ -368,7 +368,7 @@ async def _run_consensus_check(
     name_1 = _normalize_for_comparison(extraction.procedure_name or extraction.price_question or "")
     name_2 = _normalize_for_comparison(extraction_2.procedure_name or extraction_2.price_question or "")
     if not _consensus_agrees(name_1, name_2):
-        logger.warning("vision_consensus_disagreement first=%s second=%s", name_1[:60], name_2[:60])
+        logger.warning("vision_consensus_disagreement first_len=%d second_len=%d", len(name_1), len(name_2))
         return False
     return True
 
@@ -396,11 +396,11 @@ async def _handle_multi_sample(
                 VisionVerification, _VERIFY_JSON_SUFFIX,
             )
         except Exception as exc:
-            logger.warning("vision_sample_verification_failed sample=%s err=%s", sample[:60], exc)
+            logger.warning("vision_sample_verification_failed sample_len=%d err=%s", len(sample), exc)
             return None
         if verification.text_visible:
             return sample
-        logger.warning("vision_sample_verification_rejected sample=%s", sample[:60])
+        logger.warning("vision_sample_verification_rejected sample_len=%d", len(sample))
         return None
 
     samples_to_verify = samples[:_MAX_MULTI_SAMPLE_VERIFY]
@@ -480,7 +480,7 @@ async def _finalize_single_item(
         return VISION_UNCERTAIN  # transient — not cached, retry may succeed
 
     if not verification.text_visible:
-        logger.warning("vision_verification_rejected claim=%s", verify_claim[:80])
+        logger.warning("vision_verification_rejected claim_len=%d", len(verify_claim))
         # Deliberately NOT cached — proven stochastic (see docstring); one
         # unlucky roll must not become a permanent wrong answer.
         return VISION_UNCERTAIN
@@ -579,7 +579,7 @@ async def extract_procedure_query(
         # Vision uncertain; try OCR fallback if Tesseract available
         ocr_text = _extract_with_ocr(img_bytes) if _TESSERACT_AVAILABLE else None
         if ocr_text and len(ocr_text) > 3:
-            logger.info("vision_uncertain fallback_to_ocr text=%s", ocr_text[:50])
+            logger.info("vision_uncertain fallback_to_ocr text_len=%d", len(ocr_text))
             extraction.procedure_name = ocr_text
             extraction.price_question = f"¿Cuánto cuesta {ocr_text}?"
             extraction.is_legible = True

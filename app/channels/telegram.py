@@ -368,7 +368,7 @@ async def _process_update(
                 "puedes escribirme el nombre del examen o procedimiento.",
             )
             return
-        logger.warning("tg_vision_extracted tenant=%s query=%s", tenant_slug, procedure_query[:120])
+        logger.warning("tg_vision_extracted tenant=%s query_len=%d", tenant_slug, len(procedure_query))
         event = ChannelEvent(
             tenant_slug=tenant_slug, channel="telegram",
             user_id=user_id, chat_id=str(chat_id),
