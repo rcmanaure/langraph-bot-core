@@ -25,3 +25,32 @@ Items accepted for future work but out of current PR scope.
   business-initiated/proactive send path exists (e.g. an operator dashboard
   replying later, or a follow-up message). Add the read-side check (and a
   template-message fallback) when that feature is built.
+- **Fold `tenant.specialization_context` into triage.py's classification prompt.**
+  (plan-eng-review 2026-07-24, feature/especilizacion-bot — deferred at Step 0
+  complexity check: 9 core files tripped the 8-file smell, triage.py was the
+  self-flagged weakest cut candidate)
+  Qué: pass the tenant's specialization_context (already loaded from
+  `state["tenant_id"]`, same pattern `generate.py:105` uses) into
+  `_TRIAGE_PROMPT` (`app/graph/nodes/triage.py`) so jargon-heavy messages
+  classify correctly from the first step, not just in the final response.
+  Por qué: `_TRIAGE_PROMPT` already defaults ambiguous cases to `"rag"`
+  (`triage.py:29`), so the misclassification risk without this is low —
+  that's exactly why it was deferred rather than cut outright. Pros: cheap
+  once needed (no new plumbing — `AgentState` already carries `tenant_id`).
+  Cons: one more DB round trip on the message-classification critical path.
+  Depends on: nothing — `specialization_context` column and the injection
+  pattern in `generate.py`/`vision.py` already shipped. Resume when there's
+  evidence of real triage misclassification on jargon-heavy messages.
+- **Admin "preview/test prompt" panel.** (plan-ceo-review 2026-07-24,
+  feature/especilizacion-bot — cherry-pick D3.2, deferred)
+  Qué: a panel in admin.html where an operator types a sample question or
+  uploads a sample image and sees how the bot would respond with the
+  current `specialization_context`, before saving — without touching live
+  traffic. Por qué: the only way to verify a specialization_context edit
+  actually improved anything today is a real chat/photo test in production.
+  Pros: directly closes the "no sé si funcionó" gap for operators; useful
+  for any tenant, not just the one that prompted this feature. Cons: new
+  surface (endpoint + UI + test-image upload handling), doubles LLM/vision
+  cost per preview. Depends on: the base `specialization_context` field
+  (shipped 2026-07-24) being live long enough to know how often operators
+  actually need to iterate on the text.

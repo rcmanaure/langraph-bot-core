@@ -13,6 +13,7 @@ from sqlalchemy import text
 from app.channels.base import ChannelEvent
 from app.config import settings
 from app.db import AsyncSessionLocal
+from app.services.tenant_context import get_tenant_specialization
 from app.services.vision import MAX_MEDIA_BYTES as MAX_VOICE_BYTES
 from app.services.vision import VISION_UNCERTAIN as _VISION_UNCERTAIN
 from app.services.vision import extract_procedure_query as _extract_procedure_query
@@ -184,13 +185,19 @@ async def _process_media_group(group_id: str, tenant_slug: str, bot_token: str, 
     user_id = group["user_id"]
     caption = group["caption"]
 
+    # Looked up once for the whole group, not per photo — tenant doesn't
+    # change within a media group, so this avoids N redundant DB queries.
+    specialization = await get_tenant_specialization(tenant_slug)
+
     queries: list[str] = []
     for photo in group["photos"]:
         if photo.get("file_size", 0) > MAX_VOICE_BYTES:
             continue
         try:
             img_bytes = await _download_file(bot_token, photo["file_id"])
-            procedure_query = await _extract_procedure_query(img_bytes, caption)
+            procedure_query = await _extract_procedure_query(
+                img_bytes, caption, tenant_slug=tenant_slug, specialization_context=specialization
+            )
         except Exception as exc:
             logger.warning("tg_vision_group_failed user=%s err=%s", user_id, exc)
             continue
@@ -208,7 +215,13 @@ async def _process_media_group(group_id: str, tenant_slug: str, bot_token: str, 
         )
         return
 
-    combined_query = queries[0] if len(queries) == 1 else "\n".join(f"- {q}" for q in queries)
+    # A query that already spans multiple lines (vision.py's multi-sample
+    # combined_question — one photo listing several distinct items) is
+    # spliced in as-is, not re-bulleted, or its own header/sub-bullets would
+    # nest inside a single outer "- " bullet (found in /code-review).
+    combined_query = queries[0] if len(queries) == 1 else "\n".join(
+        q if "\n" in q else f"- {q}" for q in queries
+    )
     logger.warning("tg_vision_group_extracted tenant=%s count=%d", tenant_slug, len(queries))
     event = ChannelEvent(
         tenant_slug=tenant_slug, channel="telegram",
@@ -334,8 +347,11 @@ async def _process_update(
             return
         caption = msg.get("caption", "")
         try:
+            specialization = await get_tenant_specialization(tenant_slug)
             img_bytes = await _download_file(bot_token, photo["file_id"])
-            procedure_query = await _extract_procedure_query(img_bytes, caption)
+            procedure_query = await _extract_procedure_query(
+                img_bytes, caption, tenant_slug=tenant_slug, specialization_context=specialization
+            )
         except Exception as exc:
             logger.warning("tg_vision_failed user=%s err=%s", user_id, exc)
             await _send(bot_token, chat_id, "No pude procesar la imagen. Por favor intenta de nuevo.")
@@ -352,7 +368,7 @@ async def _process_update(
                 "puedes escribirme el nombre del examen o procedimiento.",
             )
             return
-        logger.warning("tg_vision_extracted tenant=%s query=%s", tenant_slug, procedure_query[:120])
+        logger.warning("tg_vision_extracted tenant=%s query_len=%d", tenant_slug, len(procedure_query))
         event = ChannelEvent(
             tenant_slug=tenant_slug, channel="telegram",
             user_id=user_id, chat_id=str(chat_id),

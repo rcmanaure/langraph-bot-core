@@ -95,7 +95,7 @@ async def retrieve_chunks(db: AsyncSession, query: str, namespace: str) -> list[
         top = chunks[0]
         logger.info("retrieve_top ns=%s sim=%.3f src=%s", namespace, top["similarity"], top["source"])
     else:
-        logger.warning("retrieve_empty ns=%s query=%s", namespace, query[:60])
+        logger.warning("retrieve_empty ns=%s query_len=%d", namespace, len(query))
     return chunks
 
 

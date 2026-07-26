@@ -4,14 +4,10 @@
 Ground truth:
 - biopsy_1 (Katharina Ortiz): Laparatomia
 """
-import io
 import time
 from pathlib import Path
 
-from PIL import Image
-
 import app.services.vision as vision_module
-
 
 GROUND_TRUTH = {
     "biopsy_1": "Laparatomia",

@@ -83,6 +83,405 @@ def _mock_llm(by_schema: dict, raw_content_by_schema: dict | None = None):
 
 
 @pytest.mark.asyncio
+async def test_specialization_context_prefixed_to_extraction_prompt_not_verify():
+    """specialization_context prepends the PRIMARY extraction prompt only —
+    the consensus re-sample intentionally uses the unbiased base prompt (see
+    test_consensus_second_sample_uses_unbiased_prompt), and the verify pass
+    stays domain-agnostic by design (anti-hallucination guard)."""
+    captured_prompts: dict[type, list[str]] = {VisionExtraction: [], VisionVerification: []}
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        captured_prompts[schema].append(prompt)
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?")
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA, antro gástrico"
+        )
+
+    assert result == "¿Cuánto cuesta un examen de IGRA?"
+    assert "jerga médica: IGRA, antro gástrico" in captured_prompts[VisionExtraction][0]
+    for verify_prompt in captured_prompts[VisionVerification]:
+        assert "jerga médica: IGRA, antro gástrico" not in verify_prompt
+
+
+@pytest.mark.asyncio
+async def test_consensus_second_sample_uses_unbiased_prompt():
+    """Regression: /code-review 2026-07-24 — the consensus re-sample must use
+    the prompt WITHOUT the specialization prefix (base_prompt), not the same
+    biased prompt as the primary extraction, or it can only catch random
+    sampling noise and never a consistent, prompt-driven steering bias."""
+    captured_prompts: list[str] = []
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            captured_prompts.append(prompt)
+            return VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?")
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA"
+        )
+
+    assert len(captured_prompts) == 2
+    assert "jerga médica: IGRA" in captured_prompts[0]
+    assert "jerga médica: IGRA" not in captured_prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_specialization_context_adds_stricter_verify_scrutiny():
+    """Found via /qa 2026-07-24: on hard-to-read images, specialization_context
+    can bias the extraction toward a plausible domain term. The verify pass
+    still never receives the jargon text itself, but gets an extra scrutiny
+    caveat appended when specialization_context was used — raising the bar
+    without a second LLM call or reintroducing bias into verification."""
+    from app.services.vision import _VERIFY_SPECIALIZATION_CAVEAT
+
+    captured_prompts = {}
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        captured_prompts[schema] = prompt
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?")
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA"
+        )
+
+    assert _VERIFY_SPECIALIZATION_CAVEAT in captured_prompts[VisionVerification]
+    # Verify prompt still doesn't leak the actual jargon text — only the caveat.
+    assert "jerga médica: IGRA" not in captured_prompts[VisionVerification]
+
+
+@pytest.mark.asyncio
+async def test_specialization_context_disagreeing_samples_returns_uncertain():
+    """Consensus check: two independent extraction samples that disagree on
+    the procedure name → VISION_UNCERTAIN, verify pass never runs. Found via
+    /qa 2026-07-24 — live re-test showed the same hard-to-read image
+    producing 3 different confident reads across 3 calls."""
+    extraction_calls = iter([
+        VisionExtraction(is_legible=True, procedure_name="Trompa uterina derecha",
+                          price_question="¿Cuánto cuesta una trompa uterina derecha?"),
+        VisionExtraction(is_legible=True, procedure_name="Hoja de biopsia",
+                          price_question="¿Cuánto cuesta una hoja de biopsia?"),
+    ])
+    verify_called = False
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        nonlocal verify_called
+        if schema is VisionExtraction:
+            return next(extraction_calls)
+        verify_called = True
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA"
+        )
+
+    assert result == VISION_UNCERTAIN
+    assert verify_called is False  # disagreement short-circuits before the verify pass
+
+
+@pytest.mark.asyncio
+async def test_specialization_context_accent_only_difference_counts_as_agreement():
+    """Regression: /qa 2026-07-24 with WhatsApp-exported real images found the
+    consensus check rejecting two samples that read the SAME term but
+    differed only in accent marks ("anatomia patologica" vs "anatomía
+    patológica") — a real false positive, not a real disagreement."""
+    extraction_calls = iter([
+        VisionExtraction(is_legible=True, procedure_name="anatomia patologica",
+                          price_question="¿Cuánto cuesta anatomia patologica?"),
+        VisionExtraction(is_legible=True, procedure_name="anatomía patológica",
+                          price_question="¿Cuánto cuesta anatomía patológica?"),
+    ])
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return next(extraction_calls)
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA"
+        )
+
+    assert result != VISION_UNCERTAIN
+
+
+@pytest.mark.asyncio
+async def test_specialization_context_agreeing_samples_proceeds_to_verify():
+    """Consensus check: two independent samples that DO agree (case-insensitive)
+    proceed normally to the verify pass and return the extracted question."""
+    extraction_calls = iter([
+        VisionExtraction(is_legible=True, procedure_name="Hoja de Biopsia",
+                          price_question="¿Cuánto cuesta una hoja de biopsia?"),
+        VisionExtraction(is_legible=True, procedure_name="hoja de biopsia",
+                          price_question="¿Cuánto cuesta una hoja de biopsia?"),
+    ])
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return next(extraction_calls)
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA"
+        )
+
+    assert result == "¿Cuánto cuesta una hoja de biopsia?"
+
+
+@pytest.mark.asyncio
+async def test_empty_specialization_context_skips_consensus_check():
+    """Regression/cost guard: without specialization_context, only ONE
+    extraction call happens — no consensus sampling, no extra cost/latency
+    for tenants who don't use the field."""
+    call_count = {"extraction": 0}
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            call_count["extraction"] += 1
+            return VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?")
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(b"fake image bytes", "")
+
+    assert result == "¿Cuánto cuesta un examen de IGRA?"
+    assert call_count["extraction"] == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_specialization_context_leaves_prompt_unchanged():
+    """Regression guard: empty specialization_context (the default for every
+    existing call site) must produce the byte-identical prompt as before
+    this feature — no dangling hint block."""
+    from app.services.vision import _VISION_EXTRACT_PROMPT
+
+    captured_prompts = {}
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        captured_prompts[schema] = prompt
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?")
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        await extract_procedure_query(b"fake image bytes", "")
+
+    assert captured_prompts[VisionExtraction] == _VISION_EXTRACT_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_multi_sample_document_combines_all_verified_samples():
+    """Root cause found via /investigate 2026-07-24: a real 6-sample biopsy
+    request (test_images) was silently collapsed to one question. When the
+    document lists 2+ distinct samples, all of them (that verify) must be
+    included in the final answer, not just the first."""
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, samples=["Epiplón", "Líquido peritoneal", "Corredera parietocólica derecha"])
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(b"fake image bytes", "")
+
+    assert "Epiplón" in result
+    assert "Líquido peritoneal" in result
+    assert "Corredera parietocólica derecha" in result
+
+
+@pytest.mark.asyncio
+async def test_multi_sample_document_drops_unverified_samples():
+    """A sample that fails the literal-presence check is dropped, not fatal
+    to the whole request — mirrors how the media-group photo loop already
+    tolerates individual failures without failing the batch."""
+    verify_calls = iter([True, False, True])  # sample 2 fails verification
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, samples=["Epiplón", "Ovario izquierdo", "Líquido peritoneal"])
+        return VisionVerification(text_visible=next(verify_calls))
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(b"fake image bytes", "")
+
+    assert "Epiplón" in result
+    assert "Ovario izquierdo" not in result
+    assert "Líquido peritoneal" in result
+
+
+@pytest.mark.asyncio
+async def test_multi_sample_partial_verification_not_cached():
+    """Regression: /code-review 2026-07-24 — a multi-sample answer missing
+    one dropped (stochastically-rejected) item must NOT be cached, mirroring
+    the single-item path's "never cache a rejection" rule. Caching a partial
+    list would permanently shortchange every resend of the same photo."""
+    ctx, session = _cache_ctx(cached_row=None)
+    verify_calls = iter([True, False, True])  # sample 2 fails verification
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, samples=["Epiplón", "Ovario izquierdo", "Líquido peritoneal"])
+        return VisionVerification(text_visible=next(verify_calls))
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+        patch("app.services.vision.AsyncSessionLocal", return_value=ctx),
+    ):
+        result = await extract_procedure_query(b"fake image bytes", "")
+
+    assert "Epiplón" in result and "Ovario izquierdo" not in result
+    insert_calls = [c for c in session.execute.await_args_list if "INSERT" in str(c.args[0])]
+    assert insert_calls == []
+
+
+@pytest.mark.asyncio
+async def test_multi_sample_verification_capped_at_max():
+    """Regression: /python-review 2026-07-24 — extraction.samples is
+    model-controlled with no upper bound; verification fan-out must be
+    capped so a mis-parsed image can't trigger an unbounded concurrent
+    call burst against the rate-limited vision model."""
+    from app.services.vision import _MAX_MULTI_SAMPLE_VERIFY
+
+    many_samples = [f"Muestra {i}" for i in range(_MAX_MULTI_SAMPLE_VERIFY + 5)]
+    verify_call_count = {"n": 0}
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, samples=many_samples)
+        verify_call_count["n"] += 1
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        await extract_procedure_query(b"fake image bytes", "")
+
+    assert verify_call_count["n"] == _MAX_MULTI_SAMPLE_VERIFY
+
+
+@pytest.mark.asyncio
+async def test_multi_sample_document_all_rejected_returns_uncertain():
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, samples=["Epiplón", "Líquido peritoneal"])
+        return VisionVerification(text_visible=False)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(b"fake image bytes", "")
+
+    assert result == VISION_UNCERTAIN
+
+
+@pytest.mark.asyncio
+async def test_single_sample_entry_falls_back_to_ocr_uncertain_path():
+    """samples with only 1 entry does NOT count as multi — the model should
+    have used procedure_name/price_question for a genuine single item; this
+    malformed shape (samples=[x], price_question=None) safely degrades to
+    the existing OCR-fallback/uncertain path instead of crashing."""
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return VisionExtraction(is_legible=True, samples=["Epiplón"])
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+        patch("app.services.vision._TESSERACT_AVAILABLE", False),
+    ):
+        result = await extract_procedure_query(b"fake image bytes", "")
+
+    assert result == VISION_UNCERTAIN
+
+
+@pytest.mark.asyncio
+async def test_multi_sample_skips_consensus_check_even_with_specialization():
+    """Regression: /investigate 2026-07-24 live re-test against a real
+    6-sample image found the whole-set consensus check rejecting a correct
+    extraction because ONE of 6 independently re-read items had a minor OCR
+    variance ("caredura" vs "corredera") — exact agreement across N items
+    compounds far more than for 1 item. Multi-sample must skip the 2-sample
+    consensus gate (only 1 extraction call) and rely on per-sample
+    verification instead, even when specialization_context is set."""
+    call_count = {"extraction": 0}
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            call_count["extraction"] += 1
+            return VisionExtraction(is_legible=True, samples=["Epiplón", "Líquido peritoneal"])
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA"
+        )
+
+    assert call_count["extraction"] == 1  # no consensus sample taken for multi
+    assert "Epiplón" in result and "Líquido peritoneal" in result
+
+
+@pytest.mark.asyncio
 async def test_extract_returns_price_question_when_legible_and_verified():
     mock_llm = _mock_llm({
         VisionExtraction: VisionExtraction(is_legible=True, price_question="¿Cuánto cuesta un examen de IGRA?"),
@@ -476,6 +875,26 @@ def test_cache_key_differs_by_model_caption_and_bytes():
     key_c = vision_module._vision_cache_key("model-a", "caption", b"img1")
     key_d = vision_module._vision_cache_key("model-a", "", b"img2")
     assert len({key_a, key_b, key_c, key_d}) == 4
+
+
+def test_cache_key_differs_by_tenant_slug():
+    """Same image, same model/caption, different tenant → different key —
+    closes the cross-tenant cache-sharing gap found in the eng review."""
+    key_tenant_a = vision_module._vision_cache_key("model-a", "", b"img1", "tenant-a")
+    key_tenant_b = vision_module._vision_cache_key("model-a", "", b"img1", "tenant-b")
+    assert key_tenant_a != key_tenant_b
+
+
+def test_cache_key_folds_in_specialization_only_when_non_empty():
+    """Two tenants with the SAME empty specialization_context (the default)
+    get the SAME key for the same image — only a non-empty value changes it.
+    This is what keeps the zero-behavior-change guarantee for tenants who
+    never set the field."""
+    key_empty_1 = vision_module._vision_cache_key("model-a", "", b"img1", "tenant-a", "")
+    key_empty_2 = vision_module._vision_cache_key("model-a", "", b"img1", "tenant-a", "")
+    key_with_spec = vision_module._vision_cache_key("model-a", "", b"img1", "tenant-a", "jerga médica")
+    assert key_empty_1 == key_empty_2
+    assert key_empty_1 != key_with_spec
 
 
 @pytest.mark.asyncio
