@@ -149,6 +149,42 @@ async def test_triage_no_human_message_defaults_rag(base_state):
     assert result == {"triage_decision": "rag"}
 
 
+# Regression: ECC:regex-vs-llm-structured-text finding — triage() called the
+# LLM on every message including pure greetings the prompt itself lists as
+# canonical examples. Found by /ecc:regex-vs-llm-structured-text review on
+# feature/triage-greeting-regex-prefilter.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "greeting",
+    ["hola", "Hola!", "buenas", "buenos días", "buenas tardes", "gracias",
+     "muchas gracias", "hasta luego", "chao", "adiós", "de nada"],
+)
+async def test_triage_regex_shortcut_pure_greeting_skips_llm(base_state, greeting):
+    base_state["messages"] = [HumanMessage(content=greeting)]
+    with patch("app.graph.nodes.triage.get_chat_llm") as mock_get_llm:
+        result = await triage(base_state)
+    mock_get_llm.assert_not_called()
+    assert result == {"triage_decision": "greeting"}
+
+
+@pytest.mark.asyncio
+async def test_triage_regex_shortcut_does_not_match_greeting_plus_question(base_state):
+    # A greeting prefix with real content must still reach the LLM as "rag" —
+    # the whole-message anchor must not fire on a partial match.
+    base_state["messages"] = [HumanMessage(content="hola, cuanto cuesta una biopsia")]
+    mock_llm = MagicMock()
+    mock_structured = AsyncMock()
+    from app.schemas.triage import TriageDecision
+    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="rag"))
+    mock_llm.with_structured_output.return_value = mock_structured
+
+    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm) as mock_get_llm:
+        result = await triage(base_state)
+
+    mock_get_llm.assert_called_once()
+    assert result == {"triage_decision": "rag"}
+
+
 @pytest.mark.asyncio
 async def test_triage_fallback_clean_json(base_state):
     """Fallback path: structured output fails, raw LLM returns clean JSON."""
