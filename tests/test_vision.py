@@ -430,11 +430,15 @@ async def test_multi_sample_document_all_rejected_returns_uncertain():
 
 
 @pytest.mark.asyncio
-async def test_single_sample_entry_falls_back_to_ocr_uncertain_path():
-    """samples with only 1 entry does NOT count as multi — the model should
-    have used procedure_name/price_question for a genuine single item; this
-    malformed shape (samples=[x], price_question=None) safely degrades to
-    the existing OCR-fallback/uncertain path instead of crashing."""
+async def test_single_sample_entry_with_no_procedure_name_still_trusted():
+    """samples with only 1 entry does NOT count as multi, but is still
+    trusted and routed through normal verification -- reversed from an
+    earlier assumption (samples=[x] with no procedure_name treated as
+    "malformed", safely degraded to uncertain) after live evidence showed
+    that assumption was wrong: real Telegram traffic on a real order photo
+    put the correct, human-confirmed answer ("Utero y anexos (Trompas y
+    Ovarios)") in samples[0] with procedure_name empty, and the old
+    behavior silently discarded it without even attempting verification."""
     async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
         if schema is VisionExtraction:
             return VisionExtraction(is_legible=True, samples=["Epiplón"])
@@ -448,7 +452,7 @@ async def test_single_sample_entry_falls_back_to_ocr_uncertain_path():
     ):
         result = await extract_procedure_query(b"fake image bytes", "")
 
-    assert result == VISION_UNCERTAIN
+    assert result == "¿Cuánto cuesta Epiplón?"
 
 
 @pytest.mark.asyncio
