@@ -513,6 +513,33 @@ async def test_extract_returns_uncertain_when_illegible_without_calling_verifica
 
 
 @pytest.mark.asyncio
+async def test_single_sample_slot_overrides_wrong_procedure_name():
+    """Regression: found live — on a single clearly-labeled item, the model
+    sometimes fills BOTH slots: procedure_name with the wrong tier-2
+    document-title text ("Anatomía Patológica") AND samples[0] with the
+    correct tier-3 labeled field ("Estómago (Antro)"), even though the
+    prompt says CASO A/B are mutually exclusive. len(samples)==1 doesn't
+    meet the is_multi threshold, so without the override the wrong
+    procedure_name would silently win and get sent to verification."""
+    mock_llm = _mock_llm({
+        VisionExtraction: VisionExtraction(
+            is_legible=True,
+            procedure_name="Anatomía Patológica",
+            price_question="¿Cuánto cuesta un examen de Anatomía Patológica?",
+            samples=["Estómago (Antro)"],
+        ),
+        VisionVerification: VisionVerification(text_visible=True),
+    })
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=mock_llm),
+    ):
+        result = await extract_procedure_query(b"fake image bytes", "")
+
+    assert result == "¿Cuánto cuesta Estómago (Antro)?"
+
+
+@pytest.mark.asyncio
 async def test_extract_returns_uncertain_when_legible_but_no_question():
     mock_llm = _mock_llm({VisionExtraction: VisionExtraction(is_legible=True, price_question=None)})
     with (

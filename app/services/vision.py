@@ -630,6 +630,29 @@ async def extract_procedure_query(
 
     is_multi = bool(extraction.is_legible and extraction.samples and len(extraction.samples) >= 2)
 
+    # Schema-confusion guard (found live): on a single clearly-labeled item,
+    # the model sometimes fills BOTH slots at once — procedure_name with the
+    # CASO A tier-2 title/type text ("Anatomía Patológica") AND samples[0]
+    # with the correct CASO B tier-3 labeled-field value ("Estómago
+    # (Antro)") — even though the prompt says CASO A/B are mutually
+    # exclusive. len(samples) == 1 doesn't meet the is_multi threshold, so
+    # without this the wrong (but present) procedure_name would silently
+    # win. samples entries are held to the stricter "exact literal" rule,
+    # so prefer it over procedure_name when both are populated (a real
+    # conflict to resolve). Only fires when procedure_name is ALSO set —
+    # bare samples=[x] with no procedure_name at all is a different,
+    # already-covered case (test_single_sample_entry_falls_back_to_ocr_
+    # uncertain_path): no conflicting signal to resolve, so it keeps
+    # degrading to the OCR-fallback/uncertain path as before.
+    if (
+        extraction.is_legible and not is_multi and extraction.procedure_name
+        and extraction.samples and len(extraction.samples) == 1
+    ):
+        only_sample = extraction.samples[0]
+        logger.info("vision_single_sample_overrides_procedure_name sample=%r", only_sample)
+        extraction.procedure_name = only_sample
+        extraction.price_question = f"¿Cuánto cuesta {only_sample}?"
+
     if not extraction.is_legible or (not extraction.price_question and not is_multi):
         # Vision uncertain; try OCR fallback if Tesseract available
         ocr_text = _extract_with_ocr(img_bytes) if _TESSERACT_AVAILABLE else None
