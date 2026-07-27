@@ -223,7 +223,7 @@ async def test_create_tenant_specialization_context_over_max_length_returns_422(
     """Server-side enforcement — a direct API client can't bypass the
     admin.html textarea's client-side maxlength."""
     app = make_app()
-    payload = {**VALID_TENANT, "slug": "lab-client-2", "specialization_context": "x" * 1001}
+    payload = {**VALID_TENANT, "slug": "lab-client-2", "specialization_context": "x" * 8001}
     r = await _request(app, "post", "/admin/tenants", json=payload)
     assert r.status_code == 422
 

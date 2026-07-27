@@ -53,7 +53,7 @@ class TenantCreate(BaseModel):
     webhook_secret: str
     expertise_area: str = ""
     tone_description: str = DEFAULT_TONE_DESCRIPTION
-    specialization_context: str = Field("", max_length=1000)
+    specialization_context: str = Field("", max_length=8000)
     contact_url: str = ""
     plan: str = "free"
 
@@ -101,7 +101,7 @@ class TenantPatch(BaseModel):
     plan: Literal["free", "basic", "pro"] | None = None
     expertise_area: str | None = None
     tone_description: str | None = None
-    specialization_context: str | None = Field(None, max_length=1000)
+    specialization_context: str | None = Field(None, max_length=8000)
     contact_url: str | None = None
     active: bool | None = None
     # Credential fields — only updated when non-empty string is provided

@@ -100,6 +100,7 @@ async def test_full_rag_flow_retrieves_reranks_and_answers():
 
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
         patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
         patch("app.services.rag.settings.rerank_enabled", True),
         # top_k_results must be SMALLER than the candidate count, or
@@ -151,6 +152,7 @@ async def test_rerank_http_failure_falls_back_but_graph_still_completes():
 
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
         patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
         patch("app.services.rag.settings.rerank_enabled", True),
         patch("app.services.rag.settings.top_k_results", 1),

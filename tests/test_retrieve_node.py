@@ -55,6 +55,7 @@ async def test_retrieve_chains_hybrid_search_rerank_and_token_cap():
 
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=raw_chunks)) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=reranked)) as mock_rerank,
         patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=capped)) as mock_cap,
@@ -88,6 +89,7 @@ async def test_retrieve_uses_previous_question_on_bare_confirmation():
 
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
         patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
@@ -95,6 +97,52 @@ async def test_retrieve_uses_previous_question_on_bare_confirmation():
         await retrieve(state)
 
     assert mock_retrieve.await_args[0][1] == "precio de biopsia de mama"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_rewrites_query_when_specialization_set():
+    """specialization_context present -> LLM rewrite runs, its output is
+    CONCATENATED (not swapped) onto the raw query before hybrid search."""
+    from app.schemas.retrieve import RewrittenQuery
+
+    state = _state()
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=RewrittenQuery(query="antro gástrico")
+    )
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="Patología")),
+        patch("app.graph.nodes.retrieve.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
+        patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
+    ):
+        await retrieve(state)
+
+    assert mock_retrieve.await_args[0][1] == "cuanto cuesta la biopsia antro gástrico"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_rewrite_failure_falls_back_to_raw_query():
+    """LLM rewrite call fails -> retrieval must still proceed with the raw
+    query, never block or raise."""
+    state = _state()
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(side_effect=RuntimeError("boom"))
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="Patología")),
+        patch("app.graph.nodes.retrieve.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
+        patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
+    ):
+        await retrieve(state)
+
+    assert mock_retrieve.await_args[0][1] == "cuanto cuesta la biopsia"
 
 
 def test_cache_key_format():

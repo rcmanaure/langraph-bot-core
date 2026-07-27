@@ -130,7 +130,7 @@
             </div>
             <div class="sm:col-span-2">
               <label class="block text-xs font-medium text-gray-700 mb-1">Specialization context (jargon/glossary for the model)</label>
-              <textarea x-model="newTenant.specialization_context" maxlength="1000" rows="3" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." class="field"></textarea>
+              <textarea x-model="newTenant.specialization_context" maxlength="8000" rows="3" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." class="field"></textarea>
             </div>
             <div class="sm:col-span-2">
               <label class="block text-xs font-medium text-gray-700 mb-1">Contact URL</label>
@@ -359,7 +359,7 @@
                               </div>
                               <div class="sm:col-span-2">
                                 <label class="block text-xs font-medium text-gray-700 mb-1" :for="'specialization-' + t.id">Specialization context (jargon/glossary for the model)</label>
-                                <textarea :id="'specialization-' + t.id" x-model="editForm.specialization_context" maxlength="1000" rows="3" @input="markDirty()" :disabled="editLoading" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." class="field"></textarea>
+                                <textarea :id="'specialization-' + t.id" x-model="editForm.specialization_context" maxlength="8000" rows="3" @input="markDirty()" :disabled="editLoading" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." class="field"></textarea>
                               </div>
                               <div class="sm:col-span-2">
                                 <label class="block text-xs font-medium text-gray-700 mb-1" :for="'contact-' + t.id">Contact URL</label>

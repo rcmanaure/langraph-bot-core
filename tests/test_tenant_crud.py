@@ -193,7 +193,7 @@ async def test_patch_specialization_context_over_max_length_returns_422():
     textarea's client-side maxlength, which any direct API client bypasses."""
     app = make_app()
     r = await req(app, "patch", "/admin/tenants/acme",
-                  json={"specialization_context": "x" * 1001})
+                  json={"specialization_context": "x" * 8001})
     assert r.status_code == 422
 
 

@@ -1,12 +1,18 @@
+import logging
 import re
 
 from langchain_core.messages import HumanMessage
 
 from app.config import settings
 from app.db import AsyncSessionLocal
+from app.schemas.retrieve import RewrittenQuery
+from app.services.llm import get_chat_llm
 from app.services.rag import cap_chunks_to_tokens, retrieve_chunks
 from app.services.rerank import rerank_chunks
+from app.services.tenant_context import get_tenant_specialization
 from app.state import AgentState
+
+logger = logging.getLogger(__name__)
 
 # A bare confirmation ("si", "sí", "correcto"...) has no retrievable content of
 # its own — it's answering the bot's PREVIOUS question (e.g. an approximation
@@ -42,10 +48,51 @@ def cache_key(state: AgentState) -> str:
     return f"{state.get('tenant_id', '')}::{_last_human_query(state)}"
 
 
+_REWRITE_PROMPT = """\
+Expandí la siguiente consulta de un usuario agregando términos o sinónimos formales \
+que ayuden a encontrarla en un catálogo de productos/servicios, usando tu propio \
+conocimiento del rubro descrito abajo. Devolvé SOLO los términos adicionales \
+relevantes (no una oración ni una respuesta) — se van a concatenar a la consulta \
+original, no a reemplazarla. Si no hay nada útil que agregar, devolvé la consulta \
+tal cual.
+
+Rubro del negocio: {specialization}
+
+Consulta del usuario: {query}
+"""
+
+
+async def _rewrite_query(query: str, specialization: str) -> str:
+    """LLM-based query expansion using the tenant's free-text specialization
+    context — no hardcoded per-vertical glossary/synonym dict. Same
+    primary/fallback shape as triage.py's structured-output call: any
+    failure falls back to the raw query untouched, never blocks retrieval.
+    Result is CONCATENATED to the original query, never replaces it, so a
+    bad/hallucinated rewrite only adds noise instead of erasing the user's
+    actual words from the retrieval input."""
+    llm = get_chat_llm()
+    prompt = _REWRITE_PROMPT.format(specialization=specialization, query=query)
+    try:
+        result: RewrittenQuery = await llm.with_structured_output(RewrittenQuery).ainvoke(
+            [HumanMessage(content=prompt)]
+        )
+        return f"{query} {result.query}".strip()
+    except Exception as exc:
+        logger.warning("retrieve_rewrite_failed=%s using raw query", exc)
+        return query
+
+
 async def retrieve(state: AgentState) -> dict:
     query = _last_human_query(state)
     if not query:
         return {"retrieved_chunks": []}
+
+    # Vertical-agnostic: skipped entirely (zero extra cost/latency) for
+    # tenants without a specialization_context — same no-op-when-empty rule
+    # already used by generate.py/vision.py for this field.
+    specialization = await get_tenant_specialization(state["tenant_id"])
+    if specialization:
+        query = await _rewrite_query(query, specialization)
 
     async with AsyncSessionLocal() as db:
         chunks = await retrieve_chunks(db, query, state["tenant_id"])
