@@ -702,6 +702,7 @@ function renderExpandPanel(t) {
           <span class="toggle-label">${t.active?'Active':'Inactive'}</span>
         </div>
       </div>
+      <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea data-field="specialization_context" maxlength="1000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer...">${esc(t.specialization_context)}</textarea></div>
       <div class="field full"><label>Tone description</label><textarea data-field="tone_description" placeholder="e.g. warm and casual, or professional and clinical">${esc(t.tone_description)}</textarea></div>
     </div>
   </div>
@@ -781,6 +782,7 @@ function renderAddTenantForm() {
       </div>
       <div class="field"><label>Expertise area</label><input type="text" id="new-expertise" placeholder="e.g. Customer support" ${state.addTenantSaving?'disabled':''}></div>
       <div class="field"><label>Contact URL</label><input type="url" id="new-contact" placeholder="https://example.com" ${state.addTenantSaving?'disabled':''}></div>
+      <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea id="new-specialization-context" maxlength="1000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." ${state.addTenantSaving?'disabled':''}></textarea></div>
     </div>
     <div class="panel-actions">
       <button class="btn btn-ghost" data-action="toggle-add-tenant" ${state.addTenantSaving?'disabled':''}>Cancel</button>
@@ -1057,6 +1059,7 @@ async function saveTenant(slug) {
   const payload = {
     plan: get('plan').value,
     expertise_area: get('expertise_area').value.trim(),
+    specialization_context: get('specialization_context').value.trim(),
     contact_url: get('contact_url').value.trim(),
     tone_description: get('tone_description').value.trim(),
     active: get('active').checked,
@@ -1085,8 +1088,8 @@ async function saveTenant(slug) {
     });
     const t = state.tenants.find(x => x.slug === slug);
     Object.assign(t, {
-      plan: data.plan, expertise_area: data.expertise_area, contact_url: data.contact_url,
-      tone_description: data.tone_description, active: data.active,
+      plan: data.plan, expertise_area: data.expertise_area, specialization_context: data.specialization_context,
+      contact_url: data.contact_url, tone_description: data.tone_description, active: data.active,
     });
     state.saveLoading.delete(slug);
     state.expandedTenant = null;
@@ -1109,6 +1112,7 @@ async function createTenant() {
   const webhookSecret = document.getElementById('new-webhook-secret').value.trim();
   const plan = document.getElementById('new-plan').value;
   const expertise = document.getElementById('new-expertise').value.trim();
+  const specialization = document.getElementById('new-specialization-context').value.trim();
   const contact = document.getElementById('new-contact').value.trim();
   if (!slug || !botToken || !webhookSecret) {
     state.addTenantError = 'Slug, bot token, and webhook secret are required.';
@@ -1124,7 +1128,7 @@ async function createTenant() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         slug, bot_token: botToken, webhook_secret: webhookSecret, plan,
-        expertise_area: expertise, contact_url: contact,
+        expertise_area: expertise, specialization_context: specialization, contact_url: contact,
       }),
     });
     state.addTenantResult = { slug: data.slug, api_key: data.api_key };

@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import shutil
+import unicodedata
 from pathlib import Path
 
 import openai
@@ -58,13 +59,12 @@ _VISION_EXTRACT_PROMPT = """\
 Analiza esta imagen (documento, orden, comprobante, etiqueta de producto, ficha...).
 
 Marca is_legible=true SOLO si podés leer con certeza el nombre del ítem o \
-procedimiento escrito en la imagen, letra por letra. Si el texto está borroso, cortado, \
-hay varios ítems distintos y no sabés cuál se pregunta, o tenés la MÍNIMA duda \
-sobre qué dice — marcá is_legible=false y dejá procedure_name y price_question \
-vacíos. NUNCA adivines ni asumas un ítem "parecido" solo porque el contexto \
-del negocio te resulte familiar.
+procedimiento escrito en la imagen, letra por letra. Si el texto está borroso, \
+cortado, o tenés la MÍNIMA duda sobre qué dice — marcá is_legible=false y dejá \
+procedure_name, price_question y samples vacíos. NUNCA adivines ni asumas un \
+ítem "parecido" solo porque el contexto del negocio te resulte familiar.
 
-Si is_legible=true, completá dos campos:
+CASO A — un solo ítem/procedimiento/muestra (el caso más común): completá:
 - procedure_name: el nombre EXACTO y LITERAL del ítem o procedimiento tal como \
 está escrito en la imagen, sin agregar palabras (ejemplo: "IGRA", "zapatilla \
 running talla 42").
@@ -72,11 +72,23 @@ running talla 42").
 ejemplo: "¿Cuánto cuesta un examen de IGRA?" o "¿Cuánto cuesta una zapatilla \
 running talla 42?". No traduzcas a un sinónimo ni asumas qué ítem "similar" \
 podría ser.
+- samples: dejalo vacío (null).
+
+CASO B — la imagen lista 2 O MÁS muestras/ítems DISTINTOS bajo una misma orden \
+(ejemplo: una solicitud de biopsia con "Muestra #1: Epiplón", "Muestra #2: \
+Líquido peritoneal", etc.) — NO es motivo para is_legible=false, es un caso \
+válido y frecuente:
+- procedure_name y price_question: dejalos vacíos (null).
+- samples: una lista con el nombre EXACTO y LITERAL de cada muestra/ítem, uno \
+por elemento, en el mismo orden en que aparecen (ejemplo: ["Epiplón", "TU de \
+ovario izquierdo (fracción)", "Líquido peritoneal"]). No incluyas valores de \
+laboratorio ni firmas, solo los nombres de muestra/ítem en sí.
 """
 
 _EXTRACT_JSON_SUFFIX = (
     '\nReply ONLY with JSON: {"is_legible": <true|false>, '
-    '"procedure_name": <string or null>, "price_question": <string or null>}'
+    '"procedure_name": <string or null>, "price_question": <string or null>, '
+    '"samples": <array of strings or null>}'
 )
 
 _VERIFY_PROMPT_TEMPLATE = """\
@@ -93,11 +105,49 @@ una verificación de presencia literal del texto, no un juicio de plausibilidad.
 
 _VERIFY_JSON_SUFFIX = '\nReply ONLY with JSON: {"text_visible": <true|false>}'
 
+# Appended to the verify prompt only when specialization_context was used for
+# extraction — found via /qa 2026-07-24: on a hard-to-read image, the
+# specialization hint can steer the extraction toward a plausible domain term
+# that the verify pass then "confirms" is present, when an unbiased
+# extraction of the SAME image read something else entirely. The base verify
+# prompt already warns against plausibility judgments in general; this raises
+# the bar specifically for the case that caused it, without a second LLM call
+# or new schema field. No-op (not appended) when specialization_context is
+# empty — byte-identical verify prompt for every tenant that doesn't use it.
+_VERIFY_SPECIALIZATION_CAVEAT = """
+ADVERTENCIA: el texto a verificar pudo haber sido influenciado por jerga \
+específica del negocio durante la extracción. Sé especialmente estricto acá — \
+si tenés cualquier duda de que el texto exacto esté escrito en la imagen (en vez \
+de sonar simplemente "razonable" para este tipo de negocio), marcá \
+text_visible=false.
+"""
+
 
 def _strip_fences(content: str) -> str:
     content = content.strip()
     content = re.sub(r"^```[a-zA-Z]*\s*", "", content)
     return re.sub(r"\s*```$", "", content).strip()
+
+
+def _normalize_for_comparison(text_value: str) -> str:
+    """Lowercase + accent-strip (NFKD, drop combining marks) so two
+    independent vision samples that read the SAME term but differ only in
+    accent marks (e.g. "anatomia patologica" vs "anatomía patológica" — real
+    /qa 2026-07-24 finding) aren't misclassified as a consensus disagreement."""
+    normalized = unicodedata.normalize("NFKD", text_value.strip().lower())
+    return "".join(c for c in normalized if not unicodedata.combining(c))
+
+
+def _consensus_agrees(name_1: str, name_2: str) -> bool:
+    """Two consensus samples agree if they're identical, OR one is a
+    substring of the other (found in /code-review): VisionExtraction's
+    procedure_name and price_question are independent optional fields, so
+    one call filling only the bare term ("igra") and the other filling only
+    the full formatted question ("¿cuánto cuesta un examen de igra?") for
+    the SAME correctly-read item would otherwise never match exactly."""
+    if not name_1 or not name_2:
+        return False
+    return name_1 == name_2 or name_1 in name_2 or name_2 in name_1
 
 
 # Per-model memo of whether with_structured_output actually works. Live
@@ -119,6 +169,15 @@ _structured_output_ok: dict[str, bool] = {}
 # of giving up immediately and asking the user to retype their question.
 _RATE_LIMIT_MAX_RETRIES = 2
 _RATE_LIMIT_BASE_DELAY = 1.5  # seconds
+
+# Multi-sample verification fans out one concurrent LLM call per sample
+# (found in /python-review) — extraction.samples is model-controlled with no
+# upper bound, so a mis-parsed image (or a burst of multi-sample photos in
+# one media group) could otherwise trigger an unbounded concurrent-call
+# spike against the same rate-limited vision model. 20 comfortably covers
+# any realistic multi-sample order; ceiling upgrade if that ever proves too
+# small — cap it, not the underlying gather logic.
+_MAX_MULTI_SAMPLE_VERIFY = 20
 
 
 def _is_rate_limited(exc: BaseException) -> bool:
@@ -206,9 +265,19 @@ def _extract_with_ocr(img_bytes: bytes) -> str | None:
         return None
 
 
-def _vision_cache_key(model_name: str, caption: str, img_bytes: bytes) -> str:
+def _vision_cache_key(
+    model_name: str, caption: str, img_bytes: bytes,
+    tenant_slug: str = "", specialization_context: str = "",
+) -> str:
+    # tenant_slug always folded in (vision_cache is a global table with zero
+    # tenant scoping otherwise — two tenants sending a byte-identical image
+    # would share a cached result). specialization_context only folded in
+    # when non-empty so tenants who never set it don't pay a second cache
+    # invalidation on top of the one-time tenant_slug invalidation.
     h = hashlib.sha256()
-    h.update(f"{model_name}:{caption}:".encode())
+    h.update(f"{model_name}:{caption}:{tenant_slug}:".encode())
+    if specialization_context:
+        h.update(f"{specialization_context}:".encode())
     h.update(img_bytes)
     return h.hexdigest()
 
@@ -264,7 +333,166 @@ async def _structured_or_json(
     return schema.model_validate(json.loads(_strip_fences(resp.content)))
 
 
-async def extract_procedure_query(img_bytes: bytes, caption: str) -> str:
+async def _run_consensus_check(
+    llm, model_name: str, extraction: VisionExtraction, base_prompt: str, img_b64: str,
+) -> bool:
+    """Consensus check for the single-item path (found via /qa 2026-07-24):
+    specialization_context can steer extraction toward a plausible domain
+    term on hard-to-read images, and the model's own confidence is
+    unreliable — but disagreement between two INDEPENDENT samples is a
+    direct, measured signal, not a proxy.
+
+    Uses base_prompt (WITHOUT the specialization prefix), not the biased
+    prompt used for the primary extraction (found in /code-review):
+    re-sending the identical biased prompt can only catch stochastic
+    sampling noise, never a consistent, prompt-driven steering toward the
+    same wrong term. Reading the image again with NO domain hint is a
+    genuinely independent second opinion.
+
+    Returns True if it's safe to proceed (the two samples agree). False
+    means the caller should return VISION_UNCERTAIN, uncached — same
+    stochastic-rejection reasoning as a verification rejection; one unlucky
+    pair of samples must not become a permanent wrong answer. Covers both a
+    real disagreement and a transient failure on the resample call itself —
+    both resolve to the identical caller action, so callers don't need to
+    branch on which one happened.
+    """
+    try:
+        extraction_2: VisionExtraction = await _call_with_rate_limit_retry(
+            _structured_or_json, llm, model_name, base_prompt, img_b64, VisionExtraction, _EXTRACT_JSON_SUFFIX
+        )
+    except Exception as exc:
+        logger.warning("vision_consensus_sample_failed=%s defaulting to uncertain", exc)
+        return False
+
+    name_1 = _normalize_for_comparison(extraction.procedure_name or extraction.price_question or "")
+    name_2 = _normalize_for_comparison(extraction_2.procedure_name or extraction_2.price_question or "")
+    if not _consensus_agrees(name_1, name_2):
+        logger.warning("vision_consensus_disagreement first_len=%d second_len=%d", len(name_1), len(name_2))
+        return False
+    return True
+
+
+async def _handle_multi_sample(
+    llm, model_name: str, samples: list[str], img_b64: str,
+    specialization_context: str, cache_key: str,
+) -> str:
+    """Multi-sample document handling (real /qa 2026-07-24 finding: a
+    6-sample biopsy request was silently collapsed to one question). Verify
+    EACH sample independently — same anti-hallucination bar as the
+    single-item path, applied per item, not skipped for the list case. A
+    sample that fails verification is dropped, not fatal to the whole
+    request (mirrors how the media-group loop in telegram.py already
+    tolerates individual photo failures without failing the batch). Returns
+    VISION_UNCERTAIN if none verify.
+    """
+    async def _verify_sample(sample: str) -> str | None:
+        verify_prompt = _VERIFY_PROMPT_TEMPLATE.format(claim=sample)
+        if specialization_context:
+            verify_prompt += _VERIFY_SPECIALIZATION_CAVEAT
+        try:
+            verification: VisionVerification = await _call_with_rate_limit_retry(
+                _structured_or_json, llm, model_name, verify_prompt, img_b64,
+                VisionVerification, _VERIFY_JSON_SUFFIX,
+            )
+        except Exception as exc:
+            logger.warning("vision_sample_verification_failed sample_len=%d err=%s", len(sample), exc)
+            return None
+        if verification.text_visible:
+            return sample
+        logger.warning("vision_sample_verification_rejected sample_len=%d", len(sample))
+        return None
+
+    samples_to_verify = samples[:_MAX_MULTI_SAMPLE_VERIFY]
+    if len(samples) > _MAX_MULTI_SAMPLE_VERIFY:
+        logger.warning(
+            "vision_multi_sample_truncated total=%d cap=%d",
+            len(samples), _MAX_MULTI_SAMPLE_VERIFY,
+        )
+
+    # Concurrent, not sequential (found in /code-review) — each sample's
+    # verification is an independent LLM call with no shared state that
+    # requires ordering, so N samples cost one round-trip's latency instead
+    # of N.
+    results = await asyncio.gather(*(_verify_sample(s) for s in samples_to_verify))
+    verified_samples = [s for s in results if s is not None]
+
+    if not verified_samples:
+        # Deliberately NOT cached — same stochastic-rejection reasoning as
+        # the single-item path.
+        return VISION_UNCERTAIN
+
+    # Vertical-neutral phrasing (found in /code-review) — extract_procedure_query
+    # is documented as vertical-agnostic (medical order, clothing tag, shoe
+    # box...), so the combined question must not hardcode lab-specific
+    # "orden"/"muestras" wording for a menu or product-shelf photo that also
+    # happens to show 2+ distinct items.
+    combined_question = "Veo varios ítems distintos en la imagen, ¿cuánto cuesta cada uno?\n" + "\n".join(
+        f"- {s}" for s in verified_samples
+    )
+
+    if len(verified_samples) < len(samples_to_verify):
+        # Partial result — one or more samples failed verification, which is
+        # documented as stochastic (identical image+claim pairs flip between
+        # accepted/rejected across independent calls). Caching an incomplete
+        # list as if it were final would permanently shortchange every
+        # resend of this photo (found in /code-review) — only a
+        # fully-verified answer is cached.
+        logger.warning(
+            "vision_multi_sample_partial verified=%d total=%d",
+            len(verified_samples), len(samples),
+        )
+        return combined_question
+
+    await _store_vision_result(cache_key, combined_question)
+    return combined_question
+
+
+async def _get_cached_result_or_none(cache_key: str) -> str | None:
+    """A cache-read failure degrades to a cache miss, not an error — the
+    extraction path below is the safe fallback either way."""
+    try:
+        return await _get_cached_vision_result(cache_key)
+    except Exception as exc:
+        logger.warning("vision_cache_read_failed err=%s treating as cache miss", exc)
+        return None
+
+
+async def _finalize_single_item(
+    llm, model_name: str, extraction: VisionExtraction, specialization_context: str,
+    img_b64: str, cache_key: str,
+) -> str:
+    """Verify the bare literal term, not the formatted question — a document
+    never contains the full interrogative sentence, only the term itself.
+    Returns VISION_UNCERTAIN (uncached) on any failure or rejection — see
+    extract_procedure_query's docstring for why rejections are never cached.
+    """
+    verify_claim = extraction.procedure_name or extraction.price_question
+    verify_prompt = _VERIFY_PROMPT_TEMPLATE.format(claim=verify_claim)
+    if specialization_context:
+        verify_prompt += _VERIFY_SPECIALIZATION_CAVEAT
+    try:
+        verification: VisionVerification = await _call_with_rate_limit_retry(
+            _structured_or_json, llm, model_name, verify_prompt, img_b64, VisionVerification, _VERIFY_JSON_SUFFIX
+        )
+    except Exception as exc:
+        logger.warning("vision_verification_failed=%s defaulting to uncertain", exc)
+        return VISION_UNCERTAIN  # transient — not cached, retry may succeed
+
+    if not verification.text_visible:
+        logger.warning("vision_verification_rejected claim_len=%d", len(verify_claim))
+        # Deliberately NOT cached — proven stochastic (see docstring); one
+        # unlucky roll must not become a permanent wrong answer.
+        return VISION_UNCERTAIN
+
+    await _store_vision_result(cache_key, extraction.price_question)
+    return extraction.price_question
+
+
+async def extract_procedure_query(
+    img_bytes: bytes, caption: str,
+    tenant_slug: str = "", specialization_context: str = "",
+) -> str:
     """Vision-transcribe a document/product image into a literal price question.
 
     Shared by every channel (Telegram, WhatsApp, ...) that accepts image uploads,
@@ -318,19 +546,24 @@ async def extract_procedure_query(img_bytes: bytes, caption: str) -> str:
 
     img_bytes = _preprocess_image(img_bytes)
     model_name = settings.openai_vision_model
-    cache_key = _vision_cache_key(model_name, caption, img_bytes)
-    try:
-        cached = await _get_cached_vision_result(cache_key)
-    except Exception as exc:
-        logger.warning("vision_cache_read_failed err=%s treating as cache miss", exc)
-        cached = None
+    cache_key = _vision_cache_key(model_name, caption, img_bytes, tenant_slug, specialization_context)
+    cached = await _get_cached_result_or_none(cache_key)
     if cached is not None:
         logger.info("vision_cache_hit key=%s", cache_key[:12])
         return cached
 
     llm = get_vision_llm()
     img_b64 = base64.b64encode(img_bytes).decode()
-    prompt = f"{caption}\n\n{_VISION_EXTRACT_PROMPT}" if caption else _VISION_EXTRACT_PROMPT
+    base_prompt = f"{caption}\n\n{_VISION_EXTRACT_PROMPT}" if caption else _VISION_EXTRACT_PROMPT
+    prompt = base_prompt
+    if specialization_context:
+        # Extraction prompt only — the verify pass below never receives the
+        # actual jargon text (stays domain-agnostic, protecting the
+        # anti-hallucination two-pass design), but DOES get a stricter
+        # scrutiny instruction (_VERIFY_SPECIALIZATION_CAVEAT below) since a
+        # biased extraction needs a higher bar to pass verification.
+        prompt = f"Contexto del negocio: {specialization_context}\n\n{prompt}"
+        logger.debug("vision_specialization_applied len=%d", len(specialization_context))
 
     try:
         extraction: VisionExtraction = await _call_with_rate_limit_retry(
@@ -340,35 +573,35 @@ async def extract_procedure_query(img_bytes: bytes, caption: str) -> str:
         logger.warning("vision_extraction_failed=%s defaulting to uncertain", exc)
         return VISION_UNCERTAIN  # transient — not cached, retry may succeed
 
-    if not extraction.is_legible or not extraction.price_question:
+    is_multi = bool(extraction.is_legible and extraction.samples and len(extraction.samples) >= 2)
+
+    if not extraction.is_legible or (not extraction.price_question and not is_multi):
         # Vision uncertain; try OCR fallback if Tesseract available
         ocr_text = _extract_with_ocr(img_bytes) if _TESSERACT_AVAILABLE else None
         if ocr_text and len(ocr_text) > 3:
-            logger.info("vision_uncertain fallback_to_ocr text=%s", ocr_text[:50])
+            logger.info("vision_uncertain fallback_to_ocr text_len=%d", len(ocr_text))
             extraction.procedure_name = ocr_text
             extraction.price_question = f"¿Cuánto cuesta {ocr_text}?"
             extraction.is_legible = True
+            is_multi = False  # OCR fallback only ever produces one literal string
         else:
             await _store_vision_result(cache_key, VISION_UNCERTAIN)
             return VISION_UNCERTAIN
+    elif specialization_context and not is_multi:
+        # Only paid when specialization_context is set (the condition that
+        # triggers the bias risk) and only on the confident direct-read path
+        # — the OCR-fallback branch above is a different, non-LLM-biased
+        # signal and doesn't need a second opinion. NOT applied to the
+        # multi-sample case (real /investigate 2026-07-24 finding): requiring
+        # exact agreement across N independently re-read items compounds —
+        # the per-sample verification loop in _handle_multi_sample is a more
+        # precise, more granular check for that case.
+        if not await _run_consensus_check(llm, model_name, extraction, base_prompt, img_b64):
+            return VISION_UNCERTAIN
 
-    # Verify the bare literal term, not the formatted question — a document
-    # never contains the full interrogative sentence, only the term itself.
-    verify_claim = extraction.procedure_name or extraction.price_question
-    verify_prompt = _VERIFY_PROMPT_TEMPLATE.format(claim=verify_claim)
-    try:
-        verification: VisionVerification = await _call_with_rate_limit_retry(
-            _structured_or_json, llm, model_name, verify_prompt, img_b64, VisionVerification, _VERIFY_JSON_SUFFIX
+    if is_multi:
+        return await _handle_multi_sample(
+            llm, model_name, extraction.samples, img_b64, specialization_context, cache_key
         )
-    except Exception as exc:
-        logger.warning("vision_verification_failed=%s defaulting to uncertain", exc)
-        return VISION_UNCERTAIN  # transient — not cached, retry may succeed
 
-    if not verification.text_visible:
-        logger.warning("vision_verification_rejected claim=%s", verify_claim[:80])
-        # Deliberately NOT cached — proven stochastic (see docstring); one
-        # unlucky roll must not become a permanent wrong answer.
-        return VISION_UNCERTAIN
-
-    await _store_vision_result(cache_key, extraction.price_question)
-    return extraction.price_question
+    return await _finalize_single_item(llm, model_name, extraction, specialization_context, img_b64, cache_key)

@@ -82,11 +82,11 @@ The API starts at `http://localhost:8000`. Migrations run automatically on start
 
 ### 3. Expose a public webhook (local dev)
 
-Telegram requires a public HTTPS URL. On Windows, `start-tunnel.ps1` starts cloudflared **and** registers the webhook automatically:
+Telegram requires a public HTTPS URL. On Windows, `scripts\start-tunnel.ps1` starts cloudflared **and** registers the webhook automatically:
 
 ```powershell
 # Fill in TELEGRAM_BOT_TOKEN, WEBHOOK_SECRET, and TENANT_SLUG in .env first
-.\start-tunnel.ps1
+.\scripts\start-tunnel.ps1
 # Starts the tunnel, waits for the trycloudflare.com URL, calls setWebhook — all in one step.
 ```
 
@@ -120,7 +120,7 @@ curl -X POST "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
   }'
 ```
 
-> **Note:** `start-tunnel.ps1` (Windows) does steps 3 + 5 together.
+> **Note:** `scripts\start-tunnel.ps1` (Windows) does steps 3 + 5 together.
 
 ### 6. Index a document
 
@@ -299,5 +299,6 @@ CHANGELOG.md         # Release history
 DESIGN.md            # Admin panel design system (colors, typography, components)
 TODOS.md             # Accepted deferred work items
 VERSION              # Current version (semver: major.minor.patch.build)
-start-tunnel.ps1     # Windows: starts cloudflared tunnel + registers Telegram webhook
+scripts/start-tunnel.ps1  # Windows: starts cloudflared tunnel + registers Telegram webhook
+scripts/benchmark_accuracy.py  # Vision/OCR extraction accuracy benchmark
 ```
