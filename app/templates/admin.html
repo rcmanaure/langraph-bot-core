@@ -1,1272 +1,1296 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Panel</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
-  <style>
-    [x-cloak] { display: none !important; }
-    .field { @apply w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white; }
-    @keyframes flash-green {
-      0%, 100% { background-color: transparent; }
-      20%, 80% { background-color: #dcfce7; }
-    }
-    .flash-success { animation: flash-green 2s ease-in-out; }
-  </style>
-</head>
-<body class="bg-gray-50 min-h-screen font-sans" x-data="admin()" x-init="init()" x-cloak>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>langraph-bot — Admin</title>
+<style>
+/* ── Linear design-system tokens ─────────────────────────────────── */
+:root {
+  --bg:           #08090a;
+  --surface:      #191a1b;
+  --surface-warm: var(--surface);
+  --fg:   #f7f8f8;
+  --fg-2: #d0d6e0;
+  --muted: #8a8f98;
+  --meta:  #62666d;
+  --border:      rgba(255, 255, 255, 0.08);
+  --border-soft: rgba(255, 255, 255, 0.05);
+  --accent:        #5e6ad2;
+  --accent-on:     #ffffff;
+  --accent-hover:  #828fff;
+  --accent-active: #4752c4;
+  --success: #27a644;
+  --warn:    #eab308;
+  --danger:  #dc2626;
+  --font-display: "Inter Variable", "Inter", "SF Pro Display", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-body:    "Inter Variable", "Inter", "SF Pro Display", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono:    "Berkeley Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --text-xs:   12px;
+  --text-sm:   14px;
+  --text-base: 16px;
+  --text-lg:   18px;
+  --text-xl:   24px;
+  --text-2xl:  32px;
+  --text-3xl:  48px;
+  --text-4xl:  72px;
+  --leading-body:     1.5;
+  --leading-tight:    1.00;
+  --tracking-display: -0.022em;
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-12: 48px;
+  --section-y-desktop: 80px;
+  --section-y-tablet:  48px;
+  --section-y-phone:   32px;
+  --radius-sm:   6px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-pill: 9999px;
+  --elev-flat:   none;
+  --elev-ring:   0 0 0 1px var(--border);
+  --elev-raised: rgba(0, 0, 0, 0.4) 0px 2px 4px, 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --focus-ring: 0 0 0 2px color-mix(in oklab, var(--accent), transparent 30%), 0 4px 12px rgba(0, 0, 0, 0.1);
+  --motion-fast:   150ms;
+  --motion-base:   200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --container-max:            1200px;
+  --container-gutter-desktop: 24px;
+  --container-gutter-tablet:  16px;
+  --container-gutter-phone:   12px;
+}
 
-  <!-- Login overlay -->
-  <div x-show="!authenticated" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm">
-      <div class="text-center mb-6">
-        <div class="inline-flex items-center justify-center w-12 h-12 bg-blue-600 rounded-xl mb-4">
-          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-          </svg>
-        </div>
-        <h1 class="text-xl font-semibold text-gray-900">Admin Panel</h1>
-        <p class="text-sm text-gray-500 mt-1">Enter your operator key</p>
+/* ── Reset ────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--fg-2);
+  font-family: var(--font-body);
+  font-feature-settings: "cv01", "ss03";
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+  -webkit-font-smoothing: antialiased;
+}
+button { font-family: inherit; cursor: pointer; }
+input, select, textarea { font-family: inherit; font-size: var(--text-sm); color: var(--fg); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+  outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm);
+}
+svg.icon { width: 16px; height: 16px; flex: none; }
+.icon-lg { width: 20px; height: 20px; }
+code, .mono { font-family: var(--font-mono); }
+.hidden { display: none !important; }
+::selection { background: color-mix(in oklab, var(--accent), transparent 60%); }
+
+/* ── Login screen ─────────────────────────────────────────────────── */
+.login-screen {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background:
+    radial-gradient(600px 400px at 50% 20%, rgba(94,106,210,0.10), transparent 70%),
+    var(--bg);
+  padding: var(--space-6);
+}
+.login-card {
+  width: 100%; max-width: 360px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: var(--space-8) var(--space-6); box-shadow: var(--elev-raised);
+}
+.login-mark {
+  width: 40px; height: 40px; border-radius: var(--radius-md); background: var(--accent);
+  display: flex; align-items: center; justify-content: center; color: #fff; margin-bottom: var(--space-5);
+}
+.login-card h1 {
+  font-size: var(--text-xl); font-weight: 510; color: var(--fg); letter-spacing: -0.288px; margin-bottom: var(--space-1);
+}
+.login-card p.sub { font-size: var(--text-sm); color: var(--muted); margin-bottom: var(--space-6); }
+.login-field label {
+  display: block; font-size: var(--text-xs); font-weight: 590; color: var(--fg-2); margin-bottom: var(--space-2);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.login-field input {
+  width: 100%; background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 12px; color: var(--fg);
+}
+.login-field input::placeholder { color: var(--meta); }
+.login-error, .inline-error {
+  display: none; align-items: center; gap: var(--space-2); background: color-mix(in oklab, var(--danger), transparent 85%);
+  border: 1px solid color-mix(in oklab, var(--danger), transparent 60%); color: #ff8a8a;
+  border-radius: var(--radius-sm); padding: 8px 10px; font-size: var(--text-xs); margin-top: var(--space-3);
+}
+.login-error.show, .inline-error.show { display: flex; }
+.login-submit { width: 100%; margin-top: var(--space-5); }
+
+/* ── Buttons ──────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border-radius: var(--radius-sm); border: 1px solid transparent; font-size: var(--text-sm);
+  font-weight: 510; padding: 8px 14px; transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+  white-space: nowrap;
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-ghost { background: rgba(255,255,255,0.02); color: #e2e4e7; border-color: rgb(36,40,44); }
+.btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,0.05); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover:not(:disabled) { background: #ef4444; }
+.btn-danger-outline { background: rgba(220,38,38,0.06); color: #ff9d9d; border-color: rgba(220,38,38,0.35); }
+.btn-danger-outline:hover:not(:disabled) { background: rgba(220,38,38,0.14); }
+.btn-sm { padding: 5px 10px; font-size: var(--text-xs); }
+.btn-icon { padding: 6px; border-radius: var(--radius-sm); background: rgba(255,255,255,0.03); border: 1px solid var(--border); color: var(--fg-2); }
+.btn-icon:hover:not(:disabled) { background: rgba(255,255,255,0.07); color: var(--fg); }
+.btn-block { width: 100%; }
+
+/* ── App shell ────────────────────────────────────────────────────── */
+.app-shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+.sidebar {
+  background: var(--surface); border-right: 1px solid var(--border-soft);
+  display: flex; flex-direction: column; padding: var(--space-4) var(--space-3);
+  position: sticky; top: 0; height: 100vh;
+}
+.sidebar-brand { display: flex; align-items: center; gap: 10px; padding: var(--space-2) var(--space-2) var(--space-6); }
+.brand-mark {
+  width: 26px; height: 26px; border-radius: 7px; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 590; font-size: 13px; flex: none;
+}
+.brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+.brand-text strong { font-size: var(--text-sm); color: var(--fg); font-weight: 590; letter-spacing: -0.1px; }
+.brand-text span { font-size: 11px; color: var(--meta); font-family: var(--font-mono); }
+.sidebar-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius-sm);
+  background: transparent; border: 1px solid transparent; color: var(--muted); font-size: var(--text-sm);
+  font-weight: 510; text-align: left; width: 100%;
+}
+.nav-item:hover { background: rgba(255,255,255,0.04); color: var(--fg-2); }
+.nav-item.active { background: rgba(94,106,210,0.14); color: var(--fg); border-color: rgba(94,106,210,0.25); }
+.nav-item svg { flex: none; }
+.sidebar-footer { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-4); border-top: 1px solid var(--border-soft); margin-top: var(--space-3); }
+.env-tag {
+  font-family: var(--font-mono); font-size: 10px; color: var(--success); background: rgba(39,166,68,0.12);
+  border: 1px solid rgba(39,166,68,0.3); border-radius: var(--radius-sm); padding: 4px 8px; text-align: center; letter-spacing: 0.04em;
+}
+
+.main { padding: var(--space-6) var(--space-8); max-width: 1320px; }
+.view-header { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); flex-wrap: wrap; }
+.view-header h2 { font-size: var(--text-2xl); font-weight: 510; color: var(--fg); letter-spacing: -0.704px; }
+.view-header p { font-size: var(--text-sm); color: var(--muted); margin-top: 4px; }
+.toolbar { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+
+/* ── Badges ───────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: var(--radius-pill);
+  font-size: 12px; font-weight: 510; border: 1px solid transparent; white-space: nowrap;
+}
+.badge .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.badge-plan-free { background: rgba(255,255,255,0.04); color: var(--muted); border-color: var(--border); }
+.badge-plan-basic { background: rgba(130,143,255,0.10); color: #a7b0ff; border-color: rgba(130,143,255,0.3); }
+.badge-plan-pro { background: rgba(94,106,210,0.18); color: #c2c9ff; border-color: rgba(94,106,210,0.45); }
+.badge-status-active { background: rgba(39,166,68,0.10); color: #4fd977; border-color: rgba(39,166,68,0.3); }
+.badge-status-inactive { background: rgba(255,255,255,0.03); color: var(--meta); border-color: var(--border); }
+.badge-wh-registered { background: rgba(39,166,68,0.10); color: #4fd977; border-color: rgba(39,166,68,0.3); }
+.badge-wh-mismatch { background: rgba(234,179,8,0.10); color: #f4cc4b; border-color: rgba(234,179,8,0.35); }
+.badge-wh-unknown { background: rgba(255,255,255,0.03); color: var(--meta); border-color: var(--border); }
+.badge-wh-error { background: rgba(220,38,38,0.12); color: #ff8a8a; border-color: rgba(220,38,38,0.35); }
+.badge-job-pending { background: rgba(255,255,255,0.03); color: var(--meta); border-color: var(--border); }
+.badge-job-running { background: rgba(94,106,210,0.14); color: #a7b0ff; border-color: rgba(94,106,210,0.35); }
+.badge-job-running .dot { animation: pulse 1.1s ease-in-out infinite; }
+.badge-job-done { background: rgba(39,166,68,0.10); color: #4fd977; border-color: rgba(39,166,68,0.3); }
+.badge-job-failed { background: rgba(220,38,38,0.12); color: #ff8a8a; border-color: rgba(220,38,38,0.35); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinning { animation: spin 0.8s linear infinite; }
+
+/* ── Tenants table ────────────────────────────────────────────────── */
+.tt-grid { --cols: 30px minmax(150px,1.2fr) minmax(160px,1.5fr) 92px 96px 168px 108px 30px; }
+.table-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; margin-top: var(--space-5); }
+.tt-head, .tt-row { display: grid; grid-template-columns: var(--cols); align-items: center; }
+.tt-head { padding: 10px var(--space-4); border-bottom: 1px solid var(--border-soft); background: rgba(255,255,255,0.015); }
+.tt-head span { font-size: 11px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--meta); }
+.tt-row { padding: 11px var(--space-4); border-bottom: 1px solid var(--border-soft); cursor: pointer; transition: background var(--motion-fast) var(--ease-standard); }
+.tt-row:hover { background: rgba(255,255,255,0.025); }
+.tt-row:last-child { border-bottom: none; }
+.tt-row.expanded { background: rgba(94,106,210,0.05); }
+.tt-row.flash { animation: flashSuccess 1.6s var(--ease-standard); }
+@keyframes flashSuccess { 0% { background: rgba(39,166,68,0.16); } 100% { background: transparent; } }
+.tt-cell { font-size: var(--text-sm); color: var(--fg-2); padding-right: var(--space-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-cell.slug { font-family: var(--font-mono); color: var(--fg); font-size: 13px; font-weight: 500; }
+.tt-cell.expertise { color: var(--muted); }
+.tt-cell.created { font-family: var(--font-mono); font-size: 12px; color: var(--meta); }
+.tt-chevron { display: flex; color: var(--meta); transition: transform var(--motion-fast) var(--ease-standard); }
+.tt-row.expanded .tt-chevron { transform: rotate(90deg); color: var(--accent-hover); }
+.wh-cell { display: flex; align-items: center; gap: 6px; }
+.recheck-btn { background: transparent; border: none; color: var(--meta); padding: 3px; border-radius: 4px; display: flex; }
+.recheck-btn:hover { color: var(--fg-2); background: rgba(255,255,255,0.06); }
+
+/* ── Expand panel (inspector) ─────────────────────────────────────── */
+.expand-wrap { grid-column: 1 / -1; background: #101112; border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); padding: var(--space-6); animation: expandIn var(--motion-base) var(--ease-standard); }
+@keyframes expandIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.panel-section { padding-bottom: var(--space-5); margin-bottom: var(--space-5); border-bottom: 1px solid var(--border-soft); }
+.panel-section:last-of-type { border-bottom: none; }
+.panel-section-title { font-size: var(--text-xs); font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-2); margin-bottom: var(--space-4); display: flex; align-items: center; gap: 8px; }
+.panel-section-title .hint { text-transform: none; font-weight: 400; letter-spacing: 0; color: var(--meta); font-size: 11px; }
+.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: var(--space-4); }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field.full { grid-column: 1 / -1; }
+.field label { font-size: 11px; font-weight: 590; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.field input, .field select, .field textarea {
+  background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 8px 10px; color: var(--fg); width: 100%;
+}
+.field input::placeholder, .field textarea::placeholder { color: var(--meta); }
+.field textarea { resize: vertical; min-height: 60px; font-family: var(--font-body); line-height: 1.5; }
+.field-pw-wrap { position: relative; }
+.field-pw-wrap input { padding-right: 34px; font-family: var(--font-mono); font-size: 13px; }
+.reveal-btn { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: var(--meta); padding: 4px; display: flex; }
+.reveal-btn:hover { color: var(--fg-2); }
+.toggle-row { display: flex; align-items: center; gap: 10px; }
+.toggle { position: relative; width: 38px; height: 22px; flex: none; }
+.toggle input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.toggle .track { position: absolute; inset: 0; background: rgba(255,255,255,0.1); border-radius: 999px; border: 1px solid var(--border); transition: background var(--motion-fast); }
+.toggle .thumb { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--meta); transition: transform var(--motion-fast) var(--ease-standard), background var(--motion-fast); }
+.toggle input:checked + .track { background: rgba(39,166,68,0.25); border-color: rgba(39,166,68,0.4); }
+.toggle input:checked + .track + .thumb { transform: translateX(16px); background: var(--success); }
+.toggle-label { font-size: var(--text-sm); color: var(--fg-2); }
+
+details.collapsible { border: 1px solid var(--border-soft); border-radius: var(--radius-md); margin-bottom: var(--space-5); background: rgba(255,255,255,0.012); }
+details.collapsible summary { list-style: none; cursor: pointer; padding: var(--space-3) var(--space-4); display: flex; align-items: center; justify-content: space-between; font-size: var(--text-xs); font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-2); }
+details.collapsible summary::-webkit-details-marker { display: none; }
+details.collapsible summary .sub { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--meta); font-size: 11px; }
+details.collapsible summary .chev { transition: transform var(--motion-fast) var(--ease-standard); color: var(--meta); }
+details.collapsible[open] summary .chev { transform: rotate(180deg); }
+details.collapsible .details-body { padding: 0 var(--space-4) var(--space-4); }
+
+.panel-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); padding-top: var(--space-2); }
+.panel-actions .inline-error { margin-top: 0; margin-right: auto; }
+
+/* ── Danger zone ──────────────────────────────────────────────────── */
+.danger-zone { border: 1px solid rgba(220,38,38,0.3); border-radius: var(--radius-md); background: rgba(220,38,38,0.035); padding: var(--space-4); margin-top: var(--space-6); }
+.danger-zone > h4 { font-size: var(--text-xs); font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: #ff9d9d; margin-bottom: var(--space-3); }
+.danger-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) 0; border-top: 1px solid rgba(220,38,38,0.15); flex-wrap: wrap; }
+.danger-row:first-of-type { border-top: none; }
+.danger-row .desc strong { color: var(--fg-2); font-size: var(--text-sm); font-weight: 590; display: block; }
+.danger-row .desc p { color: var(--meta); font-size: 12px; margin-top: 2px; }
+.danger-action { flex: none; }
+.confirm-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.confirm-inline span { font-size: 12px; color: #ffb3b3; }
+.confirm-inline input { background: rgba(255,255,255,0.03); border: 1px solid rgba(220,38,38,0.4); border-radius: var(--radius-sm); padding: 6px 9px; color: var(--fg); font-family: var(--font-mono); font-size: 12px; width: 190px; }
+.confirm-inline .inline-error { margin-top: 0; width: 100%; }
+.key-reveal-box { background: rgba(255,255,255,0.03); border: 1px solid rgba(94,106,210,0.4); border-radius: var(--radius-md); padding: var(--space-3); max-width: 420px; }
+.key-warning { display: flex; align-items: center; gap: 6px; color: #f4cc4b; font-size: 11px; font-weight: 590; margin-bottom: 8px; }
+.key-value-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.key-value { flex: 1; background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-family: var(--font-mono); font-size: 12px; color: var(--fg); word-break: break-all; }
+
+/* ── Add tenant form ──────────────────────────────────────────────── */
+.add-form { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-5); margin-top: var(--space-5); animation: expandIn var(--motion-base) var(--ease-standard); }
+.add-form h3 { font-size: var(--text-base); font-weight: 590; color: var(--fg); margin-bottom: var(--space-4); }
+.add-form .field-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
+.add-form .inline-error { margin-bottom: var(--space-4); }
+
+/* ── Documents view ───────────────────────────────────────────────── */
+.docs-layout { display: grid; grid-template-columns: minmax(0,1fr); gap: var(--space-5); }
+.docs-toolbar { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); flex-wrap: wrap; }
+.select-wrap select {
+  background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 8px 30px 8px 10px; color: var(--fg); font-size: var(--text-sm); min-width: 220px;
+}
+.dropzone {
+  border: 1.5px dashed var(--border); border-radius: var(--radius-lg); padding: var(--space-8);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3);
+  text-align: center; background: rgba(255,255,255,0.012); transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+.dropzone.dragover { border-color: var(--accent); background: rgba(94,106,210,0.06); }
+.dropzone .dz-icon { width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.04); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.dropzone strong { color: var(--fg); font-size: var(--text-sm); font-weight: 590; }
+.dropzone p { color: var(--meta); font-size: 12px; }
+.dropzone .chosen-file { font-family: var(--font-mono); font-size: 12px; color: var(--accent-hover); }
+.upload-options { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-top: var(--space-4); flex-wrap: wrap; }
+.warn-check { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); transition: border-color var(--motion-fast), background var(--motion-fast); cursor: pointer; }
+.warn-check input { margin-top: 2px; accent-color: var(--danger); }
+.warn-check span { font-size: 12px; color: var(--muted); }
+.warn-check.active { border-color: rgba(220,38,38,0.45); background: rgba(220,38,38,0.06); }
+.warn-check.active span { color: #ffb3b3; font-weight: 510; }
+.progress { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow: hidden; position: relative; }
+.progress-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.25s var(--ease-standard); }
+.progress-fill.striped { background-image: linear-gradient(45deg, rgba(255,255,255,0.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0.15) 75%, transparent 75%, transparent); background-size: 22px 22px; animation: stripe 0.9s linear infinite; }
+@keyframes stripe { to { background-position: 22px 0; } }
+.indexing-status { margin-top: var(--space-4); background: rgba(255,255,255,0.02); border: 1px solid var(--border-soft); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); }
+.indexing-status .row-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.indexing-status .fname { font-family: var(--font-mono); font-size: 12px; color: var(--fg-2); }
+.indexing-status .count { font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+.indexing-status .err-text { display: block; margin-top: 8px; }
+
+.data-table { width: 100%; border-collapse: collapse; margin-top: var(--space-5); }
+.data-table-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.data-table th { text-align: left; font-size: 11px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--meta); padding: 10px var(--space-4); border-bottom: 1px solid var(--border-soft); background: rgba(255,255,255,0.015); }
+.data-table td { padding: 11px var(--space-4); border-bottom: 1px solid var(--border-soft); font-size: var(--text-sm); color: var(--fg-2); }
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: rgba(255,255,255,0.02); }
+.file-name { font-family: var(--font-mono); font-size: 13px; color: var(--fg); }
+.chunk-count { font-family: var(--font-mono); color: var(--muted); }
+.err-text { color: #ff8a8a; font-size: 12px; }
+.ts { font-family: var(--font-mono); font-size: 12px; color: var(--meta); }
+
+/* ── Jobs view ────────────────────────────────────────────────────── */
+.job-progress-cell { display: flex; align-items: center; gap: 8px; min-width: 140px; }
+.job-progress-cell .progress { flex: 1; width: 90px; }
+.job-progress-cell .count { font-size: 11px; color: var(--meta); font-family: var(--font-mono); white-space: nowrap; }
+
+/* ── Empty state ──────────────────────────────────────────────────── */
+.empty-state { padding: var(--space-8); text-align: center; color: var(--meta); font-size: var(--text-sm); }
+.empty-state .btn { margin-top: var(--space-3); }
+
+/* ── Toasts ───────────────────────────────────────────────────────── */
+.toast-stack { position: fixed; bottom: var(--space-5); right: var(--space-5); display: flex; flex-direction: column; gap: 8px; z-index: 100; }
+.toast { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 14px; font-size: 13px; color: var(--fg-2); box-shadow: var(--elev-raised); display: flex; align-items: center; gap: 8px; max-width: 320px; animation: toastIn var(--motion-base) var(--ease-standard); }
+@keyframes toastIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.toast.success { border-color: rgba(39,166,68,0.35); }
+.toast.success .toast-dot { background: var(--success); }
+.toast.error { border-color: rgba(220,38,38,0.35); }
+.toast.error .toast-dot { background: var(--danger); }
+.toast-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+
+/* ── Responsive ───────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; flex-direction: row; align-items: center; gap: var(--space-4); overflow-x: auto; }
+  .sidebar-nav { flex-direction: row; }
+  .sidebar-footer { flex-direction: row; margin: 0; border: none; padding: 0; margin-left: auto; }
+  .main { padding: var(--space-4); }
+  .tt-grid { --cols: 26px minmax(120px,1fr) 0px 0px 88px 0px 0px 26px; }
+  .tt-cell.expertise, .tt-cell.created, .tt-head span:nth-child(3), .tt-head span:nth-child(6), .tt-head span:nth-child(7), .wh-cell { display: none; }
+  .field-grid, .add-form .field-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div id="login-screen" class="login-screen" data-od-id="login-screen">
+  <div class="login-card">
+    <div class="login-mark">
+      <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><line x1="12" y1="7" x2="12" y2="11"></line><line x1="8" y1="16" x2="8" y2="16"></line><line x1="16" y1="16" x2="16" y2="16"></line></svg>
+    </div>
+    <h1>langraph-bot admin</h1>
+    <p class="sub">Enter the operator key to continue.</p>
+    <form id="login-form">
+      <div class="login-field">
+        <label for="login-password">Operator key</label>
+        <input type="password" id="login-password" data-od-id="login-password-input" placeholder="••••••••••••" autocomplete="current-password" autofocus>
       </div>
-      <form @submit.prevent="login()">
-        <div class="mb-4">
-          <label class="block text-xs font-medium text-gray-700 mb-1">Operator key</label>
-          <input
-            x-model="loginKey"
-            type="password"
-            autocomplete="current-password"
-            class="field"
-            placeholder="••••••••••••••••••••••••"
-            autofocus
-            required
-          >
-        </div>
-        <div x-show="loginError" role="alert" class="mb-3 text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2" x-text="loginError"></div>
-        <button
-          type="submit"
-          :disabled="loginLoading"
-          class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-        >
-          <span x-show="!loginLoading">Sign in</span>
-          <span x-show="loginLoading">Verifying...</span>
-        </button>
-      </form>
-      <p class="text-xs text-gray-400 text-center mt-4">This key was generated by your system administrator</p>
+      <div class="login-error" id="login-error"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg><span id="login-error-text">Operator key required.</span></div>
+      <button type="submit" class="btn btn-primary login-submit" data-od-id="login-submit-btn" id="login-submit">Unlock</button>
+    </form>
+  </div>
+</div>
+
+<div id="app-shell" class="app-shell hidden">
+  <aside class="sidebar" data-od-id="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-mark">L</div>
+      <div class="brand-text"><strong>langraph-bot</strong><span>admin</span></div>
+    </div>
+    <nav class="sidebar-nav" data-od-id="sidebar-nav" id="sidebar-nav">
+      <button class="nav-item active" data-tab="tenants" data-od-id="nav-tenants">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+        Tenants
+      </button>
+      <button class="nav-item" data-tab="documents" data-od-id="nav-documents">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+        Documents
+      </button>
+      <button class="nav-item" data-tab="jobs" data-od-id="nav-jobs">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+        Jobs
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="env-tag">production</div>
+      <button class="nav-item" data-action="logout" data-od-id="logout-btn">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+        Log out
+      </button>
+    </div>
+  </aside>
+  <main class="main" id="main-view" data-od-id="main-view"></main>
+</div>
+
+<div class="toast-stack" id="toast-stack"></div>
+
+<script>
+/* ── Icons ────────────────────────────────────────────────────────── */
+const ICON = {
+  chevronRight: '<polyline points="9 18 15 12 9 6"></polyline>',
+  chevronDown: '<polyline points="6 9 12 15 18 9"></polyline>',
+  eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>',
+  eyeOff: '<path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.8 21.8 0 0 1 5.06-6.06M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.8 21.8 0 0 1-2.16 3.19M14.12 14.12a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>',
+  trash: '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>',
+  refresh: '<polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>',
+  x: '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>',
+  alert: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>',
+};
+function ic(name, cls) { return `<svg class="icon ${cls||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[name]}</svg>`; }
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+function fmtDate(iso) { if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }); }
+function fmtTime(iso) { if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }); }
+
+/* ── Auth / API layer ─────────────────────────────────────────────── */
+const OPERATOR_KEY_STORAGE = 'lgb_admin_operator_key';
+function operatorKey() { return localStorage.getItem(OPERATOR_KEY_STORAGE) || ''; }
+async function api(path, opts) {
+  opts = opts || {};
+  const headers = Object.assign({ 'X-Operator-Key': operatorKey() }, opts.headers || {});
+  const res = await fetch(path, Object.assign({}, opts, { headers }));
+  let data = null;
+  try { data = await res.json(); } catch { data = null; }
+  if (!res.ok) {
+    const err = new Error((data && data.detail) || `Request failed (${res.status})`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+async function verifyKey(key) {
+  const res = await fetch('/admin/tenants', { headers: { 'X-Operator-Key': key } });
+  return res.ok;
+}
+
+/* ── State ────────────────────────────────────────────────────────── */
+const state = {
+  activeTab: 'tenants',
+  tenants: [],
+  tenantsLoading: false,
+  tenantsError: '',
+  expandedTenant: null,
+  addTenantOpen: false,
+  addTenantSaving: false,
+  addTenantError: '',
+  addTenantResult: null,
+  revealed: new Set(),
+  saveLoading: new Set(),
+  saveError: {},
+  webhookStatus: {},
+  webhookChecking: new Set(),
+  regenState: {},
+  regenKey: {},
+  regenError: {},
+  deleteState: {},
+  deleteError: {},
+  flashSlug: null,
+
+  docsTenant: '',
+  docsFile: null,
+  docsReplaceAll: false,
+  docsUploading: false,
+  docsProgress: { done: 0, total: 0, filename: '', status: '' },
+  docsUploadError: '',
+  chunkFiles: [],
+  chunkFilesLoading: false,
+  chunkFilesError: '',
+  deletingFile: null,
+
+  jobs: [],
+  jobsLoading: false,
+  jobsFilter: 'all',
+};
+
+/* ── Toasts ───────────────────────────────────────────────────────── */
+function toast(msg, type) {
+  const stack = document.getElementById('toast-stack');
+  const el = document.createElement('div');
+  el.className = `toast ${type||''}`;
+  el.innerHTML = `<span class="toast-dot"></span><span>${esc(msg)}</span>`;
+  stack.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 200ms'; setTimeout(() => el.remove(), 200); }, 3200);
+}
+
+/* ── Login ────────────────────────────────────────────────────────── */
+function showApp() {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('app-shell').classList.remove('hidden');
+}
+
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('login-password');
+  const errBox = document.getElementById('login-error');
+  const btn = document.getElementById('login-submit');
+  const val = input.value.trim();
+  if (!val) {
+    document.getElementById('login-error-text').textContent = 'Operator key required.';
+    errBox.classList.add('show');
+    input.focus();
+    return;
+  }
+  errBox.classList.remove('show');
+  btn.disabled = true;
+  btn.textContent = 'Verifying…';
+  try {
+    const ok = await verifyKey(val);
+    if (!ok) throw new Error('bad key');
+    localStorage.setItem(OPERATOR_KEY_STORAGE, val);
+    input.value = '';
+    showApp();
+    await bootstrap();
+  } catch {
+    document.getElementById('login-error-text').textContent = 'Invalid operator key. Try again.';
+    errBox.classList.add('show');
+    input.focus();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Unlock';
+  }
+});
+
+/* ── Nav ──────────────────────────────────────────────────────────── */
+document.getElementById('sidebar-nav').addEventListener('click', (e) => {
+  const btn = e.target.closest('.nav-item');
+  if (!btn) return;
+  state.activeTab = btn.dataset.tab;
+  state.expandedTenant = null;
+  state.addTenantOpen = false;
+  render();
+  if (state.activeTab === 'documents') {
+    if (!state.docsTenant && state.tenants.length) state.docsTenant = state.tenants[0].slug;
+    if (state.docsTenant) fetchChunkFiles();
+  } else if (state.activeTab === 'jobs') {
+    fetchJobs();
+  }
+});
+document.querySelector('.sidebar-footer').addEventListener('click', (e) => {
+  if (e.target.closest('[data-action="logout"]')) {
+    localStorage.removeItem(OPERATOR_KEY_STORAGE);
+    location.reload();
+  }
+});
+
+/* ── Render root ──────────────────────────────────────────────────── */
+function render() {
+  document.querySelectorAll('.nav-item[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === state.activeTab));
+  const main = document.getElementById('main-view');
+  if (state.activeTab === 'tenants') main.innerHTML = renderTenantsView();
+  else if (state.activeTab === 'documents') main.innerHTML = renderDocumentsView();
+  else main.innerHTML = renderJobsView();
+  bindViewEvents();
+  if (state.flashSlug) {
+    const row = main.querySelector(`.tt-row[data-slug="${CSS.escape(state.flashSlug)}"]`);
+    if (row) row.classList.add('flash');
+    state.flashSlug = null;
+  }
+}
+
+/* ── Bootstrap ────────────────────────────────────────────────────── */
+async function bootstrap() {
+  await fetchTenants();
+  if (!state.docsTenant && state.tenants.length) state.docsTenant = state.tenants[0].slug;
+  render();
+}
+
+async function fetchTenants() {
+  state.tenantsLoading = true;
+  state.tenantsError = '';
+  render();
+  try {
+    state.tenants = await api('/admin/tenants');
+  } catch (err) {
+    state.tenantsError = err.message;
+  }
+  state.tenantsLoading = false;
+  render();
+}
+
+/* ── Tenants view ─────────────────────────────────────────────────── */
+function planBadge(plan) { return `<span class="badge badge-plan-${plan}">${esc(plan)}</span>`; }
+function statusBadge(active) { return `<span class="badge badge-status-${active?'active':'inactive'}"><span class="dot" style="background:${active?'#4fd977':'#62666d'}"></span>${active?'active':'inactive'}</span>`; }
+function webhookBadge(wh) {
+  const labels = { registered:'registered', mismatch:'mismatch', unknown:'unknown', error:'error' };
+  const dotColor = { registered:'#4fd977', mismatch:'#f4cc4b', unknown:'#62666d', error:'#ff8a8a' };
+  const key = labels[wh] ? wh : 'unknown';
+  return `<span class="badge badge-wh-${key}"><span class="dot" style="background:${dotColor[key]}"></span>${labels[key]}</span>`;
+}
+
+function renderTenantsView() {
+  const activeCount = state.tenants.filter(t => t.active).length;
+  return `
+  <div class="view-header">
+    <div><h2 data-od-id="tenants-heading">Tenants</h2><p>${state.tenants.length} tenants · ${activeCount} active</p></div>
+    <div class="toolbar">
+      <button class="btn btn-primary" data-action="toggle-add-tenant" data-od-id="add-tenant-btn">${ic('plus')} Add tenant</button>
     </div>
   </div>
+  ${state.addTenantOpen ? renderAddTenantForm() : ''}
+  <div class="table-card tt-grid" data-od-id="tenants-table">
+    <div class="tt-head">
+      <span></span><span>Slug</span><span>Expertise</span><span>Plan</span><span>Status</span><span>Webhook</span><span>Created</span><span></span>
+    </div>
+    ${state.tenantsLoading ? `<div class="empty-state">Loading tenants…</div>` : ''}
+    ${!state.tenantsLoading && state.tenantsError ? `<div class="empty-state">${esc(state.tenantsError)}<br><button class="btn btn-ghost btn-sm" data-action="retry-tenants">Retry</button></div>` : ''}
+    ${!state.tenantsLoading && !state.tenantsError && state.tenants.length === 0 ? `<div class="empty-state">No tenants yet.<br><button class="btn btn-primary btn-sm" data-action="toggle-add-tenant">Create the first one</button></div>` : ''}
+    ${!state.tenantsLoading && !state.tenantsError ? state.tenants.map(t => renderTenantRow(t)).join('') : ''}
+  </div>`;
+}
 
-  <!-- App shell -->
-  <div x-show="authenticated">
+function renderTenantRow(t) {
+  const expanded = state.expandedTenant === t.slug;
+  const checking = state.webhookChecking.has(t.slug);
+  const wh = state.webhookStatus[t.slug] || 'unknown';
+  return `
+  <div class="tt-row ${expanded?'expanded':''}" data-slug="${esc(t.slug)}" data-action="toggle-expand" data-od-id="tenant-row-${esc(t.slug)}">
+    <span class="tt-chevron">${ic('chevronRight')}</span>
+    <span class="tt-cell slug">${esc(t.slug)}</span>
+    <span class="tt-cell expertise">${esc(t.expertise_area || '—')}</span>
+    <span class="tt-cell">${planBadge(t.plan)}</span>
+    <span class="tt-cell">${statusBadge(t.active)}</span>
+    <span class="tt-cell wh-cell">${webhookBadge(wh)}<button class="recheck-btn" data-action="recheck-webhook" data-slug="${esc(t.slug)}" data-od-id="webhook-recheck-${esc(t.slug)}" title="Recheck webhook">${ic('refresh', checking?'spinning':'')}</button></span>
+    <span class="tt-cell created">${fmtDate(t.created_at)}</span>
+    <span></span>
+  </div>
+  ${expanded ? `<div class="expand-wrap" data-od-id="expand-panel-${esc(t.slug)}">${renderExpandPanel(t)}</div>` : ''}`;
+}
 
-    <!-- Nav -->
-    <nav class="bg-white border-b border-gray-200 sticky top-0 z-40">
-      <div class="max-w-5xl mx-auto px-4 flex items-center justify-between h-13 py-2">
-        <div class="flex items-center gap-2">
-          <div class="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
-            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
-            </svg>
-          </div>
-          <span class="font-semibold text-gray-900 text-sm hidden sm:block">Admin Panel</span>
-        </div>
+function pwField(label, key, tenant, placeholder) {
+  const revealKey = `${tenant.slug}:${key}`;
+  const revealed = state.revealed.has(revealKey);
+  return `
+  <div class="field">
+    <label>${label}</label>
+    <div class="field-pw-wrap">
+      <input type="${revealed?'text':'password'}" data-field="${key}" placeholder="${placeholder}" autocomplete="off">
+      <button type="button" class="reveal-btn" data-action="toggle-reveal" data-key="${revealKey}">${ic(revealed?'eyeOff':'eye')}</button>
+    </div>
+  </div>`;
+}
 
-        <nav aria-label="Main navigation" class="flex items-center gap-1">
-          <button @click="setTab('tenants')" :aria-current="tab==='tenants' ? 'page' : false" :class="tab==='tenants' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-100'" class="px-3 py-1.5 rounded-lg text-sm transition-colors">Tenants</button>
-          <button @click="setTab('upload')" :aria-current="tab==='upload' ? 'page' : false" :class="tab==='upload' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-100'" class="px-3 py-1.5 rounded-lg text-sm transition-colors">Documents</button>
-          <button @click="setTab('jobs')" :aria-current="tab==='jobs' ? 'page' : false" :class="tab==='jobs' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-100'" class="px-3 py-1.5 rounded-lg text-sm transition-colors">Jobs</button>
-        </nav>
-
-        <button @click="logout()" class="text-xs text-gray-400 hover:text-gray-600 transition-colors px-2 py-1 rounded hover:bg-gray-100">Sign out</button>
+function renderExpandPanel(t) {
+  const regenState = state.regenState[t.slug] || 'idle';
+  const deleteState = state.deleteState[t.slug] || 'idle';
+  const saving = state.saveLoading.has(t.slug);
+  const saveErr = state.saveError[t.slug];
+  const regenErr = state.regenError[t.slug];
+  const deleteErr = state.deleteError[t.slug];
+  return `
+  <div class="panel-section">
+    <div class="panel-section-title">Telegram credentials <span class="hint">leave blank to keep current</span></div>
+    <div class="field-grid">
+      ${pwField('Bot token', 'bot_token', t, '••••••••••••••••')}
+      ${pwField('Webhook secret', 'webhook_secret', t, '••••••••••••••••')}
+    </div>
+  </div>
+  <div class="panel-section">
+    <div class="panel-section-title">Configuration</div>
+    <div class="field-grid">
+      <div class="field"><label>Plan</label>
+        <select data-field="plan">
+          ${['free','basic','pro'].map(p=>`<option value="${p}" ${t.plan===p?'selected':''}>${p}</option>`).join('')}
+        </select>
       </div>
-    </nav>
-
-    <!-- Content -->
-    <main class="max-w-5xl mx-auto px-4 py-6">
-
-      <!-- ── TENANTS ── -->
-      <div x-show="tab === 'tenants'">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-semibold text-gray-900">Tenants</h2>
-          <button @click="showAddTenant = !showAddTenant" :class="showAddTenant ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-blue-600 text-white hover:bg-blue-700'" class="text-sm px-3 py-1.5 rounded-lg transition-colors">
-            <span x-show="!showAddTenant">+ Add</span>
-            <span x-show="showAddTenant">✕ Cancel</span>
-          </button>
-        </div>
-
-        <!-- Add form -->
-        <div x-show="showAddTenant" x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0" class="bg-white rounded-xl border border-gray-200 p-5 mb-4">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-sm font-semibold text-gray-900">New tenant</h3>
-            <button type="button" @click="showAddTenant=false; resetTenantForm()" class="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded hover:bg-gray-100">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-            </button>
-          </div>
-          <form @submit.prevent="createTenant()" class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <label class="block text-xs font-medium text-gray-700 mb-1">Slug <span class="text-red-500">*</span></label>
-              <input x-model="newTenant.slug" type="text" required placeholder="my-org" pattern="[a-z0-9\-]+" title="Lowercase letters, numbers and hyphens only" class="field">
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-gray-700 mb-1">Telegram Bot Token <span class="text-red-500">*</span></label>
-              <input x-model="newTenant.bot_token" type="text" required placeholder="123456:ABC-DEF1234..." class="field">
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-gray-700 mb-1">Webhook Secret <span class="text-red-500">*</span></label>
-              <input x-model="newTenant.webhook_secret" type="text" required placeholder="my-secure-secret" class="field">
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-gray-700 mb-1">Plan</label>
-              <select x-model="newTenant.plan" class="field">
-                <option value="free">Free</option>
-                <option value="basic">Basic</option>
-                <option value="pro">Pro</option>
-              </select>
-            </div>
-            <div class="sm:col-span-2">
-              <label class="block text-xs font-medium text-gray-700 mb-1">Expertise area</label>
-              <input x-model="newTenant.expertise_area" type="text" placeholder="histological diagnosis" class="field">
-            </div>
-            <div class="sm:col-span-2">
-              <label class="block text-xs font-medium text-gray-700 mb-1">Specialization context (jargon/glossary for the model)</label>
-              <textarea x-model="newTenant.specialization_context" maxlength="1000" rows="3" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." class="field"></textarea>
-            </div>
-            <div class="sm:col-span-2">
-              <label class="block text-xs font-medium text-gray-700 mb-1">Contact URL</label>
-              <input x-model="newTenant.contact_url" type="url" placeholder="https://wa.me/..." class="field">
-            </div>
-            <div x-show="tenantError" role="alert" class="sm:col-span-2 text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2" x-text="tenantError"></div>
-            <div x-show="tenantSuccess" class="sm:col-span-2 rounded-lg bg-green-50 border border-green-200 px-4 py-3">
-              <p class="text-sm text-green-700 font-medium" x-text="tenantSuccess"></p>
-              <template x-if="newApiKey">
-                <div class="mt-2">
-                  <p class="text-xs text-green-600 mb-1">API Key (save this — it won't be shown again):</p>
-                  <code class="block text-xs bg-green-100 rounded px-2 py-1.5 break-all font-mono text-green-800" x-text="newApiKey"></code>
-                </div>
-              </template>
-            </div>
-            <div class="sm:col-span-2 flex gap-2 pt-1">
-              <button type="submit" :disabled="tenantLoading" class="bg-blue-600 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
-                <span x-show="!tenantLoading">Create tenant</span>
-                <span x-show="tenantLoading">Creating...</span>
-              </button>
-              <button type="button" @click="showAddTenant=false; resetTenantForm()" class="text-sm text-gray-600 px-4 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">Cancel</button>
-            </div>
-          </form>
-        </div>
-
-        <!-- Table -->
-        <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div x-show="tenantsLoading" class="flex items-center justify-center py-16 text-gray-400 text-sm gap-2">
-            <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-            Loading...
-          </div>
-          <div x-show="!tenantsLoading && tenants.length === 0" class="flex flex-col items-center justify-center py-16 text-gray-400">
-            <svg class="w-12 h-12 mb-3 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
-            <p class="text-sm font-medium text-gray-500">No tenants yet</p>
-            <button @click="showAddTenant=true" class="mt-2 text-sm text-blue-600 hover:underline">Create the first one</button>
-          </div>
-          <div x-show="!tenantsLoading && tenants.length > 0" class="overflow-x-auto">
-            <table class="w-full text-sm" aria-label="Tenant list">
-              <thead class="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Slug</th>
-                  <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">Expertise</th>
-                  <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Plan</th>
-                  <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">Webhook</th>
-                  <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">Created</th>
-                  <th class="px-4 py-3 w-8" aria-hidden="true"></th>
-                </tr>
-              </thead>
-              <!-- One <tbody> per tenant: data row + edit panel row -->
-              <template x-for="t in tenants" :key="t.id">
-                <tbody>
-                  <!-- Data row -->
-                  <tr
-                    @click="toggleExpand(t)"
-                    @keydown.enter.prevent="toggleExpand(t)"
-                    @keydown.escape.prevent="cancelEdit()"
-                    tabindex="0"
-                    class="hover:bg-gray-50 transition-colors cursor-pointer select-none border-b border-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
-                    :class="{
-                      'bg-blue-50/50 border-gray-200': expandedId === t.id,
-                      'flash-success': flashRowId === t.id
-                    }"
-                  >
-                    <td class="px-4 py-3 font-mono text-blue-700 font-medium text-xs" x-text="t.slug"></td>
-                    <td class="px-4 py-3 text-gray-600 text-xs hidden sm:table-cell max-w-xs truncate" x-text="t.expertise_area || '—'"></td>
-                    <td class="px-4 py-3">
-                      <span :class="{'bg-gray-100 text-gray-600':t.plan==='free','bg-blue-100 text-blue-700':t.plan==='basic','bg-purple-100 text-purple-700':t.plan==='pro'}" class="px-2 py-0.5 rounded-full text-xs font-medium" x-text="t.plan"></span>
-                    </td>
-                    <td class="px-4 py-3">
-                      <span :class="t.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'" class="px-2 py-0.5 rounded-full text-xs font-medium" x-text="t.active ? 'Active' : 'Inactive'"></span>
-                    </td>
-                    <!-- Webhook badge -->
-                    <td class="px-4 py-3 hidden sm:table-cell">
-                      <div class="flex items-center gap-1.5">
-                        <template x-if="(webhookStatus[t.slug] || 'unknown') !== 'checking'">
-                          <span class="w-2 h-2 rounded-full flex-shrink-0" :class="{
-                            'bg-green-500': (webhookStatus[t.slug] || 'unknown') === 'registered',
-                            'bg-yellow-500': (webhookStatus[t.slug] || 'unknown') === 'mismatch',
-                            'bg-gray-400': (webhookStatus[t.slug] || 'unknown') === 'unknown',
-                            'bg-red-400':   (webhookStatus[t.slug] || 'unknown') === 'error'
-                          }"></span>
-                        </template>
-                        <template x-if="(webhookStatus[t.slug] || 'unknown') === 'checking'">
-                          <svg class="animate-spin w-3 h-3 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                          </svg>
-                        </template>
-                        <span class="text-xs" :class="{
-                          'text-green-700': (webhookStatus[t.slug] || 'unknown') === 'registered',
-                          'text-yellow-700': (webhookStatus[t.slug] || 'unknown') === 'mismatch',
-                          'text-gray-500':  (webhookStatus[t.slug] || 'unknown') === 'unknown',
-                          'text-red-600':   (webhookStatus[t.slug] || 'unknown') === 'error',
-                          'text-blue-500':  (webhookStatus[t.slug] || 'unknown') === 'checking'
-                        }" x-text="webhookLabel(t.slug)"></span>
-                        <button
-                          @click.stop="checkWebhook(t.slug, $event)"
-                          :aria-label="'Check webhook status for ' + t.slug"
-                          :disabled="(webhookStatus[t.slug] || 'unknown') === 'checking'"
-                          class="p-2.5 -m-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-40"
-                        >
-                          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
-                    <td class="px-4 py-3 text-gray-400 text-xs hidden md:table-cell" x-text="fmtDate(t.created_at)"></td>
-                    <!-- Chevron -->
-                    <td class="px-4 py-3 text-right">
-                      <svg class="w-4 h-4 text-gray-400 inline-block transition-transform duration-150"
-                        :class="expandedId === t.id ? 'rotate-90' : ''"
-                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                      </svg>
-                    </td>
-                  </tr>
-
-                  <!-- Edit panel row -->
-                  <tr x-show="expandedId === t.id" style="display:none">
-                    <td colspan="7" class="p-0 border-b border-gray-200">
-                      <div
-                        :id="'edit-panel-' + t.id"
-                        class="bg-white border-x border-b border-gray-200 rounded-b-xl overflow-hidden"
-                        x-show="expandedId === t.id"
-                        x-transition:enter="transition ease-out duration-150"
-                        x-transition:enter-start="opacity-0 -translate-y-1"
-                        x-transition:enter-end="opacity-100 translate-y-0"
-                      >
-                        <div class="p-5">
-
-                          <!-- Panel header -->
-                          <div class="flex items-center justify-between mb-5">
-                            <span class="font-mono text-blue-600 font-semibold text-sm" x-text="t.slug"></span>
-                            <div class="flex items-center gap-2">
-                              <button
-                                type="button"
-                                @click="cancelEdit()"
-                                :disabled="editLoading"
-                                class="text-sm text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
-                              >Cancel</button>
-                              <button
-                                type="button"
-                                @click="saveEdit(t)"
-                                :disabled="!editDirty || editLoading"
-                                class="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors flex items-center gap-2"
-                              >
-                                <svg x-show="editLoading" class="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                                </svg>
-                                <span x-text="editLoading ? 'Saving…' : 'Save changes'"></span>
-                              </button>
-                            </div>
-                          </div>
-
-                          <!-- Error / webhook-not-registered banner -->
-                          <div x-show="editError" role="alert" class="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-3" x-text="editError"></div>
-                          <div x-show="editWebhookWarn" role="alert" class="mb-4 text-sm text-yellow-800 bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3">
-                            Webhook registration failed — check Telegram bot token and try again.
-                          </div>
-
-                          <!-- Section 1: Telegram -->
-                          <div class="mb-5">
-                            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Telegram</p>
-                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                              <div>
-                                <label class="block text-xs font-medium text-gray-700 mb-1" :for="'bot-token-' + t.id">Telegram Bot Token</label>
-                                <div class="relative">
-                                  <input
-                                    :id="'bot-token-' + t.id"
-                                    :type="revealBotToken ? 'text' : 'password'"
-                                    x-model="editForm.bot_token"
-                                    @input="markDirty()"
-                                    :disabled="editLoading"
-                                    placeholder="Enter new token to change (leave blank to keep current)"
-                                    aria-label="Telegram Bot Token"
-                                    autocomplete="off"
-                                    class="field pr-10"
-                                  >
-                                  <button type="button" @click="revealBotToken = !revealBotToken" :aria-label="revealBotToken ? 'Hide bot token' : 'Show bot token'" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1">
-                                    <svg x-show="!revealBotToken" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                    <svg x-show="revealBotToken" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/></svg>
-                                  </button>
-                                </div>
-                              </div>
-                              <div>
-                                <label class="block text-xs font-medium text-gray-700 mb-1" :for="'wh-secret-' + t.id">Webhook Secret</label>
-                                <div class="relative">
-                                  <input
-                                    :id="'wh-secret-' + t.id"
-                                    :type="revealWebhookSecret ? 'text' : 'password'"
-                                    x-model="editForm.webhook_secret"
-                                    @input="markDirty()"
-                                    :disabled="editLoading"
-                                    placeholder="Enter new secret to change (leave blank to keep current)"
-                                    aria-label="Webhook Secret"
-                                    autocomplete="off"
-                                    class="field pr-10"
-                                  >
-                                  <button type="button" @click="revealWebhookSecret = !revealWebhookSecret" :aria-label="revealWebhookSecret ? 'Hide webhook secret' : 'Show webhook secret'" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1">
-                                    <svg x-show="!revealWebhookSecret" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                    <svg x-show="revealWebhookSecret" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/></svg>
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <!-- Section 2: Configuration -->
-                          <div class="mb-5">
-                            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Configuration</p>
-                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                              <div>
-                                <label class="block text-xs font-medium text-gray-700 mb-1" :for="'plan-' + t.id">Plan</label>
-                                <select :id="'plan-' + t.id" x-model="editForm.plan" @change="markDirty()" :disabled="editLoading" class="field">
-                                  <option value="free">Free</option>
-                                  <option value="basic">Basic</option>
-                                  <option value="pro">Pro</option>
-                                </select>
-                              </div>
-                              <div>
-                                <label class="block text-xs font-medium text-gray-700 mb-1" :for="'expertise-' + t.id">Expertise area</label>
-                                <input :id="'expertise-' + t.id" type="text" x-model="editForm.expertise_area" @input="markDirty()" :disabled="editLoading" placeholder="histological diagnosis" class="field">
-                              </div>
-                              <div class="sm:col-span-2">
-                                <label class="block text-xs font-medium text-gray-700 mb-1" :for="'specialization-' + t.id">Specialization context (jargon/glossary for the model)</label>
-                                <textarea :id="'specialization-' + t.id" x-model="editForm.specialization_context" maxlength="1000" rows="3" @input="markDirty()" :disabled="editLoading" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." class="field"></textarea>
-                              </div>
-                              <div class="sm:col-span-2">
-                                <label class="block text-xs font-medium text-gray-700 mb-1" :for="'contact-' + t.id">Contact URL</label>
-                                <input :id="'contact-' + t.id" type="url" x-model="editForm.contact_url" @input="markDirty()" :disabled="editLoading" placeholder="https://wa.me/..." class="field">
-                              </div>
-                              <!-- Active toggle -->
-                              <div class="sm:col-span-2">
-                                <label class="flex items-center gap-3 cursor-pointer" :class="editLoading ? 'opacity-50' : ''">
-                                  <div class="relative flex-shrink-0">
-                                    <input
-                                      type="checkbox"
-                                      class="sr-only peer"
-                                      x-model="editForm.active"
-                                      @change="markDirty()"
-                                      :disabled="editLoading"
-                                      aria-label="Toggle tenant active state"
-                                    >
-                                    <div class="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-green-500 transition-colors duration-200"></div>
-                                    <div class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 peer-checked:translate-x-5"></div>
-                                  </div>
-                                  <span class="text-sm text-gray-700" x-text="editForm.active ? 'Active — Telegram delivers messages' : 'Inactive — webhook will be unregistered on save'"></span>
-                                </label>
-                              </div>
-                            </div>
-                          </div>
-
-                          <!-- Section 3: WhatsApp (collapsible) -->
-                          <div class="mb-5">
-                            <button
-                              type="button"
-                              @click="waExpanded = !waExpanded"
-                              class="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wider hover:text-gray-700 transition-colors"
-                            >
-                              <svg class="w-3.5 h-3.5 transition-transform duration-150" :class="waExpanded ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                              </svg>
-                              WhatsApp settings
-                            </button>
-                            <div
-                              x-show="waExpanded"
-                              x-transition:enter="transition ease-out duration-150"
-                              x-transition:enter-start="opacity-0 -translate-y-1"
-                              x-transition:enter-end="opacity-100 translate-y-0"
-                              class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
-                            >
-                              <div class="sm:col-span-2">
-                                <label class="block text-xs font-medium text-gray-700 mb-1" :for="'wa-phone-' + t.id">Phone Number ID</label>
-                                <input :id="'wa-phone-' + t.id" type="text" x-model="editForm.wa_phone_number_id" @input="markDirty()" :disabled="editLoading" placeholder="123456789012345" class="field">
-                              </div>
-                              <div>
-                                <label class="block text-xs font-medium text-gray-700 mb-1" :for="'wa-token-' + t.id">Access Token</label>
-                                <div class="relative">
-                                  <input :id="'wa-token-' + t.id" :type="revealWaToken ? 'text' : 'password'" x-model="editForm.wa_access_token" @input="markDirty()" :disabled="editLoading" placeholder="EAABs..." aria-label="WhatsApp Access Token" autocomplete="off" class="field pr-10">
-                                  <button type="button" @click="revealWaToken = !revealWaToken" :aria-label="revealWaToken ? 'Hide WA token' : 'Show WA token'" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                  </button>
-                                </div>
-                              </div>
-                              <div>
-                                <label class="block text-xs font-medium text-gray-700 mb-1" :for="'wa-secret-' + t.id">App Secret</label>
-                                <div class="relative">
-                                  <input :id="'wa-secret-' + t.id" :type="revealWaSecret ? 'text' : 'password'" x-model="editForm.wa_app_secret" @input="markDirty()" :disabled="editLoading" placeholder="app secret" aria-label="WhatsApp App Secret" autocomplete="off" class="field pr-10">
-                                  <button type="button" @click="revealWaSecret = !revealWaSecret" :aria-label="revealWaSecret ? 'Hide WA secret' : 'Show WA secret'" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                                  </button>
-                                </div>
-                              </div>
-                              <div class="sm:col-span-2">
-                                <label class="block text-xs font-medium text-gray-700 mb-1" :for="'wa-verify-' + t.id">Verify Token</label>
-                                <input :id="'wa-verify-' + t.id" type="text" x-model="editForm.wa_verify_token" @input="markDirty()" :disabled="editLoading" placeholder="my-verify-token" class="field">
-                              </div>
-                            </div>
-                          </div>
-
-                          <!-- Danger zone -->
-                          <div class="border-t border-red-100 mt-4 pt-4">
-                            <p class="text-xs font-semibold text-red-400 uppercase tracking-wider mb-3">Danger zone</p>
-                            <div class="flex flex-col gap-3">
-
-                              <!-- Regen API key -->
-                              <div>
-                                <template x-if="regenStep === 'initial'">
-                                  <button
-                                    type="button"
-                                    @click="startRegen()"
-                                    :disabled="editDirty || editLoading"
-                                    :title="editDirty ? 'Save or discard changes first' : ''"
-                                    class="text-sm text-gray-600 border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-                                  >
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                                    Regenerate API key
-                                  </button>
-                                </template>
-                                <template x-if="regenStep === 'confirm'">
-                                  <div class="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-700">
-                                    This immediately invalidates the current API key. Apps using it will stop working.
-                                    <div class="flex items-center gap-2 mt-2">
-                                      <button type="button" @click="doRegen(t)" class="bg-gray-800 text-white text-xs px-3 py-1.5 rounded-lg hover:bg-gray-900 transition-colors">Confirm</button>
-                                      <button type="button" @click="cancelRegen()" class="text-xs text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">Cancel</button>
-                                    </div>
-                                  </div>
-                                </template>
-                                <template x-if="regenStep === 'loading'">
-                                  <div class="flex items-center gap-2 text-sm text-gray-500">
-                                    <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-                                    Regenerating…
-                                  </div>
-                                </template>
-                                <template x-if="regenStep === 'error'">
-                                  <div class="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
-                                    <p class="text-sm text-red-700" x-text="regenError"></p>
-                                    <button type="button" @click="cancelRegen()" class="mt-1 text-xs text-red-600 underline">Try again</button>
-                                  </div>
-                                </template>
-                                <template x-if="regenStep === 'success'">
-                                  <div class="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
-                                    <p class="text-sm text-green-800 font-medium mb-2">New API key — save it now, it won't be shown again.</p>
-                                    <div class="flex items-center gap-2">
-                                      <code class="flex-1 text-xs bg-green-100 rounded px-2 py-1.5 break-all font-mono text-green-900" x-text="regenNewKey"></code>
-                                      <button type="button" @click="copyToClipboard(regenNewKey)" title="Copy" class="p-1.5 text-green-700 hover:bg-green-100 rounded flex-shrink-0">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-                                      </button>
-                                    </div>
-                                    <button type="button" @click="dismissRegen()" class="mt-2 text-xs text-green-700 underline hover:no-underline">I've saved this key</button>
-                                  </div>
-                                </template>
-                              </div>
-
-                              <!-- Delete tenant -->
-                              <div>
-                                <template x-if="deleteStep === 'initial'">
-                                  <button
-                                    type="button"
-                                    @click="startDelete()"
-                                    :disabled="editLoading"
-                                    class="text-sm text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 disabled:opacity-40 transition-colors flex items-center gap-1.5"
-                                  >
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                                    Delete tenant
-                                  </button>
-                                </template>
-                                <template x-if="deleteStep === 'confirm' || deleteStep === 'loading' || deleteStep === 'error'">
-                                  <div class="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
-                                    <p class="text-sm text-red-800 mb-3">
-                                      Type <code class="font-mono font-bold bg-red-100 px-1 rounded" x-text="t.slug"></code> to confirm permanent deletion of this tenant and all its data.
-                                    </p>
-                                    <div x-show="deleteError" role="alert" class="text-xs text-red-700 bg-red-100 rounded px-3 py-2 mb-2" x-text="deleteError"></div>
-                                    <input
-                                      type="text"
-                                      x-model="deleteInput"
-                                      :disabled="deleteStep === 'loading'"
-                                      :placeholder="t.slug"
-                                      aria-label="Type tenant slug to confirm deletion"
-                                      autocomplete="off"
-                                      class="field mb-2 font-mono text-xs"
-                                    >
-                                    <div class="flex items-center gap-2">
-                                      <button
-                                        type="button"
-                                        @click="doDelete(t)"
-                                        :disabled="deleteInput !== t.slug || deleteStep === 'loading'"
-                                        class="bg-red-600 text-white text-xs px-3 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-                                      >
-                                        <svg x-show="deleteStep === 'loading'" class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-                                        <span x-text="deleteStep === 'loading' ? 'Deleting…' : 'Delete'"></span>
-                                      </button>
-                                      <button type="button" @click="cancelDelete()" :disabled="deleteStep === 'loading'" class="text-xs text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-100 disabled:opacity-50 transition-colors">Cancel</button>
-                                    </div>
-                                  </div>
-                                </template>
-                              </div>
-
-                            </div>
-                          </div>
-
-                        </div><!-- /panel body -->
-                      </div><!-- /edit panel div -->
-                    </td>
-                  </tr>
-                </tbody>
-              </template>
-            </table>
-          </div>
+      <div class="field"><label>Expertise area</label><input type="text" data-field="expertise_area" value="${esc(t.expertise_area)}"></div>
+      <div class="field"><label>Contact URL</label><input type="url" data-field="contact_url" value="${esc(t.contact_url)}"></div>
+      <div class="field"><label>Status</label>
+        <div class="toggle-row" style="padding-top:6px">
+          <label class="toggle"><input type="checkbox" data-field="active" ${t.active?'checked':''}><span class="track"></span><span class="thumb"></span></label>
+          <span class="toggle-label">${t.active?'Active':'Inactive'}</span>
         </div>
       </div>
-
-      <!-- ── UPLOAD ── -->
-      <div x-show="tab === 'upload'">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">Upload document</h2>
-        <div class="bg-white rounded-xl border border-gray-200 p-6 max-w-xl">
-          <form @submit.prevent="uploadDoc()" class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Tenant <span class="text-red-500">*</span></label>
-              <select x-model="up.tenant" required class="field">
-                <option value="">Select tenant...</option>
-                <template x-for="t in tenants" :key="t.slug">
-                  <option :value="t.slug" x-text="t.slug + (t.expertise_area ? ' — ' + t.expertise_area : '')"></option>
-                </template>
-              </select>
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">File <span class="text-red-500">*</span></label>
-              <div
-                class="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-                :class="up.dragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/50'"
-                role="button"
-                tabindex="0"
-                :aria-label="up.file ? 'Selected file: ' + up.file.name + '. Click to change.' : 'Click or press Enter to select a file'"
-                @dragover.prevent="up.dragging=true"
-                @dragleave="up.dragging=false"
-                @drop.prevent="dropFile($event)"
-                @click="$refs.fileInput.click()"
-                @keydown.enter.prevent="$refs.fileInput.click()"
-                @keydown.space.prevent="$refs.fileInput.click()"
-              >
-                <template x-if="!up.file">
-                  <div>
-                    <svg class="w-10 h-10 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-                    <p class="text-sm text-gray-500">Drag here or <span class="text-blue-600 font-medium">click to select</span></p>
-                    <p class="text-xs text-gray-400 mt-1">PDF, Markdown or JSONL catalog (.pdf, .md, .jsonl)</p>
-                  </div>
-                </template>
-                <template x-if="up.file">
-                  <div class="flex items-center justify-center gap-2">
-                    <svg class="w-5 h-5 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                    <span class="text-sm text-blue-700 font-medium" x-text="up.file.name"></span>
-                    <button type="button" @click.stop="up.file=null" class="text-gray-400 hover:text-gray-600 ml-1">
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                    </button>
-                  </div>
-                </template>
-                <input x-ref="fileInput" type="file" accept=".pdf,.md,.jsonl" class="hidden" @change="up.file=$event.target.files[0]">
-              </div>
-            </div>
-
-            <!-- Auto-replace hint -->
-            <p class="text-xs text-gray-400 flex items-center gap-1.5">
-              <svg class="w-3.5 h-3.5 flex-shrink-0 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              Re-uploading a file with the same name replaces its previous embeddings automatically.
-            </p>
-
-            <!-- Replace-all-for-tenant option -->
-            <label class="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 cursor-pointer">
-              <input type="checkbox" x-model="up.replaceAll" class="mt-0.5">
-              <span class="text-xs text-amber-800">
-                <span class="font-medium">Replace ALL documents for this tenant.</span>
-                Deletes every previously indexed chunk (any filename) before indexing this upload — not just files with the same name. Use for a full catalog replacement.
-              </span>
-            </label>
-
-            <!-- Progress -->
-            <div x-show="up.jobId" class="rounded-xl border border-gray-200 bg-gray-50 p-4">
-              <div class="flex items-center justify-between mb-2">
-                <span class="text-sm font-medium text-gray-700">Indexing</span>
-                <span
-                  :class="{'bg-yellow-100 text-yellow-700':up.status==='PENDING'||up.status==='RUNNING','bg-green-100 text-green-700':up.status==='DONE','bg-red-100 text-red-700':up.status==='FAILED'}"
-                  class="px-2 py-0.5 rounded-full text-xs font-medium"
-                  x-text="up.status"
-                ></span>
-              </div>
-              <div class="w-full bg-gray-200 rounded-full h-1.5 mb-1">
-                <div class="h-1.5 rounded-full transition-all duration-500" :class="up.status==='FAILED'?'bg-red-500':'bg-blue-600'" :style="`width:${up.pct}%`"></div>
-              </div>
-              <div class="flex items-center justify-between">
-                <p class="text-xs text-gray-500">
-                  <span x-show="up.total > 0" x-text="`${up.done} / ${up.total} chunks`"></span>
-                  <span x-show="up.status==='DONE'" class="text-green-600 font-medium ml-1">Done</span>
-                  <span x-show="up.status==='FAILED'" class="text-red-600" x-text="' Error: ' + (up.err||'unknown')"></span>
-                </p>
-                <p class="text-xs text-gray-400 font-mono" x-text="up.jobId ? up.jobId.slice(0,8)+'...' : ''"></p>
-              </div>
-            </div>
-
-            <div x-show="up.uploadErr" role="alert" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2" x-text="up.uploadErr"></div>
-
-            <button
-              type="submit"
-              :disabled="up.loading || !up.file || !up.tenant"
-              class="bg-blue-600 text-white text-sm px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors"
-            >
-              <span x-show="!up.loading">Upload &amp; index</span>
-              <span x-show="up.loading" class="flex items-center gap-2">
-                <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-                Uploading...
-              </span>
-            </button>
-          </form>
-        </div>
-
-        <!-- Indexed files -->
-        <div class="mt-6 max-w-xl">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-gray-900">Indexed files</h3>
-            <div class="flex items-center gap-2">
-              <select x-model="chunksTenant" @change="fetchChunkFiles()" class="field text-sm w-auto">
-                <option value="">Select tenant…</option>
-                <template x-for="t in tenants" :key="t.slug">
-                  <option :value="t.slug" x-text="t.slug"></option>
-                </template>
-              </select>
-              <button @click="fetchChunkFiles()" :disabled="!chunksTenant" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors disabled:opacity-40" title="Refresh">
-                <svg :class="{'animate-spin': chunksLoading}" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-              </button>
-            </div>
-          </div>
-
-          <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div x-show="!chunksTenant" class="flex flex-col items-center justify-center py-10 text-gray-400 text-sm">
-              Select a tenant to see its indexed files
-            </div>
-            <div x-show="chunksTenant && chunksLoading" class="flex items-center justify-center py-10 text-gray-400 text-sm gap-2">
-              <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-              Loading…
-            </div>
-            <div x-show="chunksTenant && !chunksLoading && chunkFiles.length === 0" class="flex flex-col items-center justify-center py-10 text-gray-400 text-sm">
-              No indexed files for this tenant
-            </div>
-            <div x-show="chunksTenant && !chunksLoading && chunkFiles.length > 0">
-              <div x-show="chunksMsg" role="alert" class="px-4 py-2 text-xs" :class="chunksMsg.startsWith('Deleted') ? 'text-green-700 bg-green-50' : 'text-red-700 bg-red-50'" x-text="chunksMsg"></div>
-              <table class="w-full text-sm">
-                <thead class="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th class="text-left px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">File</th>
-                    <th class="text-right px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">Chunks</th>
-                    <th class="px-4 py-2 w-10" aria-hidden="true"></th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-100">
-                  <template x-for="f in chunkFiles" :key="f.filename">
-                    <tr class="hover:bg-gray-50 transition-colors">
-                      <td class="px-4 py-2.5">
-                        <span class="font-mono text-xs text-gray-800" x-text="f.filename"></span>
-                      </td>
-                      <td class="px-4 py-2.5 text-right">
-                        <span class="text-xs text-gray-500" x-text="f.chunk_count"></span>
-                      </td>
-                      <td class="px-4 py-2.5 text-right">
-                        <template x-if="chunksDeleting !== f.filename">
-                          <button
-                            @click="deleteChunkFile(f.filename)"
-                            class="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                            :title="'Delete chunks from ' + f.filename"
-                          >
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                          </button>
-                        </template>
-                        <template x-if="chunksDeleting === f.filename">
-                          <svg class="w-3.5 h-3.5 animate-spin text-red-500 mx-auto" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-                        </template>
-                      </td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+      <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea data-field="specialization_context" maxlength="1000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer...">${esc(t.specialization_context)}</textarea></div>
+      <div class="field full"><label>Tone description</label><textarea data-field="tone_description" placeholder="e.g. warm and casual, or professional and clinical">${esc(t.tone_description)}</textarea></div>
+    </div>
+  </div>
+  <details class="collapsible">
+    <summary><span>WhatsApp settings <span class="sub">secondary channel</span></span><span class="chev">${ic('chevronDown')}</span></summary>
+    <div class="details-body">
+      <div class="field-grid">
+        <div class="field"><label>Phone number ID</label><input type="text" class="mono" data-field="wa_phone_number_id" placeholder="leave blank to keep current"></div>
+        ${pwField('Access token', 'wa_access_token', t, 'leave blank to keep current')}
+        ${pwField('App secret', 'wa_app_secret', t, 'leave blank to keep current')}
+        <div class="field"><label>Verify token</label><input type="text" class="mono" data-field="wa_verify_token" placeholder="leave blank to keep current"></div>
       </div>
-
-      <!-- ── JOBS ── -->
-      <div x-show="tab === 'jobs'">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-semibold text-gray-900">Indexing jobs</h2>
-          <div class="flex items-center gap-2">
-            <select x-model="jobsFilter" @change="fetchJobs()" class="field text-sm w-auto">
-              <option value="">All tenants</option>
-              <template x-for="t in tenants" :key="t.slug"><option :value="t.slug" x-text="t.slug"></option></template>
-            </select>
-            <button @click="fetchJobs()" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors" title="Refresh">
-              <svg :class="{'animate-spin':jobsLoading}" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-            </button>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div x-show="jobsLoading" class="flex items-center justify-center py-16 text-gray-400 text-sm gap-2">
-            <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-            Loading...
-          </div>
-          <div x-show="!jobsLoading && jobs.length === 0" class="flex flex-col items-center justify-center py-16 text-gray-400">
-            <svg class="w-12 h-12 mb-3 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-            <p class="text-sm text-gray-500">No indexing jobs yet</p>
-          </div>
-          <div x-show="!jobsLoading && jobs.length > 0" class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead class="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">File</th>
-                  <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">Progress</th>
-                  <th class="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">Date</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100">
-                <template x-for="j in jobs" :key="j.id">
-                  <tr class="hover:bg-gray-50 transition-colors">
-                    <td class="px-4 py-3">
-                      <p class="font-medium text-gray-800 truncate max-w-xs" x-text="j.filename"></p>
-                      <p class="text-xs text-gray-400 font-mono" x-text="j.id.slice(0,8)+'...'"></p>
-                    </td>
-                    <td class="px-4 py-3">
-                      <span
-                        :class="{'bg-yellow-100 text-yellow-700':j.status==='PENDING'||j.status==='RUNNING','bg-green-100 text-green-700':j.status==='DONE','bg-red-100 text-red-700':j.status==='FAILED'}"
-                        class="px-2 py-0.5 rounded-full text-xs font-medium"
-                        x-text="j.status"
-                      ></span>
-                      <p x-show="j.status==='FAILED' && j.error_message" class="text-xs text-red-500 mt-0.5 max-w-xs truncate" x-text="j.error_message"></p>
-                    </td>
-                    <td class="px-4 py-3 hidden sm:table-cell">
-                      <div x-show="j.chunks_total > 0">
-                        <div class="flex items-center gap-2">
-                          <div class="flex-1 bg-gray-200 rounded-full h-1.5 w-20">
-                            <div class="h-1.5 rounded-full bg-blue-500" :style="`width:${Math.round(j.chunks_done/j.chunks_total*100)}%`"></div>
-                          </div>
-                          <span class="text-xs text-gray-500" x-text="`${j.chunks_done}/${j.chunks_total}`"></span>
-                        </div>
-                      </div>
-                      <span x-show="!j.chunks_total" class="text-gray-400 text-xs">—</span>
-                    </td>
-                    <td class="px-4 py-3 text-gray-400 text-xs hidden md:table-cell" x-text="fmtDate(j.created_at)"></td>
-                  </tr>
-                </template>
-              </tbody>
-            </table>
-          </div>
-        </div>
+    </div>
+  </details>
+  <div class="panel-actions">
+    ${saveErr ? `<div class="inline-error show">${ic('alert')}<span>${esc(saveErr)}</span></div>` : ''}
+    <button class="btn btn-ghost" data-action="collapse">Cancel</button>
+    <button class="btn btn-primary" data-action="save-tenant" data-slug="${esc(t.slug)}" data-od-id="save-changes-${esc(t.slug)}" ${saving?'disabled':''}>${saving?'Saving…':'Save changes'}</button>
+  </div>
+  <div class="danger-zone" data-od-id="danger-zone-${esc(t.slug)}">
+    <h4>${ic('alert')} Danger zone</h4>
+    <div class="danger-row">
+      <div class="desc"><strong>Regenerate API key</strong><p>Invalidates the current key immediately. Any integration using it will stop working until updated.</p></div>
+      <div class="danger-action" data-regen-area>
+        ${regenState === 'idle' ? `<button class="btn btn-danger-outline btn-sm" data-action="regen-start" data-slug="${esc(t.slug)}" data-od-id="regen-key-btn-${esc(t.slug)}">Regenerate API key</button>` : ''}
+        ${regenState === 'confirm' ? `<div class="confirm-inline"><span>Sure? This can't be undone.</span><button class="btn btn-danger btn-sm" data-action="regen-confirm" data-slug="${esc(t.slug)}">Confirm</button><button class="btn btn-ghost btn-sm" data-action="regen-cancel" data-slug="${esc(t.slug)}">Cancel</button></div>` : ''}
+        ${regenState === 'loading' ? `<span class="ts">Regenerating…</span>` : ''}
+        ${regenState === 'error' ? `<div class="confirm-inline"><div class="inline-error show">${ic('alert')}<span>${esc(regenErr||'Failed to regenerate key.')}</span></div><button class="btn btn-ghost btn-sm" data-action="regen-cancel" data-slug="${esc(t.slug)}">Try again</button></div>` : ''}
+        ${regenState === 'revealed' ? `
+        <div class="key-reveal-box">
+          <div class="key-warning">${ic('alert')} This key will not be shown again.</div>
+          <div class="key-value-row"><span class="key-value">${esc(state.regenKey[t.slug])}</span><button class="btn btn-icon" data-action="copy-key" data-key="${esc(state.regenKey[t.slug])}" title="Copy">${ic('copy')}</button></div>
+          <button class="btn btn-ghost btn-sm btn-block" data-action="regen-done" data-slug="${esc(t.slug)}">Done, I've saved it</button>
+        </div>` : ''}
       </div>
+    </div>
+    <div class="danger-row">
+      <div class="desc"><strong>Delete tenant</strong><p>Permanently removes tenant config, credentials, and API access.</p></div>
+      <div class="danger-action" data-delete-area>
+        ${deleteState === 'idle' ? `<button class="btn btn-danger-outline btn-sm" data-action="delete-start" data-slug="${esc(t.slug)}" data-od-id="delete-tenant-btn-${esc(t.slug)}">Delete tenant</button>` : ''}
+        ${deleteState === 'confirm' || deleteState === 'loading' ? `
+        <div class="confirm-inline">
+          <span>Type <code class="mono">${esc(t.slug)}</code> to confirm</span>
+          <input type="text" data-action-input="delete-confirm-input" data-slug="${esc(t.slug)}" autocomplete="off" ${deleteState==='loading'?'disabled':''}>
+          <button class="btn btn-danger btn-sm" data-action="delete-confirm" data-slug="${esc(t.slug)}" disabled>${deleteState==='loading'?'Deleting…':'Delete permanently'}</button>
+          <button class="btn btn-ghost btn-sm" data-action="delete-cancel" data-slug="${esc(t.slug)}" ${deleteState==='loading'?'disabled':''}>Cancel</button>
+          ${deleteErr ? `<div class="inline-error show">${ic('alert')}<span>${esc(deleteErr)}</span></div>` : ''}
+        </div>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
 
-    </main>
+function renderAddTenantForm() {
+  if (state.addTenantResult) {
+    const r = state.addTenantResult;
+    return `
+    <div class="add-form" data-od-id="add-tenant-form">
+      <h3>Tenant created</h3>
+      <div class="key-reveal-box">
+        <div class="key-warning">${ic('alert')} API key for <strong class="mono">${esc(r.slug)}</strong> — save it now, it won't be shown again.</div>
+        <div class="key-value-row"><span class="key-value">${esc(r.api_key)}</span><button class="btn btn-icon" data-action="copy-key" data-key="${esc(r.api_key)}" title="Copy">${ic('copy')}</button></div>
+        <button class="btn btn-ghost btn-sm btn-block" data-action="add-tenant-done">Done, I've saved it</button>
+      </div>
+    </div>`;
+  }
+  return `
+  <div class="add-form" data-od-id="add-tenant-form">
+    <h3>New tenant</h3>
+    ${state.addTenantError ? `<div class="inline-error show">${ic('alert')}<span>${esc(state.addTenantError)}</span></div>` : ''}
+    <div class="field-grid">
+      <div class="field"><label>Slug</label><input type="text" class="mono" id="new-slug" placeholder="acme-support" autocomplete="off" ${state.addTenantSaving?'disabled':''}></div>
+      <div class="field"><label>Bot token</label><input type="password" id="new-bot-token" class="mono" placeholder="Telegram bot token" autocomplete="off" ${state.addTenantSaving?'disabled':''}></div>
+      <div class="field"><label>Webhook secret</label><input type="password" id="new-webhook-secret" class="mono" placeholder="Webhook secret" autocomplete="off" ${state.addTenantSaving?'disabled':''}></div>
+      <div class="field"><label>Plan</label>
+        <select id="new-plan" ${state.addTenantSaving?'disabled':''}><option value="free">free</option><option value="basic">basic</option><option value="pro">pro</option></select>
+      </div>
+      <div class="field"><label>Expertise area</label><input type="text" id="new-expertise" placeholder="e.g. Customer support" ${state.addTenantSaving?'disabled':''}></div>
+      <div class="field"><label>Contact URL</label><input type="url" id="new-contact" placeholder="https://example.com" ${state.addTenantSaving?'disabled':''}></div>
+      <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea id="new-specialization-context" maxlength="1000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." ${state.addTenantSaving?'disabled':''}></textarea></div>
+    </div>
+    <div class="panel-actions">
+      <button class="btn btn-ghost" data-action="toggle-add-tenant" ${state.addTenantSaving?'disabled':''}>Cancel</button>
+      <button class="btn btn-primary" data-action="create-tenant" ${state.addTenantSaving?'disabled':''}>${state.addTenantSaving?'Creating…':'Create tenant'}</button>
+    </div>
+  </div>`;
+}
+
+/* ── Documents view ───────────────────────────────────────────────── */
+function renderDocumentsView() {
+  const files = state.chunkFiles;
+  const totalChunks = files.reduce((a,f)=>a+f.chunk_count,0);
+  return `
+  <div class="view-header">
+    <div><h2 data-od-id="documents-heading">Documents</h2><p>Manage the knowledge base per tenant${state.docsTenant ? ` · ${files.length} files, ${totalChunks} chunks for this tenant` : ''}</p></div>
+  </div>
+  <div class="docs-toolbar">
+    <div class="select-wrap">
+      <select id="docs-tenant-select" data-od-id="documents-tenant-select" ${state.docsUploading?'disabled':''}>
+        ${!state.docsTenant ? `<option value="">Select tenant…</option>` : ''}
+        ${state.tenants.map(t=>`<option value="${esc(t.slug)}" ${t.slug===state.docsTenant?'selected':''}>${esc(t.slug)}</option>`).join('')}
+      </select>
+    </div>
+  </div>
+  <div class="table-card" style="padding:var(--space-6)">
+    <div class="dropzone" id="dropzone" data-od-id="documents-upload-zone">
+      <div class="dz-icon">${ic('upload','icon-lg')}</div>
+      ${state.docsFile
+        ? `<strong>File selected</strong><span class="chosen-file">${esc(state.docsFile.name)} · ${(state.docsFile.size/1024).toFixed(0)} KB</span><p>Drop a different file to replace it, or upload below.</p>`
+        : `<strong>Drag & drop a file here</strong><p>PDF, Markdown, or JSONL · or click to browse</p>`}
+      <input type="file" id="file-input" accept=".pdf,.md,.markdown,.jsonl" style="display:none">
+    </div>
+    <div class="upload-options">
+      <label class="warn-check ${state.docsReplaceAll?'active':''}" id="replace-all-label">
+        <input type="checkbox" id="replace-all-checkbox" data-od-id="documents-replace-all-checkbox" ${state.docsReplaceAll?'checked':''}>
+        <span>Replace ALL documents for <strong>${esc(state.docsTenant||'—')}</strong> — this deletes existing indexed chunks before indexing the new one.</span>
+      </label>
+      <button class="btn btn-primary" id="upload-btn" data-od-id="documents-upload-btn" ${!state.docsFile || !state.docsTenant || state.docsUploading ? 'disabled':''}>${state.docsUploading ? 'Indexing…' : 'Upload & index'}</button>
+    </div>
+    ${state.docsUploadError ? `<div class="inline-error show" style="margin-top:var(--space-4)">${ic('alert')}<span>${esc(state.docsUploadError)}</span></div>` : ''}
+    ${state.docsUploading ? `
+    <div class="indexing-status">
+      <div class="row-top"><span class="fname mono">${esc(state.docsProgress.filename)}</span><span class="count">${state.docsProgress.total > 0 ? `${state.docsProgress.done} / ${state.docsProgress.total} chunks` : state.docsProgress.status}</span></div>
+      <div class="progress"><div class="progress-fill striped" style="width:${state.docsProgress.total > 0 ? Math.min(100, Math.round(state.docsProgress.done/state.docsProgress.total*100)) : 8}%"></div></div>
+    </div>` : ''}
   </div>
 
-  <script>
-    function admin() {
-      return {
-        // ── Auth ──
-        authenticated: false,
-        loginKey: '',
-        loginLoading: false,
-        loginError: '',
-        tab: 'tenants',
+  <div class="data-table-card" data-od-id="documents-files-table">
+    <table class="data-table">
+      <thead><tr><th>File</th><th>Chunks</th><th></th></tr></thead>
+      <tbody>
+        ${!state.docsTenant ? `<tr><td colspan="3"><div class="empty-state">Select a tenant to see its indexed files.</div></td></tr>` : ''}
+        ${state.docsTenant && state.chunkFilesLoading ? `<tr><td colspan="3"><div class="empty-state">Loading…</div></td></tr>` : ''}
+        ${state.docsTenant && !state.chunkFilesLoading && state.chunkFilesError ? `<tr><td colspan="3"><div class="empty-state">${esc(state.chunkFilesError)}</div></td></tr>` : ''}
+        ${state.docsTenant && !state.chunkFilesLoading && !state.chunkFilesError && files.length === 0 ? `<tr><td colspan="3"><div class="empty-state">No documents indexed yet for this tenant.</div></td></tr>` : ''}
+        ${state.docsTenant && !state.chunkFilesLoading && !state.chunkFilesError ? files.map(f => `
+        <tr>
+          <td class="file-name">${esc(f.filename)}</td>
+          <td class="chunk-count">${f.chunk_count}</td>
+          <td style="text-align:right"><button class="btn btn-icon" data-action="delete-file" data-name="${esc(f.filename)}" title="Delete file" ${state.deletingFile===f.filename?'disabled':''}>${ic('trash', state.deletingFile===f.filename?'spinning':'')}</button></td>
+        </tr>`).join('') : ''}
+      </tbody>
+    </table>
+  </div>`;
+}
 
-        // ── Tenants list ──
-        tenants: [],
-        tenantsLoading: false,
-        showAddTenant: false,
-        newTenant: { slug:'', bot_token:'', webhook_secret:'', expertise_area:'', specialization_context:'', contact_url:'', plan:'free' },
-        tenantLoading: false,
-        tenantError: '',
-        tenantSuccess: '',
-        newApiKey: '',
+/* ── Jobs view ────────────────────────────────────────────────────── */
+function jobBadge(status) {
+  const s = String(status||'').toLowerCase();
+  const dotColor = { pending:'#62666d', running:'#a7b0ff', done:'#4fd977', failed:'#ff8a8a' };
+  return `<span class="badge badge-job-${s}"><span class="dot" style="background:${dotColor[s]||'#62666d'}"></span>${s}</span>`;
+}
+function renderJobsView() {
+  const sorted = state.jobs;
+  return `
+  <div class="view-header">
+    <div><h2 data-od-id="jobs-heading">Indexing jobs</h2><p>${sorted.length} job${sorted.length===1?'':'s'} shown</p></div>
+    <div class="toolbar">
+      <div class="select-wrap">
+        <select id="jobs-filter-select" data-od-id="jobs-filter-select">
+          <option value="all" ${state.jobsFilter==='all'?'selected':''}>All tenants</option>
+          ${state.tenants.map(t=>`<option value="${esc(t.slug)}" ${state.jobsFilter===t.slug?'selected':''}>${esc(t.slug)}</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn btn-icon" id="jobs-refresh-btn" title="Refresh">${ic('refresh', state.jobsLoading?'spinning':'')}</button>
+    </div>
+  </div>
+  <div class="data-table-card" data-od-id="jobs-table">
+    <table class="data-table">
+      <thead><tr><th>File</th><th>Tenant</th><th>Status</th><th>Progress</th><th>Error</th><th>Timestamp</th></tr></thead>
+      <tbody>
+        ${state.jobsLoading ? `<tr><td colspan="6"><div class="empty-state">Loading…</div></td></tr>` : ''}
+        ${!state.jobsLoading && sorted.length ? sorted.map(j => `
+        <tr>
+          <td class="file-name">${esc(j.filename)}</td>
+          <td class="mono" style="font-size:13px;color:var(--fg-2)">${esc(j.tenant)}</td>
+          <td>${jobBadge(j.status)}</td>
+          <td>${j.chunks_total > 0 ? `<div class="job-progress-cell"><div class="progress"><div class="progress-fill ${j.status==='RUNNING'?'striped':''}" style="width:${Math.round(j.chunks_done/j.chunks_total*100)}%"></div></div><span class="count">${j.chunks_done}/${j.chunks_total}</span></div>` : `<span class="ts">—</span>`}</td>
+          <td>${j.error_message ? `<span class="err-text">${esc(j.error_message)}</span>` : '<span class="ts">—</span>'}</td>
+          <td class="ts">${fmtTime(j.created_at)}</td>
+        </tr>`).join('') : ''}
+        ${!state.jobsLoading && !sorted.length ? `<tr><td colspan="6"><div class="empty-state">No jobs yet.</div></td></tr>` : ''}
+      </tbody>
+    </table>
+  </div>`;
+}
 
-        // ── Inline edit panel (T8) ──
-        expandedId: null,
-        editForm: {},
-        editDirty: false,
-        editLoading: false,
-        editError: '',
-        editWebhookWarn: false,
-        flashRowId: null,
+/* ── Event binding (delegated per-view) ──────────────────────────── */
+function bindViewEvents() {
+  const main = document.getElementById('main-view');
 
-        revealBotToken: false,
-        revealWebhookSecret: false,
-        revealWaToken: false,
-        revealWaSecret: false,
-        waExpanded: false,
+  main.addEventListener('click', onMainClick);
+  main.addEventListener('input', onMainInput);
+  main.addEventListener('change', onMainChange);
 
-        webhookStatus: {},
-        webhookChecking: {},
+  const dz = document.getElementById('dropzone');
+  if (dz) {
+    dz.addEventListener('click', () => document.getElementById('file-input').click());
+    dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('dragover'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+    dz.addEventListener('drop', (e) => {
+      e.preventDefault(); dz.classList.remove('dragover');
+      if (e.dataTransfer.files.length) { state.docsFile = e.dataTransfer.files[0]; render(); }
+    });
+    document.getElementById('file-input').addEventListener('change', (e) => {
+      if (e.target.files.length) { state.docsFile = e.target.files[0]; render(); }
+    });
+  }
 
-        regenStep: 'initial',
-        regenNewKey: '',
-        regenError: '',
+  const refreshBtn = document.getElementById('jobs-refresh-btn');
+  if (refreshBtn) refreshBtn.addEventListener('click', fetchJobs);
+}
 
-        deleteStep: 'initial',
-        deleteInput: '',
-        deleteError: '',
+function onMainClick(e) {
+  const row = e.target.closest('[data-action="toggle-expand"]');
+  const actionEl = e.target.closest('[data-action]');
+  if (!actionEl) return;
+  const action = actionEl.dataset.action;
+  const slug = actionEl.dataset.slug;
 
-        // ── Upload ──
-        up: { tenant:'', file:null, dragging:false, replaceAll:false, loading:false, uploadErr:'', jobId:null, status:'', pct:0, total:0, done:0, err:'' },
-
-        // ── Chunk files ──
-        chunksTenant: '',
-        chunkFiles: [],
-        chunksLoading: false,
-        chunksDeleting: null,
-        chunksMsg: '',
-
-        // ── Jobs ──
-        jobs: [],
-        jobsLoading: false,
-        jobsFilter: '',
-
-        // ── Internals ──
-        _key() { return localStorage.getItem('admin_key') || '' },
-        _h()   { return { 'X-Operator-Key': this._key() } },
-
-        async init() {
-          const saved = localStorage.getItem('admin_key')
-          if (!saved) return
-          const ok = await this._verify(saved)
-          if (ok) { this.authenticated = true; this.fetchTenants() }
-        },
-
-        async _verify(key) {
-          try {
-            const r = await fetch('/admin/tenants', { headers: { 'X-Operator-Key': key } })
-            return r.status !== 401 && r.status !== 403
-          } catch { return false }
-        },
-
-        async login() {
-          this.loginLoading = true
-          this.loginError = ''
-          const ok = await this._verify(this.loginKey)
-          if (ok) {
-            localStorage.setItem('admin_key', this.loginKey)
-            this.authenticated = true
-            this.loginKey = ''
-            await this.fetchTenants()
-          } else {
-            this.loginError = 'Wrong key. Please try again.'
-          }
-          this.loginLoading = false
-        },
-
-        logout() {
-          localStorage.removeItem('admin_key')
-          this.authenticated = false
-          this.loginKey = ''
-        },
-
-        setTab(t) {
-          this.tab = t
-          if (t === 'jobs') this.fetchJobs()
-          if (t === 'upload' || t === 'tenants') this.fetchTenants()
-        },
-
-        async fetchTenants() {
-          this.tenantsLoading = true
-          try {
-            const r = await fetch('/admin/tenants', { headers: this._h() })
-            if (r.ok) {
-              this.tenants = await r.json()
-              this.tenants.forEach(t => {
-                if (!(t.slug in this.webhookStatus)) {
-                  this.webhookStatus = { ...this.webhookStatus, [t.slug]: 'unknown' }
-                }
-              })
-            }
-          } catch {}
-          this.tenantsLoading = false
-        },
-
-        async createTenant() {
-          this.tenantLoading = true
-          this.tenantError = ''
-          this.tenantSuccess = ''
-          this.newApiKey = ''
-          try {
-            const r = await fetch('/admin/tenants', {
-              method: 'POST',
-              headers: { ...this._h(), 'Content-Type': 'application/json' },
-              body: JSON.stringify(this.newTenant),
-            })
-            const data = await r.json()
-            if (r.ok) {
-              this.tenantSuccess = `Tenant "${data.slug}" created.`
-              this.newApiKey = data.api_key || ''
-              this.resetTenantForm()
-              await this.fetchTenants()
-            } else {
-              this.tenantError = data.detail || 'Error creating tenant'
-            }
-          } catch (e) { this.tenantError = 'Network error: ' + e.message }
-          this.tenantLoading = false
-        },
-
-        resetTenantForm() {
-          this.newTenant = { slug:'', bot_token:'', webhook_secret:'', expertise_area:'', specialization_context:'', contact_url:'', plan:'free' }
-          this.tenantError = ''
-        },
-
-        // ── T8: Edit panel ──
-
-        _resetEditState() {
-          this.editForm = {}
-          this.editDirty = false
-          this.editError = ''
-          this.editWebhookWarn = false
-          this.revealBotToken = false
-          this.revealWebhookSecret = false
-          this.revealWaToken = false
-          this.revealWaSecret = false
-          this.waExpanded = false
-          this.regenStep = 'initial'
-          this.regenNewKey = ''
-          this.regenError = ''
-          this.deleteStep = 'initial'
-          this.deleteInput = ''
-          this.deleteError = ''
-        },
-
-        toggleExpand(t) {
-          if (this.expandedId === t.id) {
-            this.expandedId = null
-            return
-          }
-          this.expandedId = t.id
-          this._resetEditState()
-          this.editForm = {
-            plan: t.plan,
-            expertise_area: t.expertise_area || '',
-            specialization_context: t.specialization_context || '',
-            contact_url: t.contact_url || '',
-            active: t.active,
-            bot_token: '',
-            webhook_secret: '',
-            wa_phone_number_id: '',
-            wa_access_token: '',
-            wa_app_secret: '',
-            wa_verify_token: '',
-          }
-          this.$nextTick(() => {
-            const panel = document.getElementById('edit-panel-' + t.id)
-            if (panel) panel.querySelector('input:not([disabled]),select:not([disabled])')?.focus()
-          })
-        },
-
-        cancelEdit() {
-          this.expandedId = null
-          this._resetEditState()
-        },
-
-        markDirty() {
-          this.editDirty = true
-        },
-
-        async saveEdit(t) {
-          this.editLoading = true
-          this.editError = ''
-          this.editWebhookWarn = false
-
-          const payload = {
-            plan: this.editForm.plan,
-            expertise_area: this.editForm.expertise_area || null,
-            specialization_context: this.editForm.specialization_context || null,
-            contact_url: this.editForm.contact_url || null,
-            active: this.editForm.active,
-          }
-          // Only include credential fields when the operator actually typed a value
-          if (this.editForm.bot_token)       payload.bot_token       = this.editForm.bot_token
-          if (this.editForm.webhook_secret)  payload.webhook_secret  = this.editForm.webhook_secret
-          if (this.editForm.wa_phone_number_id) payload.wa_phone_number_id = this.editForm.wa_phone_number_id
-          if (this.editForm.wa_access_token) payload.wa_access_token = this.editForm.wa_access_token
-          if (this.editForm.wa_app_secret)   payload.wa_app_secret   = this.editForm.wa_app_secret
-          if (this.editForm.wa_verify_token) payload.wa_verify_token = this.editForm.wa_verify_token
-
-          try {
-            const r = await fetch(`/admin/tenants/${t.slug}`, {
-              method: 'PATCH',
-              headers: { ...this._h(), 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            })
-            const data = await r.json()
-            if (r.ok) {
-              // Update row in place
-              Object.assign(t, {
-                plan: data.plan ?? this.editForm.plan,
-                expertise_area: data.expertise_area ?? this.editForm.expertise_area,
-                specialization_context: data.specialization_context ?? this.editForm.specialization_context,
-                contact_url: data.contact_url ?? this.editForm.contact_url,
-                active: data.active ?? this.editForm.active,
-              })
-              // Webhook registered=false → show inline warning after collapse
-              const webhookOk = data.webhook_registered !== false
-              this.editLoading = false
-              this.expandedId = null
-              this._resetEditState()
-              if (!webhookOk) {
-                this.editWebhookWarn = true
-                // attach warning to the specific row by storing it on tenant
-                t._webhookWarn = true
-              }
-              this.flashRowId = t.id
-              setTimeout(() => { this.flashRowId = null; t._webhookWarn = false }, 2000)
-            } else {
-              this.editError = data.detail || `Error ${r.status}`
-            }
-          } catch (e) {
-            this.editError = 'Network error: ' + e.message
-          }
-          this.editLoading = false
-        },
-
-        // ── T7: Webhook status ──
-
-        async checkWebhook(slug, evt) {
-          evt?.stopPropagation()
-          if (this.webhookChecking[slug]) return
-          this.webhookChecking = { ...this.webhookChecking, [slug]: true }
-          this.webhookStatus  = { ...this.webhookStatus,  [slug]: 'checking' }
-          try {
-            const r = await fetch(`/admin/tenants/${slug}/webhook-status`, { headers: this._h() })
-            const data = await r.json()
-            this.webhookStatus = { ...this.webhookStatus, [slug]: data.status || 'error' }
-          } catch {
-            this.webhookStatus = { ...this.webhookStatus, [slug]: 'error' }
-          }
-          this.webhookChecking = { ...this.webhookChecking, [slug]: false }
-        },
-
-        webhookLabel(slug) {
-          return {
-            registered: 'Registered',
-            mismatch:   'Mismatch',
-            unknown:    'Unknown',
-            checking:   'Checking…',
-            error:      'Error',
-          }[this.webhookStatus[slug] || 'unknown'] || 'Unknown'
-        },
-
-        // ── T6: Regen API key ──
-
-        startRegen() { this.regenStep = 'confirm' },
-        cancelRegen() { this.regenStep = 'initial'; this.regenError = '' },
-
-        async doRegen(t) {
-          this.regenStep = 'loading'
-          try {
-            const r = await fetch(`/admin/tenants/${t.slug}/regen-key`, {
-              method: 'POST',
-              headers: this._h(),
-            })
-            const data = await r.json()
-            if (r.ok) {
-              this.regenNewKey = data.api_key || ''
-              this.regenStep = 'success'
-            } else {
-              this.regenError = data.detail || `Error ${r.status}`
-              this.regenStep = 'error'
-            }
-          } catch (e) {
-            this.regenError = 'Network error: ' + e.message
-            this.regenStep = 'error'
-          }
-        },
-
-        dismissRegen() { this.regenStep = 'initial'; this.regenNewKey = '' },
-
-        copyToClipboard(text) {
-          navigator.clipboard?.writeText(text).catch(() => {})
-        },
-
-        // ── T4: Delete tenant ──
-
-        startDelete() {
-          this.deleteStep = 'confirm'
-          this.deleteInput = ''
-          this.deleteError = ''
-        },
-
-        cancelDelete() { this.deleteStep = 'initial' },
-
-        async doDelete(t) {
-          if (this.deleteInput !== t.slug) {
-            this.deleteError = 'Slug does not match. Type the tenant slug exactly.'
-            return
-          }
-          this.deleteStep = 'loading'
-          this.deleteError = ''
-          try {
-            const r = await fetch(`/admin/tenants/${t.slug}`, {
-              method: 'DELETE',
-              headers: { ...this._h(), 'Content-Type': 'application/json' },
-              body: JSON.stringify({ confirm_slug: t.slug }),
-            })
-            if (r.ok) {
-              this.expandedId = null
-              this._resetEditState()
-              this.tenants = this.tenants.filter(x => x.id !== t.id)
-              delete this.webhookStatus[t.slug]
-            } else {
-              const data = await r.json()
-              this.deleteError = data.detail || `Error ${r.status}`
-              this.deleteStep = 'error'
-            }
-          } catch (e) {
-            this.deleteError = 'Network error: ' + e.message
-            this.deleteStep = 'error'
-          }
-        },
-
-        // ── Upload ──
-
-        dropFile(e) {
-          this.up.dragging = false
-          const f = e.dataTransfer.files[0]
-          if (f) this.up.file = f
-        },
-
-        async uploadDoc() {
-          this.up.loading = true
-          this.up.uploadErr = ''
-          this.up.jobId = null
-          this.up.pct = 0
-          this.up.total = 0
-          this.up.done = 0
-          const fd = new FormData()
-          fd.append('tenant_slug', this.up.tenant)
-          fd.append('file', this.up.file)
-          fd.append('replace_all', this.up.replaceAll ? 'true' : 'false')
-          try {
-            const r = await fetch('/admin/index', { method:'POST', headers: this._h(), body: fd })
-            const data = await r.json()
-            if (r.ok) {
-              this.up.jobId = data.job_id
-              this.up.status = 'PENDING'
-              this.up.file = null
-              this._pollJob(data.job_id)
-            } else {
-              this.up.uploadErr = data.detail || 'Upload error'
-            }
-          } catch (e) { this.up.uploadErr = 'Network error: ' + e.message }
-          this.up.loading = false
-        },
-
-        async _pollJob(id) {
-          const tick = async () => {
-            try {
-              const r = await fetch(`/admin/index/${id}`, { headers: this._h() })
-              if (!r.ok) return
-              const d = await r.json()
-              this.up.status = d.status
-              this.up.total = d.chunks_total || 0
-              this.up.done = d.chunks_done || 0
-              this.up.err = d.error_message || ''
-              this.up.pct = this.up.total > 0 ? Math.round(this.up.done / this.up.total * 100) : (d.status === 'RUNNING' ? 10 : 0)
-              if (d.status === 'DONE') { this.up.pct = 100; return }
-              if (d.status === 'FAILED') return
-              setTimeout(tick, 2000)
-            } catch {}
-          }
-          setTimeout(tick, 800)
-        },
-
-        // ── Chunk files ──
-
-        async fetchChunkFiles() {
-          if (!this.chunksTenant) return
-          this.chunksLoading = true
-          this.chunksMsg = ''
-          try {
-            const r = await fetch(`/admin/tenants/${this.chunksTenant}/chunks/files`, { headers: this._h() })
-            if (r.ok) {
-              this.chunkFiles = await r.json()
-            } else {
-              this.chunkFiles = []
-            }
-          } catch { this.chunkFiles = [] }
-          this.chunksLoading = false
-        },
-
-        async deleteChunkFile(filename) {
-          this.chunksDeleting = filename
-          this.chunksMsg = ''
-          try {
-            const r = await fetch(
-              `/admin/tenants/${this.chunksTenant}/chunks?source=${encodeURIComponent(filename)}`,
-              { method: 'DELETE', headers: this._h() }
-            )
-            const data = await r.json()
-            if (r.ok) {
-              this.chunksMsg = `Deleted ${data.deleted} chunks from "${filename}"`
-              this.chunkFiles = this.chunkFiles.filter(f => f.filename !== filename)
-            } else {
-              this.chunksMsg = data.detail || `Error ${r.status}`
-            }
-          } catch (e) {
-            this.chunksMsg = 'Network error: ' + e.message
-          }
-          this.chunksDeleting = null
-        },
-
-        // ── Jobs ──
-
-        async fetchJobs() {
-          this.jobsLoading = true
-          this.jobs = []
-          const slugs = this.jobsFilter ? [this.jobsFilter] : this.tenants.map(t => t.slug)
-          if (!slugs.length) { this.jobsLoading = false; return }
-          try {
-            const results = await Promise.all(
-              slugs.map(s => fetch(`/admin/index?tenant_slug=${s}`, { headers: this._h() }).then(r => r.ok ? r.json() : []))
-            )
-            this.jobs = results.flat().sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 100)
-          } catch {}
-          this.jobsLoading = false
-        },
-
-        fmtDate(iso) {
-          if (!iso) return '—'
-          try { return new Date(iso).toLocaleString('en', { dateStyle:'short', timeStyle:'short' }) }
-          catch { return iso }
-        },
-      }
+  switch (action) {
+    case 'toggle-add-tenant':
+      state.addTenantOpen = !state.addTenantOpen;
+      state.addTenantError = '';
+      state.addTenantResult = null;
+      render();
+      break;
+    case 'toggle-expand': {
+      const rowSlug = row.dataset.slug;
+      state.expandedTenant = state.expandedTenant === rowSlug ? null : rowSlug;
+      render();
+      break;
     }
-  </script>
+    case 'collapse':
+      state.expandedTenant = null;
+      render();
+      break;
+    case 'toggle-reveal': {
+      e.stopPropagation();
+      const key = actionEl.dataset.key;
+      state.revealed.has(key) ? state.revealed.delete(key) : state.revealed.add(key);
+      render();
+      break;
+    }
+    case 'recheck-webhook': {
+      e.stopPropagation();
+      recheckWebhook(slug);
+      break;
+    }
+    case 'retry-tenants':
+      fetchTenants();
+      break;
+    case 'save-tenant':
+      saveTenant(slug);
+      break;
+    case 'create-tenant':
+      createTenant();
+      break;
+    case 'add-tenant-done':
+      state.addTenantOpen = false;
+      state.addTenantResult = null;
+      render();
+      break;
+    case 'regen-start':
+      state.regenState[slug] = 'confirm';
+      render();
+      break;
+    case 'regen-cancel':
+      state.regenState[slug] = 'idle';
+      delete state.regenError[slug];
+      render();
+      break;
+    case 'regen-confirm':
+      regenerateKey(slug);
+      break;
+    case 'regen-done':
+      state.regenState[slug] = 'idle';
+      delete state.regenKey[slug];
+      render();
+      break;
+    case 'copy-key': {
+      const key = actionEl.dataset.key;
+      if (key && navigator.clipboard) navigator.clipboard.writeText(key);
+      toast('Copied to clipboard.', 'success');
+      break;
+    }
+    case 'delete-start':
+      state.deleteState[slug] = 'confirm';
+      delete state.deleteError[slug];
+      render();
+      break;
+    case 'delete-cancel':
+      state.deleteState[slug] = 'idle';
+      delete state.deleteError[slug];
+      render();
+      break;
+    case 'delete-confirm':
+      deleteTenant(slug);
+      break;
+    case 'delete-file':
+      deleteFile(actionEl.dataset.name);
+      break;
+  }
+}
+
+function onMainInput(e) {
+  if (e.target.dataset.actionInput === 'delete-confirm-input') {
+    const slug = e.target.dataset.slug;
+    const btn = e.target.closest('.confirm-inline').querySelector('[data-action="delete-confirm"]');
+    btn.disabled = e.target.value !== slug;
+  }
+}
+
+function onMainChange(e) {
+  if (e.target.id === 'docs-tenant-select') {
+    state.docsTenant = e.target.value;
+    state.docsFile = null;
+    state.docsReplaceAll = false;
+    state.chunkFiles = [];
+    render();
+    fetchChunkFiles();
+  } else if (e.target.id === 'jobs-filter-select') {
+    state.jobsFilter = e.target.value;
+    fetchJobs();
+  } else if (e.target.id === 'replace-all-checkbox') {
+    state.docsReplaceAll = e.target.checked;
+    document.getElementById('replace-all-label').classList.toggle('active', state.docsReplaceAll);
+  }
+}
+
+document.getElementById('main-view')?.addEventListener('click', (e) => {
+  if (e.target.closest('#upload-btn')) startUpload();
+});
+
+/* ── Tenant actions ───────────────────────────────────────────────── */
+async function recheckWebhook(slug) {
+  state.webhookChecking.add(slug);
+  render();
+  try {
+    const data = await api(`/admin/tenants/${encodeURIComponent(slug)}/webhook-status`);
+    state.webhookStatus[slug] = data.status;
+    toast(`Webhook recheck for ${slug}: ${data.status}`, data.status === 'registered' ? 'success' : data.status === 'error' ? 'error' : undefined);
+  } catch (err) {
+    state.webhookStatus[slug] = 'error';
+    toast(`Webhook recheck failed: ${err.message}`, 'error');
+  }
+  state.webhookChecking.delete(slug);
+  render();
+}
+
+async function saveTenant(slug) {
+  const panel = document.querySelector(`[data-od-id="expand-panel-${CSS.escape(slug)}"]`);
+  const get = (field) => panel.querySelector(`[data-field="${field}"]`);
+  const payload = {
+    plan: get('plan').value,
+    expertise_area: get('expertise_area').value.trim(),
+    specialization_context: get('specialization_context').value.trim(),
+    contact_url: get('contact_url').value.trim(),
+    tone_description: get('tone_description').value.trim(),
+    active: get('active').checked,
+  };
+  const botToken = get('bot_token').value.trim();
+  const webhookSecret = get('webhook_secret').value.trim();
+  const waPhone = get('wa_phone_number_id').value.trim();
+  const waAccess = get('wa_access_token').value.trim();
+  const waSecret = get('wa_app_secret').value.trim();
+  const waVerify = get('wa_verify_token').value.trim();
+  if (botToken) payload.bot_token = botToken;
+  if (webhookSecret) payload.webhook_secret = webhookSecret;
+  if (waPhone) payload.wa_phone_number_id = waPhone;
+  if (waAccess) payload.wa_access_token = waAccess;
+  if (waSecret) payload.wa_app_secret = waSecret;
+  if (waVerify) payload.wa_verify_token = waVerify;
+
+  state.saveLoading.add(slug);
+  delete state.saveError[slug];
+  render();
+  try {
+    const data = await api(`/admin/tenants/${encodeURIComponent(slug)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const t = state.tenants.find(x => x.slug === slug);
+    Object.assign(t, {
+      plan: data.plan, expertise_area: data.expertise_area, specialization_context: data.specialization_context,
+      contact_url: data.contact_url, tone_description: data.tone_description, active: data.active,
+    });
+    state.saveLoading.delete(slug);
+    state.expandedTenant = null;
+    state.flashSlug = slug;
+    render();
+    toast(`Saved changes for ${slug}.`, 'success');
+    if (data.webhook_registered === false) {
+      toast('Webhook registration failed — check the Telegram bot token and try again.', 'error');
+    }
+  } catch (err) {
+    state.saveLoading.delete(slug);
+    state.saveError[slug] = err.message;
+    render();
+  }
+}
+
+async function createTenant() {
+  const slug = document.getElementById('new-slug').value.trim();
+  const botToken = document.getElementById('new-bot-token').value.trim();
+  const webhookSecret = document.getElementById('new-webhook-secret').value.trim();
+  const plan = document.getElementById('new-plan').value;
+  const expertise = document.getElementById('new-expertise').value.trim();
+  const specialization = document.getElementById('new-specialization-context').value.trim();
+  const contact = document.getElementById('new-contact').value.trim();
+  if (!slug || !botToken || !webhookSecret) {
+    state.addTenantError = 'Slug, bot token, and webhook secret are required.';
+    render();
+    return;
+  }
+  state.addTenantSaving = true;
+  state.addTenantError = '';
+  render();
+  try {
+    const data = await api('/admin/tenants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        slug, bot_token: botToken, webhook_secret: webhookSecret, plan,
+        expertise_area: expertise, specialization_context: specialization, contact_url: contact,
+      }),
+    });
+    state.addTenantResult = { slug: data.slug, api_key: data.api_key };
+    await fetchTenants();
+  } catch (err) {
+    state.addTenantError = err.message;
+  }
+  state.addTenantSaving = false;
+  render();
+}
+
+async function regenerateKey(slug) {
+  state.regenState[slug] = 'loading';
+  render();
+  try {
+    const data = await api(`/admin/tenants/${encodeURIComponent(slug)}/regen-key`, { method: 'POST' });
+    state.regenKey[slug] = data.api_key;
+    state.regenState[slug] = 'revealed';
+    toast(`API key regenerated for ${slug}.`, 'success');
+  } catch (err) {
+    state.regenError[slug] = err.message;
+    state.regenState[slug] = 'error';
+  }
+  render();
+}
+
+async function deleteTenant(slug) {
+  state.deleteState[slug] = 'loading';
+  delete state.deleteError[slug];
+  render();
+  try {
+    await api(`/admin/tenants/${encodeURIComponent(slug)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm_slug: slug }),
+    });
+    state.tenants = state.tenants.filter(t => t.slug !== slug);
+    delete state.webhookStatus[slug];
+    delete state.regenState[slug];
+    delete state.deleteState[slug];
+    state.expandedTenant = null;
+    render();
+    toast(`Tenant "${slug}" deleted.`, 'success');
+  } catch (err) {
+    state.deleteError[slug] = err.message;
+    state.deleteState[slug] = 'confirm';
+    render();
+  }
+}
+
+/* ── Documents actions ────────────────────────────────────────────── */
+async function fetchChunkFiles() {
+  if (!state.docsTenant) return;
+  state.chunkFilesLoading = true;
+  state.chunkFilesError = '';
+  render();
+  try {
+    state.chunkFiles = await api(`/admin/tenants/${encodeURIComponent(state.docsTenant)}/chunks/files`);
+  } catch (err) {
+    state.chunkFilesError = err.message;
+    state.chunkFiles = [];
+  }
+  state.chunkFilesLoading = false;
+  render();
+}
+
+async function deleteFile(filename) {
+  state.deletingFile = filename;
+  render();
+  try {
+    const data = await api(`/admin/tenants/${encodeURIComponent(state.docsTenant)}/chunks?source=${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    state.chunkFiles = state.chunkFiles.filter(f => f.filename !== filename);
+    toast(`Deleted ${data.deleted} chunks from "${filename}".`, 'success');
+  } catch (err) {
+    toast(`Delete failed: ${err.message}`, 'error');
+  }
+  state.deletingFile = null;
+  render();
+}
+
+async function startUpload() {
+  if (!state.docsFile || !state.docsTenant || state.docsUploading) return;
+  const file = state.docsFile;
+  const fd = new FormData();
+  fd.append('tenant_slug', state.docsTenant);
+  fd.append('file', file);
+  fd.append('replace_all', state.docsReplaceAll ? 'true' : 'false');
+
+  state.docsUploading = true;
+  state.docsUploadError = '';
+  state.docsProgress = { done: 0, total: 0, filename: file.name, status: 'PENDING' };
+  render();
+
+  let jobId;
+  try {
+    const data = await api('/admin/index', { method: 'POST', body: fd });
+    jobId = data.job_id;
+  } catch (err) {
+    state.docsUploading = false;
+    state.docsUploadError = err.message;
+    render();
+    return;
+  }
+  pollIndexJob(jobId);
+}
+
+async function pollIndexJob(jobId) {
+  try {
+    const job = await api(`/admin/index/${encodeURIComponent(jobId)}`);
+    state.docsProgress = { done: job.chunks_done || 0, total: job.chunks_total || 0, filename: job.filename, status: job.status };
+    if (job.status === 'DONE') {
+      state.docsUploading = false;
+      state.docsFile = null;
+      state.docsReplaceAll = false;
+      render();
+      toast(`Indexed ${job.filename} — ${job.chunks_done} chunks.`, 'success');
+      fetchChunkFiles();
+      return;
+    }
+    if (job.status === 'FAILED') {
+      state.docsUploading = false;
+      state.docsUploadError = job.error_message || 'Indexing failed.';
+      render();
+      toast(`Indexing failed: ${state.docsUploadError}`, 'error');
+      return;
+    }
+    render();
+    setTimeout(() => pollIndexJob(jobId), 2000);
+  } catch (err) {
+    state.docsUploading = false;
+    state.docsUploadError = err.message;
+    render();
+  }
+}
+
+/* ── Jobs actions ─────────────────────────────────────────────────── */
+async function fetchJobs() {
+  state.jobsLoading = true;
+  render();
+  try {
+    const slugs = state.jobsFilter === 'all' ? state.tenants.map(t => t.slug) : [state.jobsFilter];
+    const results = await Promise.all(slugs.map(async (slug) => {
+      const jobs = await api(`/admin/index?tenant_slug=${encodeURIComponent(slug)}`);
+      return jobs.map(j => Object.assign({ tenant: slug }, j));
+    }));
+    state.jobs = results.flat().sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 100);
+  } catch (err) {
+    toast(`Failed to load jobs: ${err.message}`, 'error');
+    state.jobs = [];
+  }
+  state.jobsLoading = false;
+  render();
+}
+
+/* ── Init ─────────────────────────────────────────────────────────── */
+(async function init() {
+  if (!operatorKey()) return;
+  const ok = await verifyKey(operatorKey());
+  if (!ok) { localStorage.removeItem(OPERATOR_KEY_STORAGE); return; }
+  showApp();
+  await bootstrap();
+})();
+</script>
 </body>
 </html>
