@@ -221,5 +221,6 @@ __marimo__/
 graphify-out
 CLAUDE.md
 sp-diagnostico-histologico.md
+medical_data/
 test_images/
 .herenow/state.json

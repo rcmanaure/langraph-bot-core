@@ -513,6 +513,33 @@ async def test_extract_returns_uncertain_when_illegible_without_calling_verifica
 
 
 @pytest.mark.asyncio
+async def test_single_sample_slot_overrides_wrong_procedure_name():
+    """Regression: found live — on a single clearly-labeled item, the model
+    sometimes fills BOTH slots: procedure_name with the wrong tier-2
+    document-title text ("Anatomía Patológica") AND samples[0] with the
+    correct tier-3 labeled field ("Estómago (Antro)"), even though the
+    prompt says CASO A/B are mutually exclusive. len(samples)==1 doesn't
+    meet the is_multi threshold, so without the override the wrong
+    procedure_name would silently win and get sent to verification."""
+    mock_llm = _mock_llm({
+        VisionExtraction: VisionExtraction(
+            is_legible=True,
+            procedure_name="Anatomía Patológica",
+            price_question="¿Cuánto cuesta un examen de Anatomía Patológica?",
+            samples=["Estómago (Antro)"],
+        ),
+        VisionVerification: VisionVerification(text_visible=True),
+    })
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=mock_llm),
+    ):
+        result = await extract_procedure_query(b"fake image bytes", "")
+
+    assert result == "¿Cuánto cuesta Estómago (Antro)?"
+
+
+@pytest.mark.asyncio
 async def test_extract_returns_uncertain_when_legible_but_no_question():
     mock_llm = _mock_llm({VisionExtraction: VisionExtraction(is_legible=True, price_question=None)})
     with (
@@ -621,6 +648,27 @@ async def test_verification_rejection_is_not_cached():
     assert result == VISION_UNCERTAIN
     insert_calls = [c for c in session.execute.await_args_list if "INSERT" in str(c.args[0])]
     assert insert_calls == [], "a rejected verification must never be cached"
+
+
+@pytest.mark.asyncio
+async def test_cache_lookup_filters_by_ttl_cutoff():
+    """Regression: found live — a mis-extraction cached 2+ days ago (picked
+    letterhead/banner text instead of the order's real field) was served
+    unchanged forever, since vision_cache had no expiry. The lookup query
+    must bound results to entries newer than _VISION_CACHE_TTL_DAYS."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.vision import _VISION_CACHE_TTL_DAYS, _get_cached_vision_result
+
+    ctx, session = _cache_ctx(cached_row=None)
+    with patch("app.services.vision.AsyncSessionLocal", return_value=ctx):
+        await _get_cached_vision_result("some-key")
+
+    call = session.execute.await_args_list[0]
+    assert "created_at > :cutoff" in str(call.args[0])
+    bound_cutoff = call.args[1]["cutoff"]
+    expected_cutoff = datetime.now(UTC) - timedelta(days=_VISION_CACHE_TTL_DAYS)
+    assert abs((bound_cutoff - expected_cutoff).total_seconds()) < 5
 
 
 @pytest.mark.asyncio
@@ -1114,3 +1162,56 @@ def test_ocr_extraction_ignores_short_lines():
     first = next((line for line in lines if len(line) > 3), "")
     # "XX" and "YYY" are <4 chars (len >3 means >3, so >=4), "IGRA" is 4 chars
     assert first == "IGRA"
+
+
+def test_ocr_extraction_skips_first_line_fallback_on_long_form_text():
+    """Regression: found live — a real lab order form OCR's to ~20 garbled
+    lines (letterhead + patient data + handwritten notes), and the naive
+    first-line heuristic grabbed the letterhead/marketing banner ("Calidad
+    Y Experiencia en") instead of the actual sample field. Above
+    _OCR_MAX_LINES_FOR_FIRST_LINE_FALLBACK, first-line fallback must not
+    fire — returns "" (caller treats as still uncertain), not a guess."""
+    fake_ocr_text = "\n".join(
+        ["Calidad Y Experiencia en", "SERVICIO DE QUIROFANO", "POLICLINICA PUERTO LA CRUZ"]
+        + [f"linea de relleno {i}" for i in range(6)]
+    )
+    with (
+        patch("app.services.vision._TESSERACT_AVAILABLE", True),
+        patch("app.services.vision.pytesseract.image_to_string", return_value=fake_ocr_text),
+        patch("app.services.vision.Image.open", return_value=MagicMock()),
+    ):
+        result = vision_module._extract_with_ocr(b"fake image bytes")
+
+    assert result == ""
+
+
+def test_ocr_extraction_prefers_labeled_field_over_letterhead():
+    """A recognized field label (e.g. "Muestra:") is trusted regardless of
+    document length, since it's a structural signal, not a line-position
+    guess — letterhead noise before it must not win."""
+    fake_ocr_text = "\n".join(
+        ["Calidad Y Experiencia en", "SERVICIO DE QUIROFANO", "Muestra: Utero y anexos"]
+        + [f"linea de relleno {i}" for i in range(6)]
+    )
+    with (
+        patch("app.services.vision._TESSERACT_AVAILABLE", True),
+        patch("app.services.vision.pytesseract.image_to_string", return_value=fake_ocr_text),
+        patch("app.services.vision.Image.open", return_value=MagicMock()),
+    ):
+        result = vision_module._extract_with_ocr(b"fake image bytes")
+
+    assert result == "Utero y anexos"
+
+
+def test_ocr_extraction_short_text_still_uses_first_line_fallback():
+    """Below the line-count gate (simple product label / one-line slip, no
+    letterhead ambiguity), the original first-line heuristic still applies."""
+    fake_ocr_text = "\n\nIGRA TEST\nOther stuff..."
+    with (
+        patch("app.services.vision._TESSERACT_AVAILABLE", True),
+        patch("app.services.vision.pytesseract.image_to_string", return_value=fake_ocr_text),
+        patch("app.services.vision.Image.open", return_value=MagicMock()),
+    ):
+        result = vision_module._extract_with_ocr(b"fake image bytes")
+
+    assert result == "IGRA TEST"

@@ -7,6 +7,7 @@ import logging
 import re
 import shutil
 import unicodedata
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import openai
@@ -63,6 +64,18 @@ procedimiento escrito en la imagen, letra por letra. Si el texto está borroso, 
 cortado, o tenés la MÍNIMA duda sobre qué dice — marcá is_legible=false y dejá \
 procedure_name, price_question y samples vacíos. NUNCA adivines ni asumas un \
 ítem "parecido" solo porque el contexto del negocio te resulte familiar.
+
+IMPORTANTE — distinguí tres tipos de texto y usá SOLO el tercero:
+1. Encabezado/membrete: nombre del negocio, logo, eslóganes de marketing \
+(ej. "Calidad y Experiencia en..."), datos de contacto, direcciones, fecha.
+2. Título del documento o tipo de trámite: ej. "Solicitud de Biopsia", "Rp.", \
+"Orden médica" — esto identifica QUÉ TIPO de documento es, no cuál es el \
+ítem/procedimiento en sí.
+3. El valor específico dentro de un campo etiquetado del cuerpo del documento \
+— típicamente después de una etiqueta como "Muestra:", "Estudio:", "Diagnóstico:" \
+o similar. ESTE es el único texto que extraés.
+Nunca uses (1) ni (2) como procedure_name/samples, aunque sean el texto más \
+grande, legible, o el primero que veas en la imagen.
 
 CASO A — un solo ítem/procedimiento/muestra (el caso más común): completá:
 - procedure_name: el nombre EXACTO y LITERAL del ítem o procedimiento tal como \
@@ -179,6 +192,16 @@ _RATE_LIMIT_BASE_DELAY = 1.5  # seconds
 # small — cap it, not the underlying gather logic.
 _MAX_MULTI_SAMPLE_VERIFY = 20
 
+# vision_cache had no expiry (found live: a mis-extraction from letterhead/
+# banner text — "Calidad Y Experiencia en" — instead of the order's actual
+# "Muestra:" field — passed the two-pass anti-hallucination check (both
+# passes only verify the text is literally IN the image, not that it's the
+# CORRECT field) and was served unchanged for 2+ days). A cache write is
+# still "verified" at write time, but nothing here re-verifies the field
+# was the right one to pick — bounding cache age limits the damage window
+# for that class of bug without requiring a schema/versioning change.
+_VISION_CACHE_TTL_DAYS = 7
+
 
 def _is_rate_limited(exc: BaseException) -> bool:
     return isinstance(exc, openai.RateLimitError) or getattr(exc, "status_code", None) == 429
@@ -243,20 +266,50 @@ def _preprocess_image(img_bytes: bytes) -> bytes:
         return img_bytes
 
 
+_OCR_ORDER_FIELD_LABEL_RE = re.compile(
+    r"(?:muestra|estudio|diagn[oó]stico|procedimiento)\s*:\s*(.+)", re.IGNORECASE
+)
+
+# Above this many non-empty OCR'd lines, "first meaningful line" stops being
+# a safe heuristic — found live: on a real multi-field lab order form (~20
+# lines of letterhead + patient data + handwritten clinical notes), the
+# first line is the business letterhead/marketing banner, not the sample
+# being requested. A short OCR result (a handful of lines, e.g. a product
+# label or a simple one-line requisition slip) doesn't have that ambiguity,
+# so the first-line heuristic stays trustworthy below this threshold.
+_OCR_MAX_LINES_FOR_FIRST_LINE_FALLBACK = 6
+
+
 def _extract_with_ocr(img_bytes: bytes) -> str | None:
     """Extract procedure name with OCR (fallback for vision confidence boost).
 
     Returns extracted text or None if Tesseract unavailable.
-    Returns empty string if Tesseract available but found no text."""
+    Returns empty string if Tesseract available but found no text, or if
+    the text looks like a multi-field form where guessing a single field is
+    unsafe (see _OCR_MAX_LINES_FOR_FIRST_LINE_FALLBACK)."""
     if not _TESSERACT_AVAILABLE:
         return None
 
     try:
         img = Image.open(io.BytesIO(img_bytes))
         text = pytesseract.image_to_string(img, lang="spa+eng", config=_TESSDATA_OVERRIDE)
-        # Extract first meaningful line (procedure name typically appears early)
-        for line in text.split("\n"):
-            line = line.strip()
+        stripped_lines = [line.strip() for line in text.split("\n") if line.strip()]
+
+        # Prefer text after a recognized order-field label (e.g. "Muestra:")
+        # over the first line, regardless of document length — this is a
+        # real structural signal, not a guess. Handwritten labels can still
+        # OCR-garble past recognition (e.g. "Muestra" -> "Museva"), which is
+        # exactly why the line-count gate below exists as a second layer.
+        label_match = _OCR_ORDER_FIELD_LABEL_RE.search(text)
+        if label_match:
+            candidate = label_match.group(1).strip().split("\n")[0].strip()
+            if len(candidate) > 3:
+                return candidate
+
+        if len(stripped_lines) > _OCR_MAX_LINES_FOR_FIRST_LINE_FALLBACK:
+            return ""
+
+        for line in stripped_lines:
             if len(line) > 3:  # Filter noise
                 return line
         return ""
@@ -283,9 +336,11 @@ def _vision_cache_key(
 
 
 async def _get_cached_vision_result(key: str) -> str | None:
+    cutoff = datetime.now(UTC) - timedelta(days=_VISION_CACHE_TTL_DAYS)
     async with AsyncSessionLocal() as db:
         row = (await db.execute(
-            text("SELECT result FROM vision_cache WHERE key = :key"), {"key": key}
+            text("SELECT result FROM vision_cache WHERE key = :key AND created_at > :cutoff"),
+            {"key": key, "cutoff": cutoff},
         )).first()
         return row.result if row else None
 
@@ -574,6 +629,29 @@ async def extract_procedure_query(
         return VISION_UNCERTAIN  # transient — not cached, retry may succeed
 
     is_multi = bool(extraction.is_legible and extraction.samples and len(extraction.samples) >= 2)
+
+    # Schema-confusion guard (found live): on a single clearly-labeled item,
+    # the model sometimes fills BOTH slots at once — procedure_name with the
+    # CASO A tier-2 title/type text ("Anatomía Patológica") AND samples[0]
+    # with the correct CASO B tier-3 labeled-field value ("Estómago
+    # (Antro)") — even though the prompt says CASO A/B are mutually
+    # exclusive. len(samples) == 1 doesn't meet the is_multi threshold, so
+    # without this the wrong (but present) procedure_name would silently
+    # win. samples entries are held to the stricter "exact literal" rule,
+    # so prefer it over procedure_name when both are populated (a real
+    # conflict to resolve). Only fires when procedure_name is ALSO set —
+    # bare samples=[x] with no procedure_name at all is a different,
+    # already-covered case (test_single_sample_entry_falls_back_to_ocr_
+    # uncertain_path): no conflicting signal to resolve, so it keeps
+    # degrading to the OCR-fallback/uncertain path as before.
+    if (
+        extraction.is_legible and not is_multi and extraction.procedure_name
+        and extraction.samples and len(extraction.samples) == 1
+    ):
+        only_sample = extraction.samples[0]
+        logger.info("vision_single_sample_overrides_procedure_name sample=%r", only_sample)
+        extraction.procedure_name = only_sample
+        extraction.price_question = f"¿Cuánto cuesta {only_sample}?"
 
     if not extraction.is_legible or (not extraction.price_question and not is_multi):
         # Vision uncertain; try OCR fallback if Tesseract available
