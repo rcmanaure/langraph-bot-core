@@ -10,6 +10,7 @@ from sqlalchemy import text
 from app.config import settings
 from app.db import AsyncSessionLocal
 from app.models import DocumentChunk, IndexJob, IndexJobStatus
+from app.services import md_catalog
 from app.services.llm import get_embeddings
 from app.services.security import scan_chunk_for_injection
 
@@ -85,18 +86,26 @@ def _extract_jsonl_chunks(content: bytes, filename: str) -> tuple[list[dict], di
                           covering several items under one heading).
       description (str) — additional context injected into embedding text
     """
-    chunks: list[dict] = []
-    org_meta: dict | None = None
+    items: list[dict] = []
     for line_num, raw in enumerate(content.decode("utf-8", errors="replace").splitlines(), start=1):
         raw = raw.strip()
         if not raw or raw.startswith("#"):
             continue
         try:
-            item = json.loads(raw)
+            items.append(json.loads(raw))
         except json.JSONDecodeError:
             logger.warning("jsonl_skip_invalid_line file=%s line=%d", filename, line_num)
-            continue
+    return _records_to_chunks(items, filename)
 
+
+def _records_to_chunks(records: list[dict], filename: str) -> tuple[list[dict], dict | None]:
+    """Build embedding chunks + optional org_metadata from pre-parsed records —
+    shared by the JSONL line parser above and app/services/md_catalog.py's
+    Markdown-to-records converter, so both input formats produce identical
+    chunk/metadata shape without duplicating this logic."""
+    chunks: list[dict] = []
+    org_meta: dict | None = None
+    for line_num, item in enumerate(records, start=1):
         item_type = item.get("type") or item.get("doc_type")
 
         if item_type == "org_metadata":
@@ -215,30 +224,47 @@ async def run_index_job(
             logger.info("index_replaced_stale job=%s filename=%s deleted=%d replace_all=%s",
                          job_id, filename, replaced, replace_all)
 
+        all_chunks: list[dict] = []
+        org_meta: dict | None = None
+
         if filename.lower().endswith(".jsonl"):
             all_chunks, org_meta = _extract_jsonl_chunks(content, filename)
-            if org_meta:
-                async with AsyncSessionLocal() as db:
-                    await db.execute(
-                        text("""
-                            UPDATE tenants
-                               SET expertise_area = COALESCE(:ea, expertise_area),
-                                   contact_url    = COALESCE(:cu, contact_url)
-                             WHERE id = :tid
-                        """),
-                        {
-                            "ea": str(org_meta["expertise_area"])[:255] if org_meta.get("expertise_area") else None,
-                            "cu": str(org_meta["contact_url"])[:512] if org_meta.get("contact_url") else None,
-                            "tid": tenant_id,
-                        },
-                    )
-                    await db.commit()
-                logger.info("org_metadata_applied job=%s tenant=%d", job_id, tenant_id)
         else:
-            pages = _extract_pages(content, filename)
-            all_chunks: list[dict] = []
-            for text_content, page_num in pages:
-                all_chunks.extend(_chunk_page(text_content, filename, page_num))
+            # Markdown gets a structured-parse attempt first (md_catalog.convert):
+            # generic text/paragraph chunking below would slice price tables
+            # mid-row, detaching codes from prices (see md_catalog.py docstring
+            # for the real drift this caused). Falls back to generic chunking
+            # when the .md doesn't match the catalog shape (no price tables,
+            # none of the known section headers) — a tenant's free-text info
+            # doc is a valid, different use case, not an error.
+            records = None
+            if filename.lower().endswith((".md", ".markdown")):
+                records = md_catalog.convert(content.decode("utf-8", errors="replace"))
+            if records:
+                all_chunks, org_meta = _records_to_chunks(records, filename)
+                logger.info("md_catalog_parsed job=%s filename=%s records=%d", job_id, filename, len(records))
+            else:
+                pages = _extract_pages(content, filename)
+                for text_content, page_num in pages:
+                    all_chunks.extend(_chunk_page(text_content, filename, page_num))
+
+        if org_meta:
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    text("""
+                        UPDATE tenants
+                           SET expertise_area = COALESCE(:ea, expertise_area),
+                               contact_url    = COALESCE(:cu, contact_url)
+                         WHERE id = :tid
+                    """),
+                    {
+                        "ea": str(org_meta["expertise_area"])[:255] if org_meta.get("expertise_area") else None,
+                        "cu": str(org_meta["contact_url"])[:512] if org_meta.get("contact_url") else None,
+                        "tid": tenant_id,
+                    },
+                )
+                await db.commit()
+            logger.info("org_metadata_applied job=%s tenant=%d", job_id, tenant_id)
 
         if not all_chunks:
             raise ValueError("No content could be extracted from file")
