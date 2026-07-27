@@ -702,7 +702,7 @@ function renderExpandPanel(t) {
           <span class="toggle-label">${t.active?'Active':'Inactive'}</span>
         </div>
       </div>
-      <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea data-field="specialization_context" maxlength="1000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer...">${esc(t.specialization_context)}</textarea></div>
+      <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea data-field="specialization_context" maxlength="8000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer...">${esc(t.specialization_context)}</textarea></div>
       <div class="field full"><label>Tone description</label><textarea data-field="tone_description" placeholder="e.g. warm and casual, or professional and clinical">${esc(t.tone_description)}</textarea></div>
     </div>
   </div>
@@ -782,7 +782,7 @@ function renderAddTenantForm() {
       </div>
       <div class="field"><label>Expertise area</label><input type="text" id="new-expertise" placeholder="e.g. Customer support" ${state.addTenantSaving?'disabled':''}></div>
       <div class="field"><label>Contact URL</label><input type="url" id="new-contact" placeholder="https://example.com" ${state.addTenantSaving?'disabled':''}></div>
-      <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea id="new-specialization-context" maxlength="1000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." ${state.addTenantSaving?'disabled':''}></textarea></div>
+      <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea id="new-specialization-context" maxlength="8000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." ${state.addTenantSaving?'disabled':''}></textarea></div>
     </div>
     <div class="panel-actions">
       <button class="btn btn-ghost" data-action="toggle-add-tenant" ${state.addTenantSaving?'disabled':''}>Cancel</button>

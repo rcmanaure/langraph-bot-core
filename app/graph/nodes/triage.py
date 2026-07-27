@@ -30,10 +30,39 @@ When in doubt between rag/off_topic → "rag". Default is "rag".
 Reply ONLY with JSON: {"decision": "<category>"}
 """
 
+# Whole-message-only match — a pure greeting/farewell/thanks with nothing
+# else. Mirrors the prompt's own "IMPORTANT" rule: any extra content (a
+# question, a medical term) must still reach the LLM as "rag", so this never
+# matches a partial prefix like "hola, cuanto cuesta" — the trailing
+# `[.!¡?¿,]*\s*$` anchor requires nothing follows the greeting phrase itself.
+# Short-circuits the common high-frequency, near-zero-ambiguity case (bare
+# "hola"/"gracias"/"chao") without paying for an LLM call on every message.
+_GREETING_RE = re.compile(
+    r"^\s*"
+    r"(?:hola+|holis|buen[oa]s?(?:\s+(?:d[ií]as?|tardes|noches))?|"
+    r"gracias|muchas\s+gracias|mil\s+gracias|de\s+nada|"
+    r"hasta\s+luego|nos\s+vemos|chao|adi[oó]s|"
+    r"mucho\s+gusto|un\s+gusto)"
+    r"\s*[.!¡?¿,]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _last_human_text(state: AgentState) -> str | None:
+    for m in reversed(state["messages"]):
+        if isinstance(m, HumanMessage):
+            return m.content if isinstance(m.content, str) else None
+    return None
+
 
 async def triage(state: AgentState) -> dict:
-    if not any(isinstance(m, HumanMessage) for m in state["messages"]):
+    last_human = _last_human_text(state)
+    if last_human is None:
         return {"triage_decision": "rag"}
+
+    if _GREETING_RE.match(last_human):
+        logger.info("triage_regex_greeting_shortcut")
+        return {"triage_decision": "greeting"}
 
     trimmed = trim_messages(
         state["messages"],

@@ -25,8 +25,12 @@ Formato (OBLIGATORIO — compatible WhatsApp/Telegram):
 - Por ítem: - *CÓDIGO* Nombre: $precio"""
 
 _RAG_SYSTEM = """\
-Eres un asistente de {expertise}. Eres {tone_description}.{name_hint}{specialization_hint}
-Usa ÚNICAMENTE el contexto proporcionado. NO uses conocimiento propio fuera de ese contexto.
+Eres un asistente de {expertise}. Eres {tone_description}.{name_hint}{specialization_block}
+Para precios y disponibilidad usa ÚNICAMENTE el contexto proporcionado — NUNCA inventes un producto
+o precio que no esté ahí. Si arriba se te dio contexto de especialización, podés usar ese
+conocimiento de dominio para interpretar jerga, sinónimos o abreviaturas del usuario, pero la
+respuesta final SIEMPRE respeta el formato breve indicado más abajo, sin importar cuán detallado
+sea ese conocimiento.
 
 Cada ítem del contexto ya viene etiquetado por el sistema de búsqueda como [COINCIDENCIA EXACTA] o
 [APROXIMACIÓN (confianza baja)] — es una clasificación ya calculada, NO la recalcules ni la
@@ -101,8 +105,8 @@ async def _load_tenant(slug: str) -> dict:
     }
 
 
-def _build_specialization_hint(specialization: str) -> str:
-    return f"\nContexto de especialización: {specialization}." if specialization else ""
+def _build_specialization_block(specialization: str) -> str:
+    return f"\nContexto de especialización:\n{specialization}\n" if specialization else ""
 
 
 async def _load_name_hint(state: AgentState, runtime: Runtime | None) -> str:
@@ -169,12 +173,12 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
     # **tenant_ctx always containing the key — existing tests mock _load_tenant()'s
     # return dict directly and don't include this key; a missing key would KeyError.
     specialization = tenant_ctx.get("specialization_context", "") or ""
-    specialization_hint = _build_specialization_hint(specialization) if not is_catalog else ""
+    specialization_block = _build_specialization_block(specialization) if not is_catalog else ""
     if specialization:
         logger.debug("generate_specialization_applied tenant=%s len=%d", state["tenant_id"], len(specialization))
     system = template.format(
         context=context, format_hint=format_hint, name_hint=name_hint,
-        specialization_hint=specialization_hint, **tenant_ctx,
+        specialization_block=specialization_block, **tenant_ctx,
     )
 
     trimmed = trim_messages(
