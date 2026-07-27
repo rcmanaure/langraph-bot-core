@@ -7,6 +7,7 @@ import logging
 import re
 import shutil
 import unicodedata
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import openai
@@ -179,6 +180,16 @@ _RATE_LIMIT_BASE_DELAY = 1.5  # seconds
 # small — cap it, not the underlying gather logic.
 _MAX_MULTI_SAMPLE_VERIFY = 20
 
+# vision_cache had no expiry (found live: a mis-extraction from letterhead/
+# banner text — "Calidad Y Experiencia en" — instead of the order's actual
+# "Muestra:" field — passed the two-pass anti-hallucination check (both
+# passes only verify the text is literally IN the image, not that it's the
+# CORRECT field) and was served unchanged for 2+ days). A cache write is
+# still "verified" at write time, but nothing here re-verifies the field
+# was the right one to pick — bounding cache age limits the damage window
+# for that class of bug without requiring a schema/versioning change.
+_VISION_CACHE_TTL_DAYS = 7
+
 
 def _is_rate_limited(exc: BaseException) -> bool:
     return isinstance(exc, openai.RateLimitError) or getattr(exc, "status_code", None) == 429
@@ -283,9 +294,11 @@ def _vision_cache_key(
 
 
 async def _get_cached_vision_result(key: str) -> str | None:
+    cutoff = datetime.now(UTC) - timedelta(days=_VISION_CACHE_TTL_DAYS)
     async with AsyncSessionLocal() as db:
         row = (await db.execute(
-            text("SELECT result FROM vision_cache WHERE key = :key"), {"key": key}
+            text("SELECT result FROM vision_cache WHERE key = :key AND created_at > :cutoff"),
+            {"key": key, "cutoff": cutoff},
         )).first()
         return row.result if row else None
 

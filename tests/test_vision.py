@@ -624,6 +624,27 @@ async def test_verification_rejection_is_not_cached():
 
 
 @pytest.mark.asyncio
+async def test_cache_lookup_filters_by_ttl_cutoff():
+    """Regression: found live — a mis-extraction cached 2+ days ago (picked
+    letterhead/banner text instead of the order's real field) was served
+    unchanged forever, since vision_cache had no expiry. The lookup query
+    must bound results to entries newer than _VISION_CACHE_TTL_DAYS."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.vision import _VISION_CACHE_TTL_DAYS, _get_cached_vision_result
+
+    ctx, session = _cache_ctx(cached_row=None)
+    with patch("app.services.vision.AsyncSessionLocal", return_value=ctx):
+        await _get_cached_vision_result("some-key")
+
+    call = session.execute.await_args_list[0]
+    assert "created_at > :cutoff" in str(call.args[0])
+    bound_cutoff = call.args[1]["cutoff"]
+    expected_cutoff = datetime.now(UTC) - timedelta(days=_VISION_CACHE_TTL_DAYS)
+    assert abs((bound_cutoff - expected_cutoff).total_seconds()) < 5
+
+
+@pytest.mark.asyncio
 async def test_extract_falls_back_to_json_parse_when_extraction_structured_fails():
     """Once extraction's structured attempt fails for a model, the memo means
     verification (same model, same call) also skips straight to the JSON
