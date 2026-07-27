@@ -199,11 +199,11 @@ def convert(md_text: str) -> list[dict]:
 
     if "Mensaje de bienvenida" in body_by_header:
         lines = [
-            l.lstrip(">").strip()
-            for l in body_by_header["Mensaje de bienvenida"].splitlines()
-            if l.strip().startswith(">")
+            line.lstrip(">").strip()
+            for line in body_by_header["Mensaje de bienvenida"].splitlines()
+            if line.strip().startswith(">")
         ]
-        text = " ".join(l for l in lines if l)
+        text = " ".join(line for line in lines if line)
         records.append({
             "id": "service-005", "name": "Mensaje de Bienvenida", "price": None, "type": "service",
             "category": "general", "keywords": _keywords_from("bienvenida", "saludo"),
