@@ -1135,3 +1135,56 @@ def test_ocr_extraction_ignores_short_lines():
     first = next((line for line in lines if len(line) > 3), "")
     # "XX" and "YYY" are <4 chars (len >3 means >3, so >=4), "IGRA" is 4 chars
     assert first == "IGRA"
+
+
+def test_ocr_extraction_skips_first_line_fallback_on_long_form_text():
+    """Regression: found live — a real lab order form OCR's to ~20 garbled
+    lines (letterhead + patient data + handwritten notes), and the naive
+    first-line heuristic grabbed the letterhead/marketing banner ("Calidad
+    Y Experiencia en") instead of the actual sample field. Above
+    _OCR_MAX_LINES_FOR_FIRST_LINE_FALLBACK, first-line fallback must not
+    fire — returns "" (caller treats as still uncertain), not a guess."""
+    fake_ocr_text = "\n".join(
+        ["Calidad Y Experiencia en", "SERVICIO DE QUIROFANO", "POLICLINICA PUERTO LA CRUZ"]
+        + [f"linea de relleno {i}" for i in range(6)]
+    )
+    with (
+        patch("app.services.vision._TESSERACT_AVAILABLE", True),
+        patch("app.services.vision.pytesseract.image_to_string", return_value=fake_ocr_text),
+        patch("app.services.vision.Image.open", return_value=MagicMock()),
+    ):
+        result = vision_module._extract_with_ocr(b"fake image bytes")
+
+    assert result == ""
+
+
+def test_ocr_extraction_prefers_labeled_field_over_letterhead():
+    """A recognized field label (e.g. "Muestra:") is trusted regardless of
+    document length, since it's a structural signal, not a line-position
+    guess — letterhead noise before it must not win."""
+    fake_ocr_text = "\n".join(
+        ["Calidad Y Experiencia en", "SERVICIO DE QUIROFANO", "Muestra: Utero y anexos"]
+        + [f"linea de relleno {i}" for i in range(6)]
+    )
+    with (
+        patch("app.services.vision._TESSERACT_AVAILABLE", True),
+        patch("app.services.vision.pytesseract.image_to_string", return_value=fake_ocr_text),
+        patch("app.services.vision.Image.open", return_value=MagicMock()),
+    ):
+        result = vision_module._extract_with_ocr(b"fake image bytes")
+
+    assert result == "Utero y anexos"
+
+
+def test_ocr_extraction_short_text_still_uses_first_line_fallback():
+    """Below the line-count gate (simple product label / one-line slip, no
+    letterhead ambiguity), the original first-line heuristic still applies."""
+    fake_ocr_text = "\n\nIGRA TEST\nOther stuff..."
+    with (
+        patch("app.services.vision._TESSERACT_AVAILABLE", True),
+        patch("app.services.vision.pytesseract.image_to_string", return_value=fake_ocr_text),
+        patch("app.services.vision.Image.open", return_value=MagicMock()),
+    ):
+        result = vision_module._extract_with_ocr(b"fake image bytes")
+
+    assert result == "IGRA TEST"

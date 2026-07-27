@@ -65,6 +65,18 @@ cortado, o tenés la MÍNIMA duda sobre qué dice — marcá is_legible=false y 
 procedure_name, price_question y samples vacíos. NUNCA adivines ni asumas un \
 ítem "parecido" solo porque el contexto del negocio te resulte familiar.
 
+IMPORTANTE — distinguí tres tipos de texto y usá SOLO el tercero:
+1. Encabezado/membrete: nombre del negocio, logo, eslóganes de marketing \
+(ej. "Calidad y Experiencia en..."), datos de contacto, direcciones, fecha.
+2. Título del documento o tipo de trámite: ej. "Solicitud de Biopsia", "Rp.", \
+"Orden médica" — esto identifica QUÉ TIPO de documento es, no cuál es el \
+ítem/procedimiento en sí.
+3. El valor específico dentro de un campo etiquetado del cuerpo del documento \
+— típicamente después de una etiqueta como "Muestra:", "Estudio:", "Diagnóstico:" \
+o similar. ESTE es el único texto que extraés.
+Nunca uses (1) ni (2) como procedure_name/samples, aunque sean el texto más \
+grande, legible, o el primero que veas en la imagen.
+
 CASO A — un solo ítem/procedimiento/muestra (el caso más común): completá:
 - procedure_name: el nombre EXACTO y LITERAL del ítem o procedimiento tal como \
 está escrito en la imagen, sin agregar palabras (ejemplo: "IGRA", "zapatilla \
@@ -254,20 +266,50 @@ def _preprocess_image(img_bytes: bytes) -> bytes:
         return img_bytes
 
 
+_OCR_ORDER_FIELD_LABEL_RE = re.compile(
+    r"(?:muestra|estudio|diagn[oó]stico|procedimiento)\s*:\s*(.+)", re.IGNORECASE
+)
+
+# Above this many non-empty OCR'd lines, "first meaningful line" stops being
+# a safe heuristic — found live: on a real multi-field lab order form (~20
+# lines of letterhead + patient data + handwritten clinical notes), the
+# first line is the business letterhead/marketing banner, not the sample
+# being requested. A short OCR result (a handful of lines, e.g. a product
+# label or a simple one-line requisition slip) doesn't have that ambiguity,
+# so the first-line heuristic stays trustworthy below this threshold.
+_OCR_MAX_LINES_FOR_FIRST_LINE_FALLBACK = 6
+
+
 def _extract_with_ocr(img_bytes: bytes) -> str | None:
     """Extract procedure name with OCR (fallback for vision confidence boost).
 
     Returns extracted text or None if Tesseract unavailable.
-    Returns empty string if Tesseract available but found no text."""
+    Returns empty string if Tesseract available but found no text, or if
+    the text looks like a multi-field form where guessing a single field is
+    unsafe (see _OCR_MAX_LINES_FOR_FIRST_LINE_FALLBACK)."""
     if not _TESSERACT_AVAILABLE:
         return None
 
     try:
         img = Image.open(io.BytesIO(img_bytes))
         text = pytesseract.image_to_string(img, lang="spa+eng", config=_TESSDATA_OVERRIDE)
-        # Extract first meaningful line (procedure name typically appears early)
-        for line in text.split("\n"):
-            line = line.strip()
+        stripped_lines = [line.strip() for line in text.split("\n") if line.strip()]
+
+        # Prefer text after a recognized order-field label (e.g. "Muestra:")
+        # over the first line, regardless of document length — this is a
+        # real structural signal, not a guess. Handwritten labels can still
+        # OCR-garble past recognition (e.g. "Muestra" -> "Museva"), which is
+        # exactly why the line-count gate below exists as a second layer.
+        label_match = _OCR_ORDER_FIELD_LABEL_RE.search(text)
+        if label_match:
+            candidate = label_match.group(1).strip().split("\n")[0].strip()
+            if len(candidate) > 3:
+                return candidate
+
+        if len(stripped_lines) > _OCR_MAX_LINES_FOR_FIRST_LINE_FALLBACK:
+            return ""
+
+        for line in stripped_lines:
             if len(line) > 3:  # Filter noise
                 return line
         return ""
