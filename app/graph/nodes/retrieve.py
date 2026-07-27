@@ -52,9 +52,9 @@ _REWRITE_PROMPT = """\
 Expandí la siguiente consulta de un usuario agregando términos o sinónimos formales \
 que ayuden a encontrarla en un catálogo de productos/servicios, usando tu propio \
 conocimiento del rubro descrito abajo. Devolvé SOLO los términos adicionales \
-relevantes (no una oración ni una respuesta) — se van a concatenar a la consulta \
-original, no a reemplazarla. Si no hay nada útil que agregar, devolvé la consulta \
-tal cual.
+relevantes (no una oración, no una respuesta, NUNCA repitas la consulta original) \
+— se van a concatenar a la consulta original, no a reemplazarla. Si no hay nada \
+útil que agregar, devolvé un string vacío.
 
 Rubro del negocio: {specialization}
 
@@ -76,7 +76,15 @@ async def _rewrite_query(query: str, specialization: str) -> str:
         result: RewrittenQuery = await llm.with_structured_output(RewrittenQuery).ainvoke(
             [HumanMessage(content=prompt)]
         )
-        return f"{query} {result.query}".strip()
+        addition = result.query.strip()
+        # Defense in depth: the prompt asks for an empty string when there's
+        # nothing to add, but if the model echoes the query back anyway,
+        # concatenating it would duplicate the original query verbatim
+        # instead of adding new terms (found live during /qa — a real
+        # response, "cuanto cuesta X cuanto cuesta X").
+        if not addition or addition.lower() == query.lower():
+            return query
+        return f"{query} {addition}"
     except Exception as exc:
         logger.warning("retrieve_rewrite_failed=%s using raw query", exc)
         return query
