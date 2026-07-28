@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import difflib
 import hashlib
 import io
 import json
@@ -170,16 +171,30 @@ def _extraction_display_text(extraction: VisionExtraction) -> str:
     return ""
 
 
+_CONSENSUS_SIMILARITY_THRESHOLD = 0.85
+
+
 def _consensus_agrees(name_1: str, name_2: str) -> bool:
-    """Two consensus samples agree if they're identical, OR one is a
-    substring of the other (found in /code-review): VisionExtraction's
-    procedure_name and price_question are independent optional fields, so
-    one call filling only the bare term ("igra") and the other filling only
-    the full formatted question ("¿cuánto cuesta un examen de igra?") for
-    the SAME correctly-read item would otherwise never match exactly."""
+    """Two consensus samples agree if they're identical, one is a substring
+    of the other (found in /code-review): VisionExtraction's procedure_name
+    and price_question are independent optional fields, so one call filling
+    only the bare term ("igra") and the other filling only the full
+    formatted question ("¿cuánto cuesta un examen de igra?") for the SAME
+    correctly-read item would otherwise never match exactly -- OR close
+    enough by edit-distance ratio (found live: two independent reads of a
+    trivially legible single-word image, "igra" (4 chars) vs a 5-char
+    near-miss, scored as a hard disagreement over what's almost certainly
+    a one-character OCR/sampling variance, not a genuinely different
+    answer). stdlib difflib, no new dependency -- a real disagreement
+    (different item entirely) scores far below this threshold, so this
+    doesn't weaken the check against actual steering/hallucination, only
+    against near-identical noise."""
     if not name_1 or not name_2:
         return False
-    return name_1 == name_2 or name_1 in name_2 or name_2 in name_1
+    if name_1 == name_2 or name_1 in name_2 or name_2 in name_1:
+        return True
+    ratio = difflib.SequenceMatcher(None, name_1, name_2).ratio()
+    return ratio >= _CONSENSUS_SIMILARITY_THRESHOLD
 
 
 # Per-model memo of whether with_structured_output actually works. Live

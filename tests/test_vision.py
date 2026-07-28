@@ -205,6 +205,41 @@ async def test_specialization_context_disagreeing_samples_returns_uncertain():
 
 
 @pytest.mark.asyncio
+async def test_consensus_near_miss_one_char_counts_as_agreement():
+    """Regression: found live -- two independent reads of a trivially
+    legible single-word image ("IGRA", 4 chars) scored as a hard
+    disagreement against a 5-char near-miss, most likely a one-character
+    OCR/sampling variance, not a genuinely different answer. Quantified
+    live: this exact case caused a 20% false-uncertain rate (1/5 runs) on
+    the EASIEST image in the test set, from the consensus check's exact/
+    substring-only comparison. Edit-distance tolerance must accept this
+    without weakening the check against real disagreements (see
+    test_specialization_context_disagreeing_samples_returns_uncertain)."""
+    extraction_calls = iter([
+        VisionExtraction(is_legible=True, procedure_name="igra",
+                          price_question="¿Cuánto cuesta un examen de igra?"),
+        VisionExtraction(is_legible=True, procedure_name="igraa",
+                          price_question=None),
+    ])
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return next(extraction_calls)
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: IGRA"
+        )
+
+    assert result == "¿Cuánto cuesta un examen de igra?"
+
+
+@pytest.mark.asyncio
 async def test_specialization_context_accent_only_difference_counts_as_agreement():
     """Regression: /qa 2026-07-24 with WhatsApp-exported real images found the
     consensus check rejecting two samples that read the SAME term but
