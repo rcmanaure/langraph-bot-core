@@ -57,6 +57,7 @@ def _parse_category_table(category: str, body: str) -> list[dict]:
         item_type = _item_type(category, name)
         items.append({
             "id": f"{item_type}-{code.lower()}",
+            "code": code,
             "name": name,
             "price": price,
             "type": item_type,

@@ -127,8 +127,15 @@ def _records_to_chunks(records: list[dict], filename: str) -> tuple[list[dict], 
                 embed_text += "\nIndicaciones: " + ", ".join(str(k) for k in kws)
         else:
             parts: list[str] = []
-            if item.get("id"):
-                parts.append(str(item["id"]))
+            # "code" (real catalog/business code, e.g. "GIN012") takes
+            # priority over "id" (internal source-key slug, e.g.
+            # "biopsy-gin012") for what the LLM echoes back as the item's
+            # displayed code — found live: the bot was showing customers the
+            # internal slug instead of the code printed on the real price
+            # list. "id" still drives source-key uniqueness elsewhere,
+            # unaffected by this display-only change.
+            if item.get("code") or item.get("id"):
+                parts.append(str(item.get("code") or item["id"]))
             if item.get("name"):
                 parts.append(str(item["name"]))
             if item.get("price") is not None:
