@@ -16,6 +16,13 @@ from app.routes.admin import public_router as pricing_router
 from app.routes.admin import router as admin_router
 from app.routes.operator import router as operator_router
 
+# LOG_LEVEL was set in docker-compose.dev.yml but never actually applied --
+# nothing called basicConfig, so the root logger defaulted to WARNING and
+# every INFO-level app log (generate_called, retrieve_top, etc.) was
+# silently dropped, even in "dev" mode. Found live while trying to debug a
+# real retrieval-quality report with no visibility into what actually ran.
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
+
 logger = logging.getLogger(__name__)
 
 limiter = Limiter(key_func=get_remote_address)
