@@ -24,6 +24,14 @@ services:
     build: .
     entrypoint: ["/app/entrypoint.sh"]
     env_file: .env
+    environment:
+      # Testing only -- real env vars here override .env for THIS container
+      # (pydantic-settings prefers real env over the .env file). All cache
+      # layers off while actively debugging vision.py behavior live. Revert
+      # to true (or remove this block) once done.
+      - VISION_CACHE_ENABLED=false
+      - EMBEDDING_CACHE_ENABLED=false
+      - RETRIEVE_CACHE_ENABLED=false
     ports:
       - "8000:8000"
  #   depends_on:
