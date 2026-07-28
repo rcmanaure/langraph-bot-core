@@ -235,6 +235,38 @@ async def test_specialization_context_accent_only_difference_counts_as_agreement
 
 
 @pytest.mark.asyncio
+async def test_consensus_check_reads_samples_field_on_second_extraction_too():
+    """Regression: found live via real Telegram traffic — the FIRST
+    extraction filling samples=[x] (procedure_name empty) is rescued by the
+    schema-confusion guard before reaching consensus, but the SECOND
+    (independent, consensus re-sample) extraction hitting the exact same
+    samples-vs-procedure_name routing quirk was compared using only
+    procedure_name/price_question, which was empty — scored as a
+    disagreement (second_len=0 in logs) even though both reads had actually
+    landed on the same correct answer, just both in samples[0]."""
+    extraction_calls = iter([
+        VisionExtraction(is_legible=True, samples=["Estómago (Antro)"]),
+        VisionExtraction(is_legible=True, samples=["Estómago (Antro)"]),
+    ])
+
+    async def _fake_structured_or_json(llm, model_name, prompt, img_b64, schema, json_suffix):
+        if schema is VisionExtraction:
+            return next(extraction_calls)
+        return VisionVerification(text_visible=True)
+
+    with (
+        patch("app.services.vision.settings.openai_vision_model", "some-vision-model"),
+        patch("app.services.vision.get_vision_llm", return_value=MagicMock()),
+        patch("app.services.vision._structured_or_json", side_effect=_fake_structured_or_json),
+    ):
+        result = await extract_procedure_query(
+            b"fake image bytes", "", specialization_context="jerga médica: patología"
+        )
+
+    assert result == "¿Cuánto cuesta Estómago (Antro)?"
+
+
+@pytest.mark.asyncio
 async def test_specialization_context_agreeing_samples_proceeds_to_verify():
     """Consensus check: two independent samples that DO agree (case-insensitive)
     proceed normally to the verify pass and return the extracted question."""

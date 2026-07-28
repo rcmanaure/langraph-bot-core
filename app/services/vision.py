@@ -151,6 +151,25 @@ def _normalize_for_comparison(text_value: str) -> str:
     return "".join(c for c in normalized if not unicodedata.combining(c))
 
 
+def _extraction_display_text(extraction: VisionExtraction) -> str:
+    """The effective single-item answer for an extraction, wherever the model
+    put it. procedure_name/price_question take priority when set; otherwise
+    a single populated sample is trusted (see the schema-confusion guard in
+    extract_procedure_query for why bare samples=[x] is trustworthy). Shared
+    by extract_procedure_query (for the PRIMARY extraction) and
+    _run_consensus_check (for the SECOND independent extraction) — found
+    live: the second call can hit the exact same samples-vs-procedure_name
+    routing quirk as the first, and _run_consensus_check was only reading
+    procedure_name/price_question, so a second call that (correctly) filled
+    samples[0] and left the rest empty compared as "" and was scored as a
+    disagreement against a genuinely matching first answer."""
+    if extraction.procedure_name or extraction.price_question:
+        return extraction.procedure_name or extraction.price_question or ""
+    if extraction.samples and len(extraction.samples) == 1:
+        return extraction.samples[0]
+    return ""
+
+
 def _consensus_agrees(name_1: str, name_2: str) -> bool:
     """Two consensus samples agree if they're identical, OR one is a
     substring of the other (found in /code-review): VisionExtraction's
@@ -420,8 +439,8 @@ async def _run_consensus_check(
         logger.warning("vision_consensus_sample_failed=%s defaulting to uncertain", exc)
         return False
 
-    name_1 = _normalize_for_comparison(extraction.procedure_name or extraction.price_question or "")
-    name_2 = _normalize_for_comparison(extraction_2.procedure_name or extraction_2.price_question or "")
+    name_1 = _normalize_for_comparison(_extraction_display_text(extraction))
+    name_2 = _normalize_for_comparison(_extraction_display_text(extraction_2))
     if not _consensus_agrees(name_1, name_2):
         logger.warning("vision_consensus_disagreement first_len=%d second_len=%d", len(name_1), len(name_2))
         return False
