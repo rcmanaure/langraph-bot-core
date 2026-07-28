@@ -37,12 +37,14 @@ class Settings(BaseSettings):
     rrf_k: int = 60
     # Cross-encoder reranking of hybrid-search candidates before generation
     rerank_enabled: bool = True
-    # Dev/testing escape hatch: vision_cache repeatedly confounded live
-    # debugging this session (a photo re-tested minutes apart served a
-    # 2-day-old pre-fix result from cache, hiding whether code fixes
-    # actually worked). Default True (unchanged production behavior) --
-    # set VISION_CACHE_ENABLED=false during active vision.py testing.
+    # Dev/testing escape hatches for every cache layer in the codebase --
+    # vision_cache repeatedly confounded live debugging this session (a
+    # photo re-tested minutes apart served a 2-day-old pre-fix result from
+    # cache, hiding whether code fixes actually worked). All default True
+    # (unchanged production behavior); set to false during active testing.
     vision_cache_enabled: bool = True
+    embedding_cache_enabled: bool = True
+    retrieve_cache_enabled: bool = True
     rerank_candidate_k: int = 20
     rerank_model: str = "nvidia/llama-nemotron-rerank-vl-1b-v2:free"
 

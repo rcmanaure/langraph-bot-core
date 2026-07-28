@@ -69,6 +69,9 @@ class CachedEmbeddings:
         if not texts:
             return []
 
+        if not settings.embedding_cache_enabled:
+            return await self._underlying.aembed_documents(texts)
+
         keys = [_cache_key(t) for t in texts]
         cached = await _get_cached(keys)
 

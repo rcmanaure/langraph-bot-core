@@ -2,6 +2,7 @@ from langgraph.cache.memory import InMemoryCache
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import CachePolicy, RetryPolicy
 
+from app.config import settings
 from app.graph.nodes.generate import generate
 from app.graph.nodes.interrupt import interrupt_node
 from app.graph.nodes.prune_history import prune_history
@@ -51,7 +52,7 @@ def build_graph(checkpointer=None, store=None):
         "retrieve",
         retrieve,
         retry_policy=_RETRIEVE_RETRY,
-        cache_policy=CachePolicy(key_func=retrieve_cache_key, ttl=90),
+        cache_policy=CachePolicy(key_func=retrieve_cache_key, ttl=90) if settings.retrieve_cache_enabled else None,
     )
     # triage() swallows every exception internally and always falls back to a
     # default decision, so no retry_policy here would ever fire — see

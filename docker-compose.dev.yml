@@ -28,6 +28,15 @@ services:
       - DEBUG=true
       - LOG_LEVEL=info
       - DATABASE_URL=postgresql://${DB_USER:-ragbot}:${DB_PASSWORD:-ragbot}@postgres:5432/${DB_NAME:-ragbot}
+      # Testing only -- real env vars here override .env for THIS container
+      # only (pydantic-settings prefers real env over the .env file), so
+      # local pytest runs (which read .env directly, no override) stay on
+      # defaults. Putting these in .env instead broke 3 vision cache tests
+      # that assume caching is on by default -- found live. Revert to true
+      # (or remove) once done actively testing.
+      - VISION_CACHE_ENABLED=false
+      - EMBEDDING_CACHE_ENABLED=false
+      - RETRIEVE_CACHE_ENABLED=false
     ports:
       - "8000:8000"
     volumes:
