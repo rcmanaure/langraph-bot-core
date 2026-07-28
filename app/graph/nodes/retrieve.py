@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 
@@ -13,6 +14,14 @@ from app.services.tenant_context import get_tenant_specialization
 from app.state import AgentState
 
 logger = logging.getLogger(__name__)
+
+# Rewrite is a query-expansion nicety, not critical path -- fail fast and
+# fall back to the raw (un-rewritten) query rather than block the user's
+# whole turn on a slow model. See _rewrite_query's inline comment for the
+# live incident (a reasoning model burning ~9 minutes of streamed reasoning
+# tokens with no single read gap long enough to trip the client's own
+# per-request timeout) that this bounds.
+_REWRITE_TIMEOUT_SECONDS = 10
 
 # A bare confirmation ("si", "sí", "correcto"...) has no retrievable content of
 # its own — it's answering the bot's PREVIOUS question (e.g. an approximation
@@ -73,8 +82,16 @@ async def _rewrite_query(query: str, specialization: str) -> str:
     llm = get_chat_llm()
     prompt = _REWRITE_PROMPT.format(specialization=specialization, query=query)
     try:
-        result: RewrittenQuery = await llm.with_structured_output(RewrittenQuery).ainvoke(
-            [HumanMessage(content=prompt)]
+        # get_chat_llm()'s client-level timeout=60 does NOT bound total call
+        # duration for reasoning-capable models (found live: OPENAI_MODEL is
+        # a free reasoning model that streamed tokens continuously for ~9
+        # minutes before failing -- no single read gap exceeded 60s, so the
+        # client timeout never fired). Rewrite is a pure enhancement, not
+        # critical path, so fail fast and fall back to the raw query rather
+        # than block the whole user turn on a slow/stuck reasoning chain.
+        result: RewrittenQuery = await asyncio.wait_for(
+            llm.with_structured_output(RewrittenQuery).ainvoke([HumanMessage(content=prompt)]),
+            timeout=_REWRITE_TIMEOUT_SECONDS,
         )
         addition = result.query.strip()
         # Defense in depth: the prompt asks for an empty string when there's

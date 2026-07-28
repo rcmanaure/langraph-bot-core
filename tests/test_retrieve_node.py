@@ -171,6 +171,37 @@ async def test_retrieve_rewrite_failure_falls_back_to_raw_query():
     assert mock_retrieve.await_args[0][1] == "cuanto cuesta la biopsia"
 
 
+@pytest.mark.asyncio
+async def test_retrieve_rewrite_timeout_falls_back_to_raw_query():
+    """Regression: found live -- a reasoning-capable OPENAI_MODEL streamed
+    tokens continuously for ~9 minutes before failing, and no single read
+    gap exceeded the client's own timeout=60, so it never fired. Rewrite
+    must bound total call duration itself and fall back, not block the
+    user's turn indefinitely."""
+    import asyncio
+
+    state = _state()
+    mock_llm = MagicMock()
+
+    async def _hangs_forever(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    mock_llm.with_structured_output.return_value.ainvoke = _hangs_forever
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="Patología")),
+        patch("app.graph.nodes.retrieve.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.retrieve._REWRITE_TIMEOUT_SECONDS", 0.05),
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
+        patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
+    ):
+        await retrieve(state)
+
+    assert mock_retrieve.await_args[0][1] == "cuanto cuesta la biopsia"
+
+
 def test_cache_key_format():
     state = _state(tenant_id="acme")
     assert cache_key(state) == "acme::cuanto cuesta la biopsia"
