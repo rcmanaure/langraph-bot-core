@@ -382,6 +382,8 @@ async def _get_cached_vision_result(key: str) -> str | None:
 async def _store_vision_result(key: str, result: str) -> None:
     """Best-effort: a cache WRITE failure must never discard an already-computed
     (and already-paid-for) correct result — log and move on."""
+    if not settings.vision_cache_enabled:
+        return
     try:
         async with AsyncSessionLocal() as db:
             await db.execute(
@@ -540,6 +542,8 @@ async def _handle_multi_sample(
 async def _get_cached_result_or_none(cache_key: str) -> str | None:
     """A cache-read failure degrades to a cache miss, not an error — the
     extraction path below is the safe fallback either way."""
+    if not settings.vision_cache_enabled:
+        return None
     try:
         return await _get_cached_vision_result(cache_key)
     except Exception as exc:
