@@ -58,9 +58,29 @@ services:
     networks:
       - lgbot-dev
 
+  phoenix:
+    # Pinned version, not :latest -- matches this file's existing Postgres
+    # pinning convention (pgvector/pgvector:0.8.2-pg16 above), specifically
+    # to avoid debugging against a dev container that doesn't match prod.
+    image: arizephoenix/phoenix:version-11.15.0
+    ports:
+      # 127.0.0.1 (not 0.0.0.0) even in dev -- on a developer's own
+      # machine this is already equivalent to localhost:6006, so it costs
+      # nothing, and it keeps the same habit as prod (docker-compose.yml)
+      # so nobody copy-pastes a bare "6006:6006" from here into prod.
+      - "127.0.0.1:6006:6006"
+      - "127.0.0.1:4317:4317"
+    environment:
+      - PHOENIX_WORKING_DIR=/mnt/data
+    volumes:
+      - phoenix_dev_data:/mnt/data
+    networks:
+      - lgbot-dev
+
 volumes:
   pgdata:
   api-venv:
+  phoenix_dev_data:
 
 networks:
   lgbot-dev:
