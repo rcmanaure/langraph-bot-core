@@ -48,7 +48,13 @@ async def list_tenants(_: None = Depends(verify_operator_key)):
 
 
 class TenantCreate(BaseModel):
-    slug: str
+    # Interpolated unescaped into a webhook URL sent to Telegram's setWebhook
+    # (see webhook_url f-string below and at line ~278) -- a slug with a
+    # space or "!" produces a URL Telegram rejects, and set_webhook() only
+    # logs that as a warning, so the tenant silently ends up with no working
+    # webhook. Restrict to the same charset every slug in this codebase
+    # already uses (e.g. "qa-demo").
+    slug: str = Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$", max_length=64)
     bot_token: str
     webhook_secret: str
     expertise_area: str = ""

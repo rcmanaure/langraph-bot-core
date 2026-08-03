@@ -208,6 +208,29 @@ async def test_create_tenant_missing_webhook_secret_returns_422():
 
 
 @pytest.mark.asyncio
+async def test_create_tenant_invalid_slug_returns_422():
+    """Regression: QA on 2026-08-03 found slug had no format validation —
+    "My Tenant!" was accepted and interpolated unescaped into the Telegram
+    webhook URL (app/routes/admin.py), which Telegram then rejected,
+    leaving the tenant with a silently broken webhook. Slug must match
+    the lowercase-alnum-with-hyphens pattern every other slug in this
+    codebase already uses.
+    """
+    app = make_app()
+    payload = {**VALID_TENANT, "slug": "My Tenant!"}
+    r = await _request(app, "post", "/admin/tenants", json=payload)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_tenant_uppercase_slug_returns_422():
+    app = make_app()
+    payload = {**VALID_TENANT, "slug": "UpperCase"}
+    r = await _request(app, "post", "/admin/tenants", json=payload)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_create_tenant_specialization_context_persisted():
     """specialization_context in the create payload reaches the INSERT."""
     app = make_app()
