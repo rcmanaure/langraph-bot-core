@@ -100,11 +100,8 @@ Open the admin panel and log in with your operator key:
 http://localhost:8000/admin/ui
 ```
 
-The operator key is `SHA256(SECRET_KEY)`. Generate it:
-
-```bash
-echo -n "your-SECRET_KEY-value" | sha256sum
-```
+The operator key is your `SECRET_KEY` value itself (sent as-is in the
+`X-Operator-Key` header — see `app/auth.py`), not a hash of it.
 
 In the **Tenants** tab, fill in slug, bot token, webhook secret, and expertise area.
 
@@ -188,7 +185,7 @@ GET /health  →  {"status": "ok"}
 **Operator key** — used by the admin panel and `/admin/*` routes:
 
 ```
-X-Operator-Key: sha256(SECRET_KEY)
+X-Operator-Key: <SECRET_KEY value, raw — not hashed>
 ```
 
 **Tenant API key** — generated on tenant creation (shown once). Used for future per-tenant integrations.
