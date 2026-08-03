@@ -22,7 +22,11 @@ services:
 
   api:
     build: .
-    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    # Migrations must run before uvicorn starts (see entrypoint.sh, which
+    # prod uses) -- a bare uvicorn command here skips them, so a fresh dev
+    # DB crashes on boot with UndefinedTableError. Found live: cold dev
+    # stack failed on _cleanup_stuck_jobs() querying index_jobs pre-migration.
+    command: ["sh", "-c", "alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     environment:
       - ENVIRONMENT=development
       - DEBUG=true
@@ -37,6 +41,11 @@ services:
       - VISION_CACHE_ENABLED=false
       - EMBEDDING_CACHE_ENABLED=false
       - RETRIEVE_CACHE_ENABLED=false
+      # Phoenix tracing on for this QA session -- endpoint must be the
+      # compose service name (phoenix:4317), "localhost" from inside this
+      # container is itself, not the phoenix container.
+      - OBSERVABILITY_ENABLED=true
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
     ports:
       - "8000:8000"
     volumes:
@@ -58,9 +67,51 @@ services:
     networks:
       - lgbot-dev
 
+  phoenix:
+    # Pinned version, not :latest -- matches this file's existing Postgres
+    # pinning convention (pgvector/pgvector:0.8.2-pg16 above), specifically
+    # to avoid debugging against a dev container that doesn't match prod.
+    image: arizephoenix/phoenix:13.15.0
+    ports:
+      # 127.0.0.1 (not 0.0.0.0) even in dev -- on a developer's own
+      # machine this is already equivalent to localhost:6006, so it costs
+      # nothing, and it keeps the same habit as prod (docker-compose.yml)
+      # so nobody copy-pastes a bare "6006:6006" from here into prod.
+      - "127.0.0.1:6006:6006"
+      - "127.0.0.1:4317:4317"
+    environment:
+      - PHOENIX_WORKING_DIR=/mnt/data
+    volumes:
+      - phoenix_dev_data:/mnt/data
+    networks:
+      - lgbot-dev
+
+  cloudflared-api:
+    # Quick Tunnel -- zero config, no Cloudflare account/domain needed.
+    # Prints a random https://*.trycloudflare.com URL to its own logs on
+    # startup (`docker compose logs cloudflared-api`). Dev/local testing
+    # only -- ephemeral URL, not for anything that needs a stable address.
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://api:8000
+    depends_on:
+      - api
+    networks:
+      - lgbot-dev
+    restart: unless-stopped
+
+  cloudflared-phoenix:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://phoenix:6006
+    depends_on:
+      - phoenix
+    networks:
+      - lgbot-dev
+    restart: unless-stopped
+
 volumes:
   pgdata:
   api-venv:
+  phoenix_dev_data:
 
 networks:
   lgbot-dev:

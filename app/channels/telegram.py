@@ -405,7 +405,19 @@ async def telegram_webhook(
         logger.warning("tg_bad_secret tenant=%s", tenant_slug)
         return {"ok": True}
 
-    body = await request.json()
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("update body is not a JSON object")
+    except ValueError:
+        # Same "always 200 fast" contract as the other early-returns above --
+        # an unhandled exception here would 500, and Telegram retries a
+        # failed delivery forever instead of dropping it like every other
+        # invalid-update path in this handler. Covers malformed JSON and
+        # valid-but-non-object JSON (e.g. a bare list or string), both of
+        # which would otherwise reach body.get() and raise AttributeError.
+        logger.warning("tg_malformed_body tenant=%s", tenant_slug)
+        return {"ok": True}
 
     update_id = body.get("update_id")
     if update_id is not None and _is_duplicate(tenant_slug, update_id):

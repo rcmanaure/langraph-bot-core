@@ -63,8 +63,33 @@ services:
       - traefik.http.routers.lgbot_upload.service=lgbot_upload
       - traefik.http.services.lgbot_upload.loadbalancer.server.port=8000
 
+  phoenix:
+    # Pinned version, not :latest -- see docker-compose.dev.yml for why
+    # (this repo already pins Postgres in dev specifically to avoid
+    # dev/prod drift; Phoenix follows the same convention).
+    image: arizephoenix/phoenix:13.15.0
+    ports:
+      # Loopback-only, never a bare "6006:6006" (binds 0.0.0.0 = public
+      # internet by default). No VPN/private network exists in this repo
+      # (verified -- only Traefik + external docker networks). Reach the UI
+      # via an SSH tunnel to the host: ssh -L 6006:localhost:6006 <host>.
+      - "127.0.0.1:6006:6006"  # UI/API
+      - "127.0.0.1:4317:4317"  # OTLP gRPC
+    environment:
+      - PHOENIX_WORKING_DIR=/mnt/data
+      - PHOENIX_ENABLE_AUTH=true
+      - PHOENIX_SECRET=${PHOENIX_SECRET}
+      - PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD=${PHOENIX_ADMIN_PASSWORD}
+    volumes:
+      - phoenix_data:/mnt/data
+    restart: unless-stopped
+    networks:
+      - lgbot-net
+
 #volumes:
 #  pgdata:
+volumes:
+  phoenix_data:
 
 networks:
   lgbot-net:

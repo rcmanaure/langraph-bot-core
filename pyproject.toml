@@ -9,7 +9,6 @@ dependencies = [
     "langgraph-checkpoint-postgres>=2.0.0",
     "langchain-core>=0.3.0",
     "langchain-openai>=0.2.0",
-    "langsmith>=0.2.0",
     # FastAPI / web
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -42,6 +41,9 @@ dependencies = [
     "apscheduler>=3.10.0",
     # Monitoring
     "sentry-sdk[fastapi]>=2.19.0",
+    "arize-phoenix-otel>=0.10.0",
+    "arize-phoenix-client>=1.0.0",
+    "openinference-instrumentation-langchain>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -70,6 +72,6 @@ ignore = ["E501"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
-    "integration: requires live docker services (postgres)",
+    "integration: requires live docker services (postgres, phoenix)",
     "eval: requires LANGCHAIN_API_KEY, calls LLM",
 ]

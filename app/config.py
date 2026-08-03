@@ -59,16 +59,14 @@ class Settings(BaseSettings):
     csrf_secret: str = ""
     operator_token: str = ""  # if set, used for operator/admin auth instead of secret_key
 
-    # LangSmith
-    langchain_tracing_v2: bool = False
-    langchain_api_key: str = ""
-    langchain_project: str = "langraph-bot-v1"
-    langsmith_hide_inputs: bool = False
-    langsmith_hide_outputs: bool = False
-
     # Observability
     sentry_dsn: str = ""
     environment: str = "dev"
+    # Phoenix (LLM tracing, replaces LangSmith -- open source, self-hosted
+    # free, see docs/adr for the decision). Off by default -- flipped on
+    # manually per environment only after the redaction self-check passes
+    # (see _setup_phoenix in app/main.py).
+    observability_enabled: bool = False
 
     # STT
     groq_api_key: str = ""

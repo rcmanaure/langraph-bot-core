@@ -200,6 +200,44 @@ async def test_empty_string_secret_returns_ok(mock_db):
     assert r.json() == {"ok": True}
 
 
+@pytest.mark.asyncio
+async def test_malformed_json_body_returns_ok(mock_db):
+    """Regression: QA on 2026-08-03 found a valid-secret request with a
+    malformed JSON body raised an unhandled JSONDecodeError -> 500, breaking
+    this handler's own "always 200 fast" contract (comment above
+    telegram_webhook) and making Telegram retry the bad update forever."""
+    app = make_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            f"/webhook/telegram/{SLUG}",
+            content=b"{bad json",
+            headers={
+                "x-telegram-bot-api-secret-token": SECRET,
+                "content-type": "application/json",
+            },
+        )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_valid_json_non_object_body_returns_ok(mock_db):
+    """Same contract as above for valid-but-non-dict JSON (bare list/string),
+    which would otherwise reach body.get() and raise AttributeError."""
+    app = make_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            f"/webhook/telegram/{SLUG}",
+            content=b"[1, 2, 3]",
+            headers={
+                "x-telegram-bot-api-secret-token": SECRET,
+                "content-type": "application/json",
+            },
+        )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+
+
 # ── 3. Message parsing ─────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
