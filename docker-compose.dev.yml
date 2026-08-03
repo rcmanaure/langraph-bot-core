@@ -22,7 +22,11 @@ services:
 
   api:
     build: .
-    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    # Migrations must run before uvicorn starts (see entrypoint.sh, which
+    # prod uses) -- a bare uvicorn command here skips them, so a fresh dev
+    # DB crashes on boot with UndefinedTableError. Found live: cold dev
+    # stack failed on _cleanup_stuck_jobs() querying index_jobs pre-migration.
+    command: ["sh", "-c", "alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     environment:
       - ENVIRONMENT=development
       - DEBUG=true
