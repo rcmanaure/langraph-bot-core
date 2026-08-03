@@ -186,6 +186,14 @@ def _setup_phoenix() -> None:
     if not settings.observability_enabled:
         return
 
+    # HIDE_INPUT_TEXT/HIDE_OUTPUT_TEXT alone do NOT cover it -- verified live
+    # against Phoenix: those two only mask the structured
+    # llm.input_messages.N.message.content attributes. The separate
+    # input.value/output.value attributes (raw serialized request/response,
+    # also populated on LLM-kind spans by LangChainInstrumentor) leaked the
+    # full unmasked content until HIDE_INPUTS/HIDE_OUTPUTS were added here.
+    os.environ["OPENINFERENCE_HIDE_INPUTS"] = "true"
+    os.environ["OPENINFERENCE_HIDE_OUTPUTS"] = "true"
     os.environ["OPENINFERENCE_HIDE_INPUT_TEXT"] = "true"
     os.environ["OPENINFERENCE_HIDE_OUTPUT_TEXT"] = "true"
     os.environ["OPENINFERENCE_HIDE_INPUT_IMAGES"] = "true"

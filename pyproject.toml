@@ -72,6 +72,6 @@ ignore = ["E501"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
-    "integration: requires live docker services (postgres)",
+    "integration: requires live docker services (postgres, phoenix)",
     "eval: requires LANGCHAIN_API_KEY, calls LLM",
 ]

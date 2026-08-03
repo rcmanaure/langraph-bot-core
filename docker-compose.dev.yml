@@ -62,7 +62,7 @@ services:
     # Pinned version, not :latest -- matches this file's existing Postgres
     # pinning convention (pgvector/pgvector:0.8.2-pg16 above), specifically
     # to avoid debugging against a dev container that doesn't match prod.
-    image: arizephoenix/phoenix:version-11.15.0
+    image: arizephoenix/phoenix:13.15.0
     ports:
       # 127.0.0.1 (not 0.0.0.0) even in dev -- on a developer's own
       # machine this is already equivalent to localhost:6006, so it costs

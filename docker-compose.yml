@@ -67,7 +67,7 @@ services:
     # Pinned version, not :latest -- see docker-compose.dev.yml for why
     # (this repo already pins Postgres in dev specifically to avoid
     # dev/prod drift; Phoenix follows the same convention).
-    image: arizephoenix/phoenix:version-11.15.0
+    image: arizephoenix/phoenix:13.15.0
     ports:
       # Loopback-only, never a bare "6006:6006" (binds 0.0.0.0 = public
       # internet by default). No VPN/private network exists in this repo
