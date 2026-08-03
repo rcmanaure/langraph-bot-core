@@ -54,3 +54,19 @@ Items accepted for future work but out of current PR scope.
   cost per preview. Depends on: the base `specialization_context` field
   (shipped 2026-07-24) being live long enough to know how often operators
   actually need to iterate on the text.
+- **Webhook endpoints have no rate limiting.** (/qa 2026-08-03) `slowapi`'s
+  `Limiter` is only applied to `/operator/resume` (`20/minute`). An
+  unauthenticated POST flood against a guessed/leaked tenant slug on
+  `/webhook/telegram/{slug}` or `/webhook/whatsapp/{slug}` isn't throttled
+  at the app layer — auth there is a per-tenant secret, not IP-based, so it
+  may be an intentional gap, but it wasn't a deliberate decision anyone
+  made. Revisit if webhook abuse shows up in logs/cost.
+- **`retrieve_chunks()` and `_call_rerank_api()` aren't wrapped in OTel
+  spans.** (/qa 2026-08-03, Phoenix trace review) They're plain
+  httpx/SQLAlchemy calls, not LangChain Runnables, so `auto_instrument=True`
+  never captures them — a 37.7s trace during this QA session showed ~3s of
+  visible ChatOpenAI spans and 30+s of unattributed dead time between
+  `triage` and `generate`, almost certainly the embedding/rerank call
+  against a free-tier OpenRouter model. Add explicit spans around both so
+  the next latency spike is diagnosable instead of invisible. See
+  `.gstack/qa-reports/qa-report-langraph-bot-v1-2026-08-03.md`.
