@@ -2,13 +2,22 @@
 
 Items accepted for future work but out of current PR scope.
 
-- **WhatsApp: `WhatsAppAdapter.normalize()` is unused by the live webhook path.**
-  `whatsapp_webhook`/`_handle_message` (`app/channels/whatsapp.py`) parse the raw
-  payload directly instead of going through the `ChannelAdapter` Protocol, unlike
-  Telegram's text path. Already flagged in code as `ponytail: ... migrate when
-  adding a 3rd channel` — deferred again rather than refactored under time
-  pressure while getting WhatsApp ready for testing. Revisit when adding a 3rd
-  channel or when unifying the two handlers' message-type branching.
+- **WhatsApp is not yet on the inbound turn.** Telegram now runs through
+  `app/channels/turn.py` behind the six-method `ChannelAdapter` (`app/channels/base.py`);
+  `whatsapp_webhook`/`_handle_message` still parse payloads and re-implement the
+  turn inline. Second commit of the same refactor — until it lands, WhatsApp keeps
+  its own copies of the size gate, STT/vision branching and graph invocation, and
+  `MAX_MEDIA_BYTES` stays re-exported from `app/services/vision.py` for it. The
+  `wa_service_windows` update and the `hub.challenge` GET stay channel-specific;
+  everything else moves behind `run_turn`.
+- **`POST /operator/resume` never delivers the operator's answer to the user.**
+  (found during the inbound-turn design review, 2026-08-15) It invokes the graph
+  and returns the answer in the HTTP response body only — nothing sends it back
+  over Telegram/WhatsApp, so a human takeover is invisible to the person who
+  asked. Now cheap to fix: `ChannelAdapter.send` is reachable outside the turn,
+  and `thread_id` carries tenant/user/channel (`app/graph/thread.py:parse_thread_part`).
+  Open questions before implementing: rebuilding channel credentials from a
+  `thread_id`, and what to do when WhatsApp's 24h service window has closed.
 - **Feedback de usuario 👍/👎 sobre respuestas del bot.** (movido desde plan
   voz/escalabilidad, eng-review 2026-07-06 D9 — no seleccionada en decisión CEO)
   Qué: botones inline (Telegram) / reacciones (WhatsApp) → tabla feedback.

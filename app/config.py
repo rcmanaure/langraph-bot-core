@@ -92,6 +92,12 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+# Shared cap for every inbound media download (voice, audio, image), enforced
+# by the inbound turn before any adapter fetches bytes. Lives here rather than
+# in a feature module so neither the vision nor the STT path owns a limit the
+# other also depends on.
+MAX_MEDIA_BYTES = 10 * 1024 * 1024  # 10 MB
+
 PLAN_LIMITS: dict[str, dict] = {
     "free":  {"docs": 5,   "chunks": 500,   "queries_monthly": 500},
     "basic": {"docs": 20,  "chunks": 2000,  "queries_monthly": 2000},

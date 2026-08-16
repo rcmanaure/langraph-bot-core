@@ -17,6 +17,10 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from pydantic import BaseModel
 from sqlalchemy import text
 
+# Re-exported, not used here: the cap now lives in app/config.py because it
+# bounds every media kind, not just images. whatsapp.py still imports it from
+# this module — drop this line once that handler moves onto the inbound turn.
+from app.config import MAX_MEDIA_BYTES as MAX_MEDIA_BYTES
 from app.config import settings
 from app.db import AsyncSessionLocal
 from app.schemas.vision import VisionExtraction, VisionVerification
@@ -52,8 +56,6 @@ if _TESSERACT_AVAILABLE and not shutil.which("tesseract"):
             # way posix shlex does — quoting here embeds literal quotes into
             # the path tesseract receives and breaks --tessdata-dir entirely.
             _TESSDATA_OVERRIDE = f"--tessdata-dir {_user_tessdata}"
-
-MAX_MEDIA_BYTES = 10 * 1024 * 1024  # 10 MB — shared cap for voice/audio/image downloads
 
 VISION_UNCERTAIN = "__VISION_UNCERTAIN__"
 
