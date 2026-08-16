@@ -229,3 +229,5 @@ test_images/
 .opencode
 .clinerules
 .cursor
+.agents
+skills-lock.json
