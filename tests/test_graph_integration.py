@@ -127,6 +127,62 @@ async def test_full_rag_flow_retrieves_reranks_and_answers():
 
 
 @pytest.mark.asyncio
+async def test_retrieval_and_rerank_spans_are_emitted():
+    """Neither the raw SQL retrieval query nor the rerank httpx call is a
+    LangChain runnable, so OpenInference's auto-instrumentation never
+    produces a span for either -- without an explicit one, both show up as
+    unattributed dead time between the triage and generate spans. Patches
+    each service module's tracer directly (rather than the global OTel
+    tracer provider, which real registration -- see app.main.register --
+    can only ever be set once per process) so this test doesn't depend on
+    whether an earlier test in the same run already claimed it."""
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    tracer_provider = TracerProvider()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+    test_tracer = tracer_provider.get_tracer("test")
+
+    graph = build_graph(checkpointer=None)
+    state = _initial_state("cuanto cuesta la biopsia de pulmon")
+    rows = [
+        _db_row("SRP009 | Pulmón – PAFF | $90.00"),
+        _db_row("SRP011 | Lobectomía | $240.00"),
+    ]
+    # top_k_results=1 < len(rows)=2 so rerank_chunks() actually calls the
+    # API instead of skipping via its own len(chunks) <= top_k gate.
+    rerank_client = _mock_rerank_http_response([
+        {"index": 0, "relevance_score": 0.9, "document": {"text": ""}},
+        {"index": 1, "relevance_score": 0.4, "document": {"text": ""}},
+    ])
+    llm = _mock_chat_llm("respuesta", triage_decision="rag")
+    db = _mock_db_session(fetchall_rows=rows)
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
+        patch("app.services.rag._tracer", test_tracer),
+        patch("app.services.rag.settings.rerank_enabled", True),
+        patch("app.services.rag.settings.top_k_results", 1),
+        patch("app.services.rerank.httpx.AsyncClient", return_value=rerank_client),
+        patch("app.services.rerank._tracer", test_tracer),
+        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
+    ):
+        await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
+
+    spans_by_name = {s.name: s for s in exporter.get_finished_spans()}
+    assert "chunk_retrieval" in spans_by_name
+    assert "rerank" in spans_by_name
+    assert spans_by_name["chunk_retrieval"].attributes["openinference.span.kind"] == "RETRIEVER"
+    assert spans_by_name["rerank"].attributes["openinference.span.kind"] == "RERANKER"
+
+
+@pytest.mark.asyncio
 async def test_rerank_http_failure_falls_back_but_graph_still_completes():
     """This is the regression-proofing test for the rerank swap: if the
     OpenRouter /rerank call fails mid-graph, rerank_chunks() falls back to
