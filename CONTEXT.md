@@ -53,3 +53,7 @@ An indexed slice of a tenant's corpus, embedded for retrieval. Stored in Postgre
 ## Triage decision
 
 The classification the graph assigns an incoming message before doing any work: `greeting`, `catalog`, `rag`, `off_topic`. It decides which nodes run.
+
+## Staff member
+
+A channel-and-identifier pair an operator has nominated as staff for a tenant, in the admin panel — distinct from the person making an enquiry, who is never staff by default. Membership is a per-tenant, per-channel allowlist (`staff_members` table); resolving it reads only the channel-supplied identifier, never anything the person said. A message cannot claim staff status — see [ADR-006](docs/adr/ADR-006-staff-actor.md).

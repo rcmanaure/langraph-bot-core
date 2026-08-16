@@ -34,7 +34,6 @@ class Tenant(Base):
     specialization_context = Column(Text, nullable=False, default="", server_default="")
     contact_url = Column(String(512), nullable=True)
     example_questions = Column(JSON, nullable=True)
-    operator_chat_id = Column(String(64), nullable=True)
     web_search_enabled = Column(Boolean, default=False, server_default="false")
     doc_structure_summary = Column(Text, nullable=True)
     active = Column(Boolean, default=True)

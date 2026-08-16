@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from langchain_core.messages import HumanMessage
 
@@ -11,6 +13,17 @@ def clear_dedup_caches():
     yield
     telegram._SEEN.clear()
     whatsapp._SEEN.clear()
+
+
+@pytest.fixture(autouse=True)
+def mock_resolve_staff():
+    """The inbound turn resolves staff membership via a real DB query
+    (app.services.staff.resolve_staff) before every graph invocation.
+    Default every test to non-staff so tests that don't care about staff
+    resolution don't need their own DB mock; tests that do care (see
+    tests/test_turn.py) inspect or override this fixture's mock."""
+    with patch("app.channels.turn.resolve_staff", new_callable=AsyncMock, return_value=False) as mock:
+        yield mock
 
 
 @pytest.fixture

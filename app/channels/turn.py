@@ -14,6 +14,7 @@ from langchain_core.messages import HumanMessage
 
 from app.channels.base import ChannelAdapter, Inbound, MediaRef, MediaTooLarge
 from app.config import MAX_MEDIA_BYTES, settings
+from app.services.staff import resolve_staff
 from app.services.tenant_context import get_tenant_specialization
 from app.services.vision import VISION_UNCERTAIN, extract_procedure_query
 
@@ -187,6 +188,11 @@ async def _reply(adapter: ChannelAdapter, inbound: Inbound, text: str, graph) ->
         await _send(adapter, inbound, SERVICE_UNAVAILABLE)
         return
 
+    # Resolved once per turn, here — the only place the graph is invoked —
+    # from tenant/channel/user id alone. Never from anything in `text`: a
+    # message claiming staff status in prose grants nothing (see ADR-006).
+    is_staff = await resolve_staff(inbound.tenant_slug, inbound.channel, inbound.user_id)
+
     try:
         result = await graph.ainvoke(
             {
@@ -194,6 +200,7 @@ async def _reply(adapter: ChannelAdapter, inbound: Inbound, text: str, graph) ->
                 "thread_id": inbound.thread_id,
                 "messages": [HumanMessage(content=text)],
                 "answer": "",
+                "is_staff": is_staff,
             },
             config={"configurable": {"thread_id": inbound.thread_id}},
         )
