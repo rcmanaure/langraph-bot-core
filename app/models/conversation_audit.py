@@ -20,7 +20,6 @@ class ConversationAudit(Base):
     channel = Column(String(20), nullable=False)
     user_message = Column(Text, nullable=True)
     bot_response = Column(Text, nullable=True)
-    langsmith_trace_url = Column(String(512), nullable=True)
     # Interrupt tracking — queried by expire_interrupted_threads scheduler
     interrupt_started_at = Column(DateTime(timezone=True), nullable=True)
     expired_at = Column(DateTime(timezone=True), nullable=True)

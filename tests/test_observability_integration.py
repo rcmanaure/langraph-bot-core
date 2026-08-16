@@ -19,9 +19,11 @@ specifically for this kind of test: it makes calls the instrumentor can see,
 with no network cost.
 
 Tests cover:
-  - Redaction: a marker string set as LLM input/output never appears in the
-    exported span, once OPENINFERENCE_HIDE_* env vars are set (mirrors
-    app.main._verify_redaction's own technique)
+  - Selective redaction: the system prompt and the model's own answer
+    survive into an exported span unmasked, while the requester's message
+    text and any inbound image never appear -- mirrors the real wiring in
+    app.main._setup_phoenix (RedactingSpanExporter), not just the blanket
+    OPENINFERENCE_HIDE_* env vars.
   - Happy path / wiring: a real (fake-LLM) LangChain call produces a span in
     Phoenix -- proves auto-instrumentation actually engages, not just that
     register() didn't raise
@@ -57,16 +59,24 @@ pytestmark = [
 def phoenix_client():
     import os
 
-    os.environ["OPENINFERENCE_HIDE_INPUT_TEXT"] = "true"
-    os.environ["OPENINFERENCE_HIDE_OUTPUT_TEXT"] = "true"
     os.environ["OPENINFERENCE_HIDE_INPUT_IMAGES"] = "true"
 
     from openinference.instrumentation.langchain import LangChainInstrumentor
     from phoenix.client import Client
-    from phoenix.otel import register
+    from phoenix.otel import BatchSpanProcessor, SimpleSpanProcessor, register
 
+    from app.services.trace_redaction import RedactingSpanExporter
+
+    # Mirrors app.main._setup_phoenix's own wiring: register() with its
+    # default processor discarded, replaced by one wrapping a fresh real
+    # exporter in RedactingSpanExporter, so this test exercises the actual
+    # production redaction path rather than a blanket env-var stand-in.
     tracer_provider = register(
-        project_name="langraph-bot-v1-test", auto_instrument=False, batch=True
+        project_name="langraph-bot-v1-test", auto_instrument=False, batch=False
+    )
+    real_exporter = SimpleSpanProcessor().span_exporter
+    tracer_provider.add_span_processor(
+        BatchSpanProcessor(span_exporter=RedactingSpanExporter(real_exporter))
     )
     LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
     try:
@@ -75,36 +85,86 @@ def phoenix_client():
         LangChainInstrumentor().uninstrument()
 
 
-def _query_spans_by_name(client, name: str, retries: int = 5, delay: float = 1.0):
-    """Phoenix ingest is async even after force_flush -- poll briefly."""
+def _query_spans_by_name(client, name: str, retries: int = 10, delay: float = 1.0):
+    """Phoenix ingest is async even after force_flush -- poll briefly. On a
+    brand-new Phoenix instance the project itself doesn't exist until the
+    first span for it lands, so the query API 404s rather than returning an
+    empty list -- an earlier stage of the same ingest race, retried the
+    same way. The project-creation retries and the ingest-lag retries share
+    this one budget, so it's wider than either alone would need -- the
+    first test in the module (whichever runs first) pays the one-time
+    project-creation cost out of it."""
+    import httpx
+
     for _ in range(retries):
-        spans = client.spans.get_spans(
-            project_identifier="langraph-bot-v1-test", name=name, limit=10
-        )
+        try:
+            spans = client.spans.get_spans(
+                project_identifier="langraph-bot-v1-test", name=name, limit=10
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 404:
+                raise
+            spans = []
         if spans:
             return spans
         time.sleep(delay)
     return []
 
 
-def test_redaction_masks_message_content(phoenix_client):
+def test_system_prompt_and_answer_survive_but_user_text_is_masked(phoenix_client):
+    """AC: a real exported span contains the system prompt (and therefore
+    the retrieved chunks it carries -- generate.py always folds them into
+    the system message) and the model's own answer, but never the
+    requester's message text."""
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langchain_core.messages import HumanMessage, SystemMessage
 
     client, tracer_provider = phoenix_client
-    marker = f"REDACTION_TEST_{uuid.uuid4().hex}"
+    system_marker = f"SYSTEM_PROMPT_{uuid.uuid4().hex}"
+    user_marker = f"USER_TEXT_{uuid.uuid4().hex}"
+    answer_marker = f"ANSWER_{uuid.uuid4().hex}"
 
-    llm = FakeListChatModel(responses=[marker])
-    llm.invoke(marker)
+    llm = FakeListChatModel(responses=[answer_marker])
+    llm.invoke([SystemMessage(content=system_marker), HumanMessage(content=user_marker)])
+    tracer_provider.force_flush()
+
+    # The fixture's tracer_provider is module-scoped and shared with every
+    # other test in this file, so a bare name query returns every
+    # FakeListChatModel span from the whole module, not just this test's --
+    # narrow to the one span this test actually produced via its unique
+    # answer marker before asserting on its contents.
+    spans = _query_spans_by_name(client, "FakeListChatModel")
+    assert spans, "expected at least one span from the FakeListChatModel call"
+    matches = [s for s in spans if answer_marker in str(s["attributes"])]
+    assert matches, "could not find this test's own span among the results"
+    # get_spans() returns plain dicts, not span objects -- confirmed by
+    # actually running this against live Phoenix.
+    attrs = str(matches[0]["attributes"])
+    assert user_marker not in attrs, "requester message text found unmasked in an exported span"
+    assert system_marker in attrs, "system prompt missing from an exported span"
+
+
+def test_inbound_image_is_masked(phoenix_client):
+    """AC: a real exported span contains neither the requester's message
+    text nor any inbound image."""
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langchain_core.messages import HumanMessage
+
+    client, tracer_provider = phoenix_client
+    image_marker = f"data:image/png;base64,{uuid.uuid4().hex}"
+
+    llm = FakeListChatModel(responses=["ok"])
+    llm.invoke([HumanMessage(content=[
+        {"type": "text", "text": "look at this order"},
+        {"type": "image_url", "image_url": {"url": image_marker}},
+    ])])
     tracer_provider.force_flush()
 
     spans = _query_spans_by_name(client, "FakeListChatModel")
     assert spans, "expected at least one span from the FakeListChatModel call"
     for s in spans:
-        # get_spans() returns plain dicts, not span objects -- confirmed by
-        # actually running this against live Phoenix.
-        assert marker not in str(s["attributes"]), (
-            "marker string found unmasked in an exported span -- "
-            "OPENINFERENCE_HIDE_* is not working"
+        assert image_marker not in str(s["attributes"]), (
+            "inbound image found unmasked in an exported span"
         )
 
 

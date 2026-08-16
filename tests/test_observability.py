@@ -49,11 +49,16 @@ async def test_phoenix_register_raises_app_still_boots(caplog):
 @pytest.mark.asyncio
 async def test_phoenix_register_success_triggers_redaction_verify():
     """Wiring check: when register() succeeds, _verify_redaction() runs.
-    Mocked here (no real Phoenix) -- the real verification behavior is
-    covered in test_observability_integration.py."""
+    Mocked here (no real Phoenix, no real SimpleSpanProcessor/
+    BatchSpanProcessor construction, which would otherwise build real
+    exporters and start a real background export thread) -- the real
+    verification behavior is covered in test_observability_integration.py.
+    """
     with (
         patch("app.main.settings.observability_enabled", True),
         patch("phoenix.otel.register", return_value=MagicMock()),
+        patch("phoenix.otel.SimpleSpanProcessor", return_value=MagicMock()),
+        patch("phoenix.otel.BatchSpanProcessor", return_value=MagicMock()),
         patch("app.main._verify_redaction") as mock_verify,
     ):
         from app.main import _setup_phoenix
