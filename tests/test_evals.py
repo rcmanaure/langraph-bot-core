@@ -109,7 +109,6 @@ async def test_generate_uses_context():
         context=context,
         format_hint=_FORMAT_HINT.format(tone_description=DEFAULT_TONE_DESCRIPTION),
         tone_description=DEFAULT_TONE_DESCRIPTION,
-        name_hint="",
         specialization_block="",
     )
     llm = _eval_llm()
@@ -135,7 +134,6 @@ async def test_generate_admits_missing_context():
         context=context,
         format_hint=_FORMAT_HINT.format(tone_description=DEFAULT_TONE_DESCRIPTION),
         tone_description=DEFAULT_TONE_DESCRIPTION,
-        name_hint="",
         specialization_block="",
     )
     llm = _eval_llm()

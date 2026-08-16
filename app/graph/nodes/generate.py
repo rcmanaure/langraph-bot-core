@@ -6,7 +6,6 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import AsyncSessionLocal
-from app.graph.thread import profile_namespace
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.services.llm import get_chat_llm
 from app.services.rag import cap_chunks_to_tokens, token_counter
@@ -25,7 +24,7 @@ Formato (OBLIGATORIO — compatible WhatsApp/Telegram):
 - Por ítem: - *CÓDIGO* Nombre: $precio"""
 
 _RAG_SYSTEM = """\
-Eres un asistente de {expertise}. Eres {tone_description}.{name_hint}{specialization_block}
+Eres un asistente de {expertise}. Eres {tone_description}.{specialization_block}
 Para precios y disponibilidad usa ÚNICAMENTE el contexto proporcionado — NUNCA inventes un producto
 o precio que no esté ahí. Si arriba se te dio contexto de especialización, podés usar ese
 conocimiento de dominio para interpretar jerga, sinónimos o abreviaturas del usuario, pero la
@@ -54,7 +53,7 @@ Contexto:
 """
 
 _CATALOG_SYSTEM = """\
-Eres un asistente de {expertise}.{name_hint}
+Eres un asistente de {expertise}.
 Lista TODOS los ítems del catálogo a continuación, organizados por sección.
 No omitas ningún ítem. Usa los nombres y precios exactos del catálogo.{contact_hint}
 {format_hint}
@@ -109,17 +108,6 @@ def _build_specialization_block(specialization: str) -> str:
     return f"\nContexto de especialización:\n{specialization}\n" if specialization else ""
 
 
-async def _load_name_hint(state: AgentState, runtime: Runtime | None) -> str:
-    if runtime is None or runtime.store is None:
-        return ""
-    try:
-        item = await runtime.store.aget(profile_namespace(state), "profile")
-    except Exception:
-        return ""
-    name = (item.value.get("display_name") if item else None) or ""
-    return f" El usuario se llama {name}, salúdalo por su nombre si es natural." if name else ""
-
-
 async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
     chunks = list(state.get("retrieved_chunks") or [])
     decision = state.get("triage_decision", "rag")
@@ -168,7 +156,6 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         )
     template = _CATALOG_SYSTEM if is_catalog else _RAG_SYSTEM
     format_hint = _FORMAT_HINT.format(tone_description=tenant_ctx["tone_description"])
-    name_hint = await _load_name_hint(state, runtime)
     # Defensive .get(), not a bare {specialization_context} placeholder relying on
     # **tenant_ctx always containing the key — existing tests mock _load_tenant()'s
     # return dict directly and don't include this key; a missing key would KeyError.
@@ -177,7 +164,7 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
     if specialization:
         logger.debug("generate_specialization_applied tenant=%s len=%d", state["tenant_id"], len(specialization))
     system = template.format(
-        context=context, format_hint=format_hint, name_hint=name_hint,
+        context=context, format_hint=format_hint,
         specialization_block=specialization_block, **tenant_ctx,
     )
 

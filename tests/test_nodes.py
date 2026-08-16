@@ -438,13 +438,13 @@ def _mock_runtime(get_result=None):
     return Runtime(store=store)
 
 
-def _mock_extraction_llm(display_name=None, new_topic=None):
+def _mock_extraction_llm(new_topic=None):
     from app.schemas.profile import ProfileExtraction
 
     mock_llm = MagicMock()
     mock_structured = AsyncMock()
     mock_structured.ainvoke = AsyncMock(
-        return_value=ProfileExtraction(display_name=display_name, new_topic=new_topic)
+        return_value=ProfileExtraction(new_topic=new_topic)
     )
     mock_llm.with_structured_output.return_value = mock_structured
     return mock_llm
@@ -470,7 +470,7 @@ async def test_update_profile_noop_when_blocked(base_state):
 @pytest.mark.asyncio
 async def test_update_profile_creates_new_profile_when_none_exists(base_state):
     runtime = _mock_runtime(get_result=None)
-    mock_llm = _mock_extraction_llm(display_name="Ana", new_topic="precio biopsia")
+    mock_llm = _mock_extraction_llm(new_topic="precio biopsia")
 
     with patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm):
         result = await update_profile(base_state, runtime=runtime)
@@ -478,7 +478,6 @@ async def test_update_profile_creates_new_profile_when_none_exists(base_state):
     assert result == {}
     namespace, key, saved = runtime.store.aput.await_args.args
     assert key == "profile"
-    assert saved["display_name"] == "Ana"
     assert saved["topics_of_interest"] == ["precio biopsia"]
     assert saved["escalated_to_human_count"] == 0
 
@@ -486,7 +485,7 @@ async def test_update_profile_creates_new_profile_when_none_exists(base_state):
 @pytest.mark.asyncio
 async def test_update_profile_merges_new_topic_without_losing_existing(base_state):
     existing = MagicMock()
-    existing.value = {"display_name": "Ana", "topics_of_interest": ["horario atención"]}
+    existing.value = {"topics_of_interest": ["horario atención"]}
     runtime = _mock_runtime(get_result=existing)
     mock_llm = _mock_extraction_llm(new_topic="precio biopsia")
 
@@ -495,21 +494,6 @@ async def test_update_profile_merges_new_topic_without_losing_existing(base_stat
 
     _, _, saved = runtime.store.aput.await_args.args
     assert saved["topics_of_interest"] == ["precio biopsia", "horario atención"]
-    assert saved["display_name"] == "Ana"
-
-
-@pytest.mark.asyncio
-async def test_update_profile_never_overwrites_name_with_none(base_state):
-    existing = MagicMock()
-    existing.value = {"display_name": "Ana", "topics_of_interest": []}
-    runtime = _mock_runtime(get_result=existing)
-    mock_llm = _mock_extraction_llm(display_name=None)
-
-    with patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm):
-        await update_profile(base_state, runtime=runtime)
-
-    _, _, saved = runtime.store.aput.await_args.args
-    assert saved["display_name"] == "Ana"
 
 
 @pytest.mark.asyncio
@@ -539,55 +523,16 @@ async def test_update_profile_swallows_llm_failure(base_state):
 
 
 # ---------------------------------------------------------------------------
-# generate — personalizes the system prompt with the stored display_name
+# profile_namespace — per-user isolation under one tenant
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_generate_includes_display_name_in_prompt_when_profile_exists(base_state):
-    item = MagicMock()
-    item.value = {"display_name": "Ana"}
-    runtime = _mock_runtime(get_result=item)
+def test_profile_namespace_isolates_two_users_under_one_tenant():
+    from app.graph.thread import profile_namespace
 
-    mock_llm = MagicMock()
-    mock_llm.model_name = "test-model"
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hola Ana!"))
+    state_a = {"tenant_id": "test-tenant", "thread_id": "tenant:test-tenant:user:111:channel:telegram"}
+    state_b = {"tenant_id": "test-tenant", "thread_id": "tenant:test-tenant:user:222:channel:telegram"}
 
-    with (
-        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
-        patch(
-            "app.graph.nodes.generate._load_tenant",
-            AsyncMock(return_value={
-                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
-            }),
-        ),
-    ):
-        await generate(base_state, runtime=runtime)
-
-    system_content = mock_llm.ainvoke.await_args.args[0][0].content
-    assert "Ana" in system_content
-
-
-@pytest.mark.asyncio
-async def test_generate_omits_name_line_when_no_profile(base_state):
-    runtime = _mock_runtime(get_result=None)
-
-    mock_llm = MagicMock()
-    mock_llm.model_name = "test-model"
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hola!"))
-
-    with (
-        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
-        patch(
-            "app.graph.nodes.generate._load_tenant",
-            AsyncMock(return_value={
-                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
-            }),
-        ),
-    ):
-        await generate(base_state, runtime=runtime)
-
-    system_content = mock_llm.ainvoke.await_args.args[0][0].content
-    assert "se llama" not in system_content
+    assert profile_namespace(state_a) != profile_namespace(state_b)
 
 
 @pytest.mark.asyncio
