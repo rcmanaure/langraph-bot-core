@@ -127,6 +127,24 @@ async def test_nothing_to_answer_stops_before_the_graph(graph):
     assert adapter.sent == []
 
 
+# ── Document number redaction ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_document_number_is_redacted_before_reaching_the_graph(graph):
+    await run_turn(FakeAdapter(), make_inbound(text="mi cédula es 12345678"), graph)
+
+    content = graph.ainvoke.call_args[0][0]["messages"][0].content
+    assert "12345678" not in content
+    assert "[documento]" in content
+
+
+@pytest.mark.asyncio
+async def test_ordinary_message_reaches_the_graph_unmodified(graph):
+    await run_turn(FakeAdapter(), make_inbound(text="cuánto cuesta la biopsia"), graph)
+
+    assert graph.ainvoke.call_args[0][0]["messages"][0].content == "cuánto cuesta la biopsia"
+
+
 # ── Staff resolution ──────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

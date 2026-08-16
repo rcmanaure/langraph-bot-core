@@ -47,3 +47,43 @@ async def test_expire_old_interrupts_no_expired():
     mock_db.commit.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_purge_old_conversation_audit_deletes_and_commits():
+    """purge_old_conversation_audit issues a DELETE against created_at and commits."""
+    mock_result = MagicMock(rowcount=3)
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.commit = AsyncMock()
+    mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+    mock_db.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("app.scheduler.AsyncSessionLocal", MagicMock(return_value=mock_db)):
+        from app.scheduler import purge_old_conversation_audit
+        await purge_old_conversation_audit()
+
+    mock_db.execute.assert_called_once()
+    mock_db.commit.assert_called_once()
+    sql_clause = mock_db.execute.call_args[0][0]
+    assert "DELETE" in str(sql_clause)
+    assert "created_at" in str(sql_clause)
+
+
+@pytest.mark.asyncio
+async def test_purge_old_conversation_audit_cutoff_is_ninety_days():
+    mock_result = MagicMock(rowcount=0)
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.commit = AsyncMock()
+    mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+    mock_db.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("app.scheduler.AsyncSessionLocal", MagicMock(return_value=mock_db)):
+        from app.scheduler import _AUDIT_RETENTION_DAYS, purge_old_conversation_audit
+        await purge_old_conversation_audit()
+
+    assert _AUDIT_RETENTION_DAYS == 90
+    params = mock_db.execute.call_args[0][1]
+    assert "cutoff" in params
+
+

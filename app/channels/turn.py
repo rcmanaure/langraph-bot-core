@@ -14,6 +14,7 @@ from langchain_core.messages import HumanMessage
 
 from app.channels.base import ChannelAdapter, Inbound, MediaRef, MediaTooLarge
 from app.config import MAX_MEDIA_BYTES, settings
+from app.services.redaction import redact_document_numbers
 from app.services.staff import resolve_staff
 from app.services.tenant_context import get_tenant_specialization
 from app.services.vision import VISION_UNCERTAIN, extract_procedure_query
@@ -53,6 +54,9 @@ async def run_turn(adapter: ChannelAdapter, inbound: Inbound, graph) -> None:
     text = await _resolve_text(adapter, inbound)
     if text is None:
         return  # nothing to answer, or the user was already told why
+    # Masked before the text becomes part of persisted graph state or a
+    # conversation audit record — see app/services/redaction.py.
+    text = redact_document_numbers(text)
     await _reply(adapter, inbound, text, graph)
 
 
