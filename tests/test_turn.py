@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.channels import turn as turn_module
-from app.channels.base import Inbound, MediaRef
+from app.channels.base import Inbound, MediaRef, MediaTooLarge
 from app.channels.turn import run_turn
 
 VISION_MODEL = "app.channels.turn.settings.openai_vision_model"
@@ -286,6 +286,17 @@ async def test_media_download_failure_on_audio_asks_the_user_to_type(graph):
     assert adapter.sent == [turn_module.STT_FAILED]
 
 
+@pytest.mark.asyncio
+async def test_media_too_large_raised_by_fetch_sends_the_audio_size_message(graph):
+    """A late-discovered size (unknown until the adapter's fetch, e.g.
+    WhatsApp) must reach the user worded identically to the upfront gate."""
+    adapter = FakeAdapter(media=MediaTooLarge())
+    await run_turn(adapter, make_inbound(media=[audio()]), graph)
+
+    assert adapter.sent == [turn_module.AUDIO_TOO_LARGE]
+    graph.ainvoke.assert_not_awaited()
+
+
 # ── Images ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -429,6 +440,36 @@ async def test_oversized_images_are_skipped_not_fatal_to_the_batch(graph, vision
         )
 
     assert len(adapter.fetched) == 1
+    graph.ainvoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_media_too_large_raised_by_fetch_sends_the_image_size_message(graph, vision_on):
+    """A late-discovered size (unknown until the adapter's fetch, e.g.
+    WhatsApp) must reach the user worded identically to the upfront gate."""
+    adapter = FakeAdapter(media=MediaTooLarge())
+    await run_turn(adapter, make_inbound(media=[image()]), graph)
+
+    assert adapter.sent == [turn_module.IMAGE_TOO_LARGE]
+    graph.ainvoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_media_too_large_on_one_batched_image_is_skipped_not_fatal(graph, vision_on):
+    fetched: list[MediaRef] = []
+
+    async def fetch(ref):
+        fetched.append(ref)
+        if len(fetched) == 1:
+            raise MediaTooLarge()
+        return b"img"
+
+    adapter = FakeAdapter()
+    adapter.fetch_media = fetch
+    with patch(EXTRACT, new_callable=AsyncMock, return_value="¿Cuánto cuesta X?"):
+        await run_turn(adapter, make_inbound(media=[image(), image()]), graph)
+
+    assert len(fetched) == 2
     graph.ainvoke.assert_awaited_once()
 
 

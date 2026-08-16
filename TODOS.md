@@ -2,14 +2,19 @@
 
 Items accepted for future work but out of current PR scope.
 
-- **WhatsApp is not yet on the inbound turn.** Telegram now runs through
-  `app/channels/turn.py` behind the six-method `ChannelAdapter` (`app/channels/base.py`);
-  `whatsapp_webhook`/`_handle_message` still parse payloads and re-implement the
-  turn inline. Second commit of the same refactor — until it lands, WhatsApp keeps
-  its own copies of the size gate, STT/vision branching and graph invocation, and
-  `MAX_MEDIA_BYTES` stays re-exported from `app/services/vision.py` for it. The
-  `wa_service_windows` update and the `hub.challenge` GET stay channel-specific;
-  everything else moves behind `run_turn`.
+- **`TelegramAdapter.parse` can 500 the webhook on a malformed message shape.**
+  (found during /code-review of the WhatsApp inbound-turn migration, 2026-08-16)
+  `telegram_webhook` calls `adapter.parse(body)` synchronously before
+  returning 200 (dedup needs the ids parse produces), and `parse` does
+  unguarded dict indexing (`media["file_id"]`, `photo["file_id"]`). A
+  malformed-but-valid-JSON message (e.g. a photo entry missing `file_id`)
+  raises `KeyError` inline and 500s instead of returning `{"ok": true}` —
+  exactly the retry storm the malformed-body guard next to it exists to
+  prevent, just one layer deeper. `WhatsAppAdapter.parse` was fixed to
+  degrade gracefully on this same class of input during the migration above;
+  Telegram's copy predates that fix and was left alone as out of scope for a
+  WhatsApp-only ticket. Wrap `TelegramAdapter._parse` message-type branches in
+  the same try/except KeyError → log + skip pattern.
 - **`POST /operator/resume` never delivers the operator's answer to the user.**
   (found during the inbound-turn design review, 2026-08-15) It invokes the graph
   and returns the answer in the HTTP response body only — nothing sends it back

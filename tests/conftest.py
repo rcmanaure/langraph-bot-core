@@ -1,17 +1,16 @@
 import pytest
 from langchain_core.messages import HumanMessage
 
-from app.channels.telegram import _SEEN
-from app.channels.whatsapp import _SEEN_WA
+from app.channels import telegram, whatsapp
 
 
 @pytest.fixture(autouse=True)
 def clear_dedup_caches():
-    _SEEN.clear()
-    _SEEN_WA.clear()
+    telegram._SEEN.clear()
+    whatsapp._SEEN.clear()
     yield
-    _SEEN.clear()
-    _SEEN_WA.clear()
+    telegram._SEEN.clear()
+    whatsapp._SEEN.clear()
 
 
 @pytest.fixture

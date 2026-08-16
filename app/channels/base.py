@@ -73,6 +73,13 @@ class ChannelAdapter(Protocol):
         """Stable key identifying this delivery, for drop-on-redelivery.
         None when the payload carries no usable id.
 
+        The dict passed is whatever unit of delivery the channel naturally
+        dedupes on, not necessarily the raw webhook body: Telegram passes the
+        whole body (one update = one message), while WhatsApp — where one
+        webhook payload can carry several messages needing independent dedup
+        keys — passes each parsed message's id as {"id": message_id}. Check
+        the concrete adapter's implementation before writing a third one.
+
         Must be unique across tenants: Telegram's update_id is sequential per
         bot, not globally, so two tenants can emit the same one and a
         tenant-blind key would silently drop one of their messages."""
@@ -128,13 +135,10 @@ class SeenKeys:
         return len(self._seen)
 
 
-@dataclass
-class ChannelEvent:
-    """Legacy — superseded by Inbound. Still referenced by the unmigrated
-    WhatsApp handler; delete with that migration."""
-    tenant_slug: str
-    channel: str
-    user_id: str
-    chat_id: str
-    text: str
-    thread_id: str
+class MediaTooLarge(Exception):
+    """Raised by ChannelAdapter.fetch_media when a channel can only learn a
+    file's real size during the fetch itself — too late for the turn's own
+    pre-fetch gate on MediaRef.size_bytes (see WhatsAppAdapter.fetch_media).
+    The turn maps this to the same AUDIO_TOO_LARGE/IMAGE_TOO_LARGE message
+    its own gate would have sent, so the user can't tell which layer refused.
+    """

@@ -12,7 +12,7 @@ import logging
 
 from langchain_core.messages import HumanMessage
 
-from app.channels.base import ChannelAdapter, Inbound, MediaRef
+from app.channels.base import ChannelAdapter, Inbound, MediaRef, MediaTooLarge
 from app.config import MAX_MEDIA_BYTES, settings
 from app.services.tenant_context import get_tenant_specialization
 from app.services.vision import VISION_UNCERTAIN, extract_procedure_query
@@ -100,6 +100,9 @@ async def _transcribe(adapter: ChannelAdapter, inbound: Inbound) -> str | None:
         text = await transcribe(
             audio, ref.filename or "audio.ogg", ref.mime_type or "audio/ogg"
         )
+    except MediaTooLarge:
+        await _send(adapter, inbound, AUDIO_TOO_LARGE)
+        return None
     except STTNotConfiguredError:
         logger.error(
             "turn_stt_not_configured channel=%s tenant=%s user=%s",
@@ -143,6 +146,11 @@ async def _extract_images(adapter: ChannelAdapter, inbound: Inbound) -> str | No
                 tenant_slug=inbound.tenant_slug,
                 specialization_context=specialization,
             )
+        except MediaTooLarge:
+            if single:
+                await _send(adapter, inbound, IMAGE_TOO_LARGE)
+                return None
+            continue  # one oversized photo must not fail a whole batch
         except Exception as exc:
             logger.warning("turn_vision_failed channel=%s user=%s err=%s",
                            inbound.channel, inbound.user_id, exc)

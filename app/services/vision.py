@@ -17,10 +17,6 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from pydantic import BaseModel
 from sqlalchemy import text
 
-# Re-exported, not used here: the cap now lives in app/config.py because it
-# bounds every media kind, not just images. whatsapp.py still imports it from
-# this module — drop this line once that handler moves onto the inbound turn.
-from app.config import MAX_MEDIA_BYTES as MAX_MEDIA_BYTES
 from app.config import settings
 from app.db import AsyncSessionLocal
 from app.schemas.vision import VisionExtraction, VisionVerification
