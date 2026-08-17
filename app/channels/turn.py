@@ -41,6 +41,10 @@ DOCUMENT_UNSUPPORTED = (
 SERVICE_UNAVAILABLE = "Lo siento, el servicio no está disponible. Por favor intente de nuevo más tarde."
 GRAPH_ERROR = "Lo siento, ocurrió un error. Por favor intente de nuevo."
 EMPTY_ANSWER = "Lo siento, no pude generar una respuesta."
+# Sent for every cause of an escalation (see docs/adr/ADR-009-human-control.md)
+# — the user doesn't need to know whether they asked for a person or the bot
+# ran out of things to say.
+HUMAN_HANDOFF = "En breve lo va a atender una persona. Por favor, espere un momento."
 
 
 async def run_turn(adapter: ChannelAdapter, inbound: Inbound, graph) -> None:
@@ -214,11 +218,17 @@ async def _reply(adapter: ChannelAdapter, inbound: Inbound, text: str, graph) ->
             },
             config={"configurable": {"thread_id": inbound.thread_id}},
         )
-        answer = result.get("answer") or ""
-        if not answer and result.get("messages"):
-            answer = result["messages"][-1].content
-        if not answer:
-            answer = EMPTY_ANSWER
+        if result.get("__interrupt__"):
+            # The graph suspended (interrupt_node) rather than finishing —
+            # "answer" is whatever it was before the suspended node ran, not
+            # a genuinely empty reply. Distinguish it from EMPTY_ANSWER.
+            answer = HUMAN_HANDOFF
+        else:
+            answer = result.get("answer") or ""
+            if not answer and result.get("messages"):
+                answer = result["messages"][-1].content
+            if not answer:
+                answer = EMPTY_ANSWER
     except Exception:
         logger.exception("turn_graph_failed thread=%s", inbound.thread_id)
         answer = GRAPH_ERROR

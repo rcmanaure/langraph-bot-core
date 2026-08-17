@@ -204,6 +204,18 @@ async def test_empty_answer_and_no_messages_still_replies(graph):
 
 
 @pytest.mark.asyncio
+async def test_graph_suspension_sends_the_handoff_message_not_empty_answer(graph):
+    """A suspended graph (interrupt_node) is not a graph that produced
+    nothing -- "answer" is whatever it was before the suspended node ran,
+    not a genuinely empty reply. See docs/adr/ADR-009-human-control.md."""
+    graph.ainvoke.return_value = {"answer": "", "messages": [], "__interrupt__": [object()]}
+    adapter = FakeAdapter()
+
+    await run_turn(adapter, make_inbound(text="quiero hablar con un humano"), graph)
+    assert adapter.sent == [turn_module.HUMAN_HANDOFF]
+
+
+@pytest.mark.asyncio
 async def test_graph_failure_sends_a_spanish_error(graph):
     graph.ainvoke.side_effect = RuntimeError("boom")
     adapter = FakeAdapter()

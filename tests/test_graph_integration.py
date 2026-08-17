@@ -293,3 +293,38 @@ async def test_human_escalation_routes_through_interrupt_skipping_retrieve_and_g
     mock_retrieve.assert_not_called()
     llm.ainvoke.assert_not_called()  # generate() never runs on the human path
     assert result["answer"] == "un operador te va a contactar"
+
+
+@pytest.mark.asyncio
+async def test_human_escalation_actually_suspends_the_graph():
+    """The mocked-interrupt() test above proves routing; this one proves
+    suspension itself -- interrupt() is real (only the audit DB and
+    checkpointer are test doubles), so the graph genuinely pauses instead of
+    completing, and ainvoke's result carries "__interrupt__". This is the
+    signal app/channels/turn.py reads to send the handoff message instead of
+    the empty-answer fallback. See docs/adr/ADR-009-human-control.md."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    graph = build_graph(checkpointer=InMemorySaver())
+    state = _initial_state("quiero hablar con un humano")
+    llm = _mock_chat_llm("should not be reached", triage_decision="human")
+    interrupt_db = AsyncMock()
+    interrupt_result = MagicMock()
+    interrupt_result.first.return_value = None  # no open interrupt row yet
+    interrupt_db.execute = AsyncMock(return_value=interrupt_result)
+    interrupt_db.commit = AsyncMock()
+    interrupt_db.__aenter__ = AsyncMock(return_value=interrupt_db)
+    interrupt_db.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
+        patch("app.graph.nodes.interrupt.AsyncSessionLocal", MagicMock(return_value=interrupt_db)),
+    ):
+        result = await graph.ainvoke(
+            state, config={"configurable": {"thread_id": state["thread_id"]}}
+        )
+
+    mock_retrieve.assert_not_called()
+    assert "__interrupt__" in result
+    assert not result.get("answer")
