@@ -32,7 +32,7 @@ vs. Spanish fluency) that were both paying for one model's compromise.
 
 | Stage    | Model                                        | Fallback | Accuracy | Avg/only latency | Notes |
 | -------- | --------------------------------------------- | -------- | -------- | ----------------- | ----- |
-| Triage   | `openai/gpt-5-nano`                          | none — degrades to `"rag"` on failure, no model swap | 4/4 | 2.18s avg | Cheap, strong structured output |
+| Triage   | `amazon/nova-micro-v1`                       | none — degrades to `"rag"` on failure, no model swap | 10/10 (real `triage()`, 10 cases) | 0.53s avg | Swapped from `openai/gpt-5-nano` — see below |
 | Generate | `mistralai/mistral-small-3.2-24b-instruct`   | `nvidia/nemotron-3-super-120b-a12b:free` | 3/3 | 0.94s avg | Chosen for Spanish fluency/tone over raw reasoning; also fastest chat model measured across all three runs in this doc |
 | Vision   | `qwen/qwen3-vl-32b-instruct`                 | none — illegible image resolves to uncertainty (see `Extraction` in `CONTEXT.md`) | n/a (latency only) | 1.22s | OCR-strong, ~10x cheaper than the most accurate handwriting option (`anthropic/claude-haiku-4.5`); escalate only if real-world illegibility failures show up |
 | Embed    | `openai/text-embedding-3-small`              | n/a      | —        | —                  | Unchanged — already single-purpose |
@@ -50,6 +50,31 @@ quality signal.
 The vision sample response's "Ñ" printed as a replacement character
 (`PULM�N`) in the terminal — a console encoding artifact of printing the
 response, not a signal the model misread the image.
+
+## Triage re-validation and swap to `amazon/nova-micro-v1`
+
+`openai/gpt-5-nano`'s 4/4 above came from `benchmark_model_upgrade.py`'s
+narrow 4-case set. A follow-up pass ran the real `app.graph.nodes.triage.triage()`
+function (real `_TRIAGE_PROMPT`, real regex shortcut, real structured-output/
+JSON-fallback path — not the benchmark script's simplified call) against 10
+cases chosen to all miss the pure-greeting regex shortcut, so every case
+actually exercises the LLM:
+
+| Model | Accuracy | Avg latency |
+| ----- | -------- | ------------ |
+| `openai/gpt-5-nano` (then-current) | 9/10 — misclassified "como programo en python" as `rag` instead of `off_topic` | 2.42s |
+| `amazon/nova-micro-v1` | 10/10 | 0.53s |
+| `qwen/qwen3.7-flash` | 10/10 | 1.60s |
+
+`amazon/nova-micro-v1` won on all three axes (accuracy, latency, price:
+$0.035/$0.14 per 1M vs. gpt-5-nano's $0.05/$0.40) — no trade-off, so it
+replaced `openai/gpt-5-nano` as `TRIAGE_MODEL`.
+
+A parallel check of `mistralai/mistral-small-3.2-24b-instruct` (generate)
+against `qwen/qwen3-30b-a3b-instruct-2507` and `qwen/qwen3-32b` found a real
+trade-off (the qwen MoE variant is ~40-50% cheaper but ~2x slower; the qwen
+dense 32b was 5.94s avg, one case hit 10.1s) — generate was left unchanged
+since there's no clean win there, unlike triage.
 
 ## Findings (superseded runs kept for history)
 
