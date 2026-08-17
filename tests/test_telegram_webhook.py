@@ -428,7 +428,7 @@ async def test_voice_stt_failure_sends_user_error(mock_db, mock_http, mock_graph
     send_calls = mock_http.post.call_args_list
     error_call = next((c for c in send_calls if "sendMessage" in str(c)), None)
     assert error_call is not None
-    assert "No pude procesar tu nota de voz" in str(error_call)
+    assert "No pude procesar su nota de voz" in str(error_call)
 
 
 @pytest.mark.asyncio

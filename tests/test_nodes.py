@@ -640,7 +640,7 @@ async def test_generate_rag_prompt_forbids_recalculating_tag(base_state):
         base_state, [{"content": "x", "similarity": 0.5}]
     )
 
-    assert "NO la recalcules" in system_content
+    assert "NO la recalcule" in system_content
     assert "0.65" not in system_content
 
 
@@ -654,7 +654,7 @@ async def test_generate_rag_prompt_forbids_leaking_tag_into_reply(base_state):
         base_state, [{"content": "x", "similarity": 0.9}]
     )
 
-    assert "NUNCA las escribas literalmente" in system_content
+    assert "NUNCA las escriba literalmente" in system_content
 
 
 @pytest.mark.asyncio
@@ -673,7 +673,7 @@ async def test_generate_rag_prompt_keeps_hedge_after_positive_confirmation(base_
 
     assert "CONFIRMA que sí" in system_content
     assert "nombre EXACTO del ítem" in system_content
-    assert "nunca lo renombres" in system_content
+    assert "nunca lo renombre" in system_content
 
 
 @pytest.mark.asyncio

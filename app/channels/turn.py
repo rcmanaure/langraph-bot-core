@@ -26,20 +26,20 @@ logger = logging.getLogger(__name__)
 AUDIO_TOO_LARGE = "Archivo de voz demasiado grande (máx 10MB)."
 IMAGE_TOO_LARGE = "Imagen demasiado grande (máx 10MB)."
 STT_DISABLED = "La transcripción de audio no está habilitada."
-STT_FAILED = "No pude procesar tu nota de voz. ¿Puedes escribirme tu consulta?"
-STT_EMPTY = "No escuché nada en el audio. ¿Puedes repetirlo o escribirme?"
+STT_FAILED = "No pude procesar su nota de voz. ¿Puede escribirme su consulta?"
+STT_EMPTY = "No escuché nada en el audio. ¿Puede repetirlo o escribirme?"
 VISION_DISABLED = "El análisis de imágenes no está habilitado."
-VISION_FAILED = "No pude procesar la imagen. Por favor intenta de nuevo."
+VISION_FAILED = "No pude procesar la imagen. Por favor intente de nuevo."
 VISION_UNSURE = (
-    "No pude leer con seguridad el examen en la imagen. Intenta con una foto "
-    "más clara: buena luz, enfocada, y que se vea toda la hoja. O si prefieres, "
-    "puedes escribirme el nombre del examen o procedimiento."
+    "No pude leer con seguridad el examen en la imagen. Intente con una foto "
+    "más clara: buena luz, enfocada, y que se vea toda la hoja. O si prefiere, "
+    "puede escribirme el nombre del examen o procedimiento."
 )
 DOCUMENT_UNSUPPORTED = (
-    "Por ahora no puedo leer documentos PDF. ¿Puedes mandarme una foto del examen?"
+    "Por ahora no puedo leer documentos PDF. ¿Puede enviarme una foto del examen?"
 )
-SERVICE_UNAVAILABLE = "Lo siento, el servicio no está disponible. Por favor intenta de nuevo más tarde."
-GRAPH_ERROR = "Lo siento, ocurrió un error. Por favor intenta de nuevo."
+SERVICE_UNAVAILABLE = "Lo siento, el servicio no está disponible. Por favor intente de nuevo más tarde."
+GRAPH_ERROR = "Lo siento, ocurrió un error. Por favor intente de nuevo."
 EMPTY_ANSWER = "Lo siento, no pude generar una respuesta."
 
 

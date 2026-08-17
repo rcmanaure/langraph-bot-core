@@ -8,8 +8,8 @@ from app.models.base import Base
 # span arbitrary business types (clinic, gym, bakery...) — a fixed preset list
 # can't cover that and would require a code change per new tenant vertical.
 DEFAULT_TONE_DESCRIPTION = (
-    "cálido y cercano, como una persona del negocio respondiendo por chat. "
-    "Nada de lenguaje robótico, emojis casuales están bien"
+    "formal y profesional, como corresponde a un contexto de salud. "
+    "Directo y claro, sin sonar robótico"
 )
 
 

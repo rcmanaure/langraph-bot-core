@@ -44,7 +44,7 @@ Treat a thread id as sensitive: it grants access to a conversation's history.
 
 What the vision module reads out of an image: a literal item or procedure name, or several, or nothing it will vouch for. Never a guess — an unreadable image resolves to uncertainty and the user is asked to type instead.
 
-Deliberately vertical-agnostic. A medical order, a product label and a menu are all just documents with items on them.
+The prompts are lab-specific today — clinical vocabulary in triage, extraction and generation all assume a diagnostic-lab tenant. See [ADR-007](docs/adr/ADR-007-register-floor.md) for why this wasn't generalized alongside the register floor. `TODOS.md`'s "Fold `tenant.specialization_context` into triage.py's classification prompt" item is the migration path once a second, differently-worded tenant is onboarded.
 
 ## Chunk
 

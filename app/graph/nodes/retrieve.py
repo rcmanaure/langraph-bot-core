@@ -25,7 +25,7 @@ _REWRITE_TIMEOUT_SECONDS = 10
 
 # A bare confirmation ("si", "sí", "correcto"...) has no retrievable content of
 # its own — it's answering the bot's PREVIOUS question (e.g. an approximation
-# offer: "¿Eso es lo que necesitas?"). Embedding it verbatim searches for
+# offer: "¿Es lo que necesita?"). Embedding it verbatim searches for
 # nothing meaningful and returns unrelated chunks, so generate() then can't
 # find the item it just offered and contradicts itself. Fall back to the
 # previous human query so retrieval stays anchored to what's actually being
