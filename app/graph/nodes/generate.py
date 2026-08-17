@@ -116,30 +116,33 @@ _MATCH_UNCONFIRMED_INSTRUCTION = (
 )
 
 
-# Negative-confirmation rule variants (#27) — the patient version refers the
-# requester to the tenant's contact; a staff member IS the business, so
-# nothing points them at a contact line for their own workplace.
-_NEGATIVE_CONFIRMATION_RULE = (
+# Negative-confirmation rule (#27) — shared lead, one place to fix its
+# wording (see ADR-007's "expressed once" rationale). Only the tail differs:
+# the patient version refers the requester to the tenant's contact; a staff
+# member IS the business, so nothing points them at a contact line for their
+# own workplace.
+_NEGATIVE_CONFIRMATION_LEAD = (
     "CONFIRMACIÓN NEGATIVA: Si el usuario responde que la aproximación NO es lo que busca, o si "
-    "definitivamente no hay nada relacionado, diga en una línea que no lo ofrecemos y eleve al "
-    "contacto: {contact_hint}"
+    "definitivamente no hay nada relacionado, diga en una línea que no lo ofrecemos"
 )
 
-_NEGATIVE_CONFIRMATION_RULE_STAFF = (
-    "CONFIRMACIÓN NEGATIVA: Si la aproximación NO es lo que busca, o si definitivamente no hay nada "
-    "relacionado, dígalo en una línea."
-)
+_NEGATIVE_CONFIRMATION_RULE = _NEGATIVE_CONFIRMATION_LEAD + " y eleve al contacto: {contact_hint}"
+
+_NEGATIVE_CONFIRMATION_RULE_STAFF = _NEGATIVE_CONFIRMATION_LEAD + "."
 
 
 def _has_confirmed_match(chunks: list[dict]) -> bool:
     """The match decision, computed in code from the retrieval similarity —
-    never handed to the model to recompute or narrate. True when the best
-    scored chunk clears the exact-match threshold, or when no chunk carries
+    never handed to the model to recompute or narrate. Driven by the
+    top-ranked chunk specifically (retrieve.py already reranks by relevance,
+    so chunks[0] IS the primary match) rather than the max similarity across
+    the whole list — a max would let one unrelated but numerically-similar
+    later chunk falsely confirm a weak top match. True when no chunk carries
     a similarity score at all (e.g. chunks built from a raw catalog dump)."""
-    scored = [c["similarity"] for c in chunks if "similarity" in c]
-    if not scored:
-        return True
-    return max(scored) >= settings.exact_match_threshold
+    for c in chunks:
+        if "similarity" in c:
+            return c["similarity"] >= settings.exact_match_threshold
+    return True
 
 
 async def _load_tenant(slug: str) -> dict:

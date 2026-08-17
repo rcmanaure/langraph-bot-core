@@ -644,6 +644,20 @@ async def test_generate_no_similarity_scores_treated_as_confirmed():
     assert _has_confirmed_match([{"content": "x"}]) is True
 
 
+def test_has_confirmed_match_uses_top_ranked_chunk_not_max():
+    """/code-review 2026-08-17: an earlier version used max(similarity) across
+    every chunk, so one unrelated but numerically-similar low-ranked chunk
+    could falsely confirm a weak top match. retrieve.py already reranks by
+    relevance, so chunks[0] is the primary match and must decide alone."""
+    from app.graph.nodes.generate import _has_confirmed_match
+
+    weak_top_strong_second = [
+        {"content": "a", "similarity": 0.40},
+        {"content": "b", "similarity": 0.95},
+    ]
+    assert _has_confirmed_match(weak_top_strong_second) is False
+
+
 @pytest.mark.asyncio
 async def test_generate_rag_context_has_no_bracketed_confidence_label(base_state):
     """No internal label — [COINCIDENCIA EXACTA] / [APROXIMACIÓN...] — ever
