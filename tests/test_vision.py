@@ -11,8 +11,19 @@ import pytest
 from PIL import Image
 
 import app.services.vision as vision_module
+from app.config import settings
 from app.schemas.vision import VisionExtraction, VisionVerification
 from app.services.vision import VISION_UNCERTAIN, extract_procedure_query
+
+# Cache-behavior tests need settings.vision_cache_enabled=True to exercise
+# the cache read/write path. Skip rather than force it on with a patch —
+# caches stay off during live testing on purpose (see docker-compose.dev.yml)
+# to keep live runs from picking up stale cached results, and a test that
+# quietly overrides the real setting no longer proves anything about how
+# this environment actually behaves.
+_VISION_CACHE_SKIP = pytest.mark.skipif(
+    not settings.vision_cache_enabled, reason="vision cache disabled in this environment"
+)
 
 
 def _rate_limit_error() -> openai.RateLimitError:
@@ -853,6 +864,7 @@ async def test_memoized_structured_output_failure_skips_retry_on_next_call():
         assert mock_llm.ainvoke.call_count == 2
 
 
+@_VISION_CACHE_SKIP
 @pytest.mark.asyncio
 async def test_cache_hit_returns_cached_result_without_calling_llm():
     """Same photo resent (hash matches) → cached result returned, zero LLM calls."""
@@ -927,6 +939,7 @@ async def test_cache_write_failure_still_returns_correct_result():
     assert result == "¿Cuánto cuesta un examen de IGRA?"
 
 
+@_VISION_CACHE_SKIP
 @pytest.mark.asyncio
 async def test_cache_miss_stores_extracted_result():
     """A fresh (uncached) image, once extracted+verified, is written to the cache."""
@@ -949,6 +962,7 @@ async def test_cache_miss_stores_extracted_result():
     session.commit.assert_awaited_once()
 
 
+@_VISION_CACHE_SKIP
 @pytest.mark.asyncio
 async def test_cache_miss_stores_uncertain_when_illegible():
     """An illegible image's VISION_UNCERTAIN verdict is itself a stable content
