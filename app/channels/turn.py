@@ -142,12 +142,18 @@ async def _extract_images(adapter: ChannelAdapter, inbound: Inbound) -> str | No
     # change mid-batch, so this avoids N redundant DB round-trips.
     specialization = await get_tenant_specialization(inbound.tenant_slug)
 
+    # Masked before it reaches the vision API, not just before it reaches
+    # persisted state -- found in /code-review: a caption is free-form user
+    # text same as any other message, and this path used to send it to a
+    # third-party model unredacted.
+    caption = redact_document_numbers(inbound.caption)
+
     queries: list[str] = []
     for ref in refs:
         try:
             img_bytes = await adapter.fetch_media(ref)
             query = await extract_procedure_query(
-                img_bytes, inbound.caption,
+                img_bytes, caption,
                 tenant_slug=inbound.tenant_slug,
                 specialization_context=specialization,
             )

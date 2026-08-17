@@ -376,6 +376,21 @@ async def test_caption_and_tenant_context_are_passed_to_extraction(graph):
 
 
 @pytest.mark.asyncio
+async def test_document_number_in_caption_is_redacted_before_vision_call(graph, vision_on):
+    """Found in /code-review: a caption is free-form user text same as any
+    other message, but it used to reach the third-party vision API
+    unredacted -- only the graph-bound text was masked."""
+    with patch(EXTRACT, new_callable=AsyncMock, return_value="¿Cuánto cuesta X?") as extract:
+        await run_turn(
+            FakeAdapter(),
+            make_inbound(media=[image()], caption="mi cédula es 12345678"),
+            graph,
+        )
+
+    assert "12345678" not in extract.await_args[0][1]
+
+
+@pytest.mark.asyncio
 async def test_vision_disabled_sends_a_notice(graph):
     adapter = FakeAdapter()
     with patch(VISION_MODEL, ""):

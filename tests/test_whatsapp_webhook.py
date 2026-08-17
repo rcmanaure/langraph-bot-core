@@ -374,6 +374,18 @@ async def test_malformed_message_shape_is_skipped_not_raised():
 
 
 @pytest.mark.asyncio
+async def test_message_missing_from_is_skipped_not_defaulted():
+    """Found in /code-review: user_id/chat_id used to default to "" with no
+    rejection, running the whole turn under an empty-string identity instead
+    of being dropped -- and an empty identity could collide with a staff
+    row whose identifier also normalizes to "" (see ADR-006)."""
+    adapter = WhatsAppAdapter(SLUG, PHONE_ID, ACCESS_TOKEN, None)
+    no_from = {"id": "wamid.nofrom1", "type": "text", "text": {"body": "hola"}}
+    inbounds = await adapter.parse(_wrap(no_from))
+    assert inbounds == []
+
+
+@pytest.mark.asyncio
 async def test_audio_mime_type_codec_param_is_stripped():
     """A clean type and sensible filename reach the media ref even when
     WhatsApp reports the mime type with a codec parameter attached."""

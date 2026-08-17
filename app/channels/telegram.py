@@ -136,42 +136,53 @@ class TelegramAdapter:
         if not msg:
             return []
 
-        common = {
-            "tenant_slug": self._slug,
-            "channel": self.channel,
-            "user_id": str((msg.get("from") or {}).get("id", "unknown")),
-            "chat_id": str(msg["chat"]["id"]),
-            "message_id": str(msg.get("message_id", "")),
-            "caption": msg.get("caption") or "",
-        }
+        try:
+            common = {
+                "tenant_slug": self._slug,
+                "channel": self.channel,
+                "user_id": str((msg.get("from") or {}).get("id", "unknown")),
+                "chat_id": str(msg["chat"]["id"]),
+                "message_id": str(msg.get("message_id", "")),
+                "caption": msg.get("caption") or "",
+            }
 
-        audio_type = next((t for t in _AUDIO_MSG_TYPES if t in msg), None)
-        if audio_type:
-            media = msg[audio_type]
-            filename, mime_type = _audio_filename_and_mime(audio_type, media)
-            return [Inbound(**common, media=[MediaRef(
-                id=media["file_id"], kind="audio",
-                size_bytes=media.get("file_size", 0),
-                mime_type=mime_type, filename=filename,
-            )])]
+            audio_type = next((t for t in _AUDIO_MSG_TYPES if t in msg), None)
+            if audio_type:
+                media = msg[audio_type]
+                filename, mime_type = _audio_filename_and_mime(audio_type, media)
+                return [Inbound(**common, media=[MediaRef(
+                    id=media["file_id"], kind="audio",
+                    size_bytes=media.get("file_size", 0),
+                    mime_type=mime_type, filename=filename,
+                )])]
 
-        if "photo" in msg:
-            photo = msg["photo"][-1]  # largest resolution
-            return [Inbound(**common, media=[MediaRef(
-                id=photo["file_id"], kind="image",
-                size_bytes=photo.get("file_size", 0),
-            )])]
+            if "photo" in msg:
+                photo = msg["photo"][-1]  # largest resolution
+                return [Inbound(**common, media=[MediaRef(
+                    id=photo["file_id"], kind="image",
+                    size_bytes=photo.get("file_size", 0),
+                )])]
 
-        if "document" in msg:
-            document = msg["document"]
-            return [Inbound(**common, media=[MediaRef(
-                id=document.get("file_id", ""), kind="document",
-                size_bytes=document.get("file_size"),
-                mime_type=document.get("mime_type"),
-            )])]
+            if "document" in msg:
+                document = msg["document"]
+                return [Inbound(**common, media=[MediaRef(
+                    id=document.get("file_id", ""), kind="document",
+                    size_bytes=document.get("file_size"),
+                    mime_type=document.get("mime_type"),
+                )])]
 
-        content = (msg.get("text") or "").strip()
-        return [Inbound(**common, text=content)] if content else []
+            content = (msg.get("text") or "").strip()
+            return [Inbound(**common, text=content)] if content else []
+        except KeyError:
+            # dedup_key() is called (and the update_id marked seen) BEFORE
+            # parse() runs — found in /code-review: an unhandled KeyError
+            # here would 500 the webhook, and since the update is already
+            # marked seen, Telegram's automatic retry of the same update_id
+            # then gets silently dropped by the dedup check instead of
+            # getting a second chance. Degrades the same way
+            # whatsapp.py's _parse_message already does for malformed input.
+            logger.warning("tg_malformed_message id=%s", msg.get("message_id"))
+            return []
 
     async def acknowledge(self, inbound: Inbound) -> None:
         async with httpx.AsyncClient(timeout=5) as c:

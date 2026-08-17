@@ -250,6 +250,21 @@ async def test_no_message_key_returns_ok(mock_db, mock_http):
 
 
 @pytest.mark.asyncio
+async def test_message_missing_chat_key_returns_ok_not_500(mock_db, mock_http, mock_graph):
+    """Found in /code-review: parse() indexed msg["chat"]["id"] unguarded --
+    an update missing "chat" raised KeyError uncaught, 500ing the webhook.
+    Worse, dedup_key() marks the update_id seen BEFORE parse() runs, so a
+    crash here meant Telegram's automatic retry of the same update_id got
+    silently dropped by the dedup check instead of getting a second try."""
+    app = make_app(mock_graph)
+    payload = {"update_id": 99, "message": {"from": {"id": 1}, "text": "hola"}}  # no 'chat'
+    r = await _post(app, payload)
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    mock_graph.ainvoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_edited_message_is_processed(mock_db, mock_http, mock_graph):
     """edited_message (no message key) should be processed normally."""
     app = make_app(mock_graph)

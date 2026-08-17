@@ -127,6 +127,20 @@ async def test_add_normalizes_a_pasted_phone_number():
 
 
 @pytest.mark.asyncio
+async def test_add_identifier_that_normalizes_to_empty_is_rejected():
+    """Found in /code-review: min_length=1 on the raw field let "+" through
+    (non-empty pre-normalization), but it strips down to "" here — an empty
+    stored identifier could match an unparsed inbound user_id defaulting to
+    "", granting staff status nobody configured (see ADR-006)."""
+    app = make_app()
+    sess = _session()
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)):
+        r = await req(app, "post", "/admin/tenants/acme/staff",
+                      json={"channel": "whatsapp", "identifier": "+"})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_add_duplicate_returns_409():
     app = make_app()
     sess = _session(commit=AsyncMock(side_effect=IntegrityError("dup", {}, Exception())))

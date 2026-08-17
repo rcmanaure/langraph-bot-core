@@ -46,6 +46,14 @@ def test_dni_with_keyword_is_redacted():
     assert redact_document_numbers(msg) == "mi DNI [documento]"
 
 
+def test_dotted_cc_abbreviation_with_keyword_is_redacted():
+    """Found in /code-review: "C.C." ends in a period, and a \\b right after
+    it can't match between two non-word characters (the period, then the
+    space that follows) -- the match silently failed to fire at all."""
+    msg = "paciente C.C. 87654321, agenda para el jueves"
+    assert redact_document_numbers(msg) == "paciente C.C. [documento], agenda para el jueves"
+
+
 def test_passport_with_keyword_is_redacted():
     msg = "mi pasaporte es AB1234567"
     assert redact_document_numbers(msg) == "mi pasaporte [documento]"

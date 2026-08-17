@@ -132,11 +132,20 @@ class WhatsAppAdapter:
 
     def _parse_message(self, msg: dict) -> Inbound | None:
         msg_type = msg.get("type")
+        from_id = msg.get("from")
+        if not from_id:
+            # Found in /code-review: without this guard an empty user_id/
+            # chat_id ran the whole turn under an empty-string identity
+            # instead of being rejected, and could collide with a staff
+            # allowlist row whose identifier also normalized to "" (see
+            # app/routes/admin.py's StaffMemberCreate fix, same finding).
+            logger.warning("wa_malformed_message type=%s id=%s reason=missing_from", msg_type, msg.get("id"))
+            return None
         common = dict(
             tenant_slug=self._slug,
             channel=self.channel,
-            user_id=msg.get("from", ""),
-            chat_id=msg.get("from", ""),
+            user_id=from_id,
+            chat_id=from_id,
             message_id=msg.get("id", ""),
         )
 

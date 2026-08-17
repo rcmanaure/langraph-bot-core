@@ -8,7 +8,11 @@ import re
 _KEYWORD = r"c[ée]dula|c\.?\s?c\.?|dni|pasaporte|documento|identificaci[oó]n"
 
 _ID_RE = re.compile(
-    rf"(?i)(\b(?:{_KEYWORD})\b)[\s:]*(?:es|no\.?|n[uú]mero)?[\s:]*"
+    # (?!\w), not \b, after the keyword: "C.C." ends in a period, and \b
+    # can't match between two non-word characters (period, then the space
+    # that follows it) -- found in /code-review, confirmed live:
+    # redact_document_numbers("C.C. 87654321") passed through unmasked.
+    rf"(?i)(\b(?:{_KEYWORD}))(?!\w)[\s:]*(?:es|no\.?|n[uú]mero)?[\s:]*"
     r"(?:(?<!\$)\d{1,3}(?:[.\s]\d{3}){1,3}\b"           # grouped: 12.345.678
     r"|(?<!\$)\d{6,10}\b"                                 # bare: 12345678
     r"|[A-Za-z]{1,2}\d{6,9}\b)"                           # passport: AB1234567

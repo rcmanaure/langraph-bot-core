@@ -302,7 +302,7 @@ async def webhook_status(slug: str, _: None = Depends(verify_operator_key)):
 
 class StaffMemberCreate(BaseModel):
     channel: Literal["telegram", "whatsapp"]
-    identifier: str = Field(min_length=1, max_length=128)
+    identifier: str = Field(max_length=128)
 
     @field_validator("identifier")
     @classmethod
@@ -312,7 +312,16 @@ class StaffMemberCreate(BaseModel):
         # pasting a phone number as "+1 555-123-4567" must still match that
         # raw value, so strip the punctuation a human would type but leave
         # the identifier otherwise untouched (found in /code-review).
-        return re.sub(r"[\s\-()]", "", v).lstrip("+")
+        normalized = re.sub(r"[\s\-()]", "", v).lstrip("+")
+        # min_length=1 on the raw field wouldn't catch this: an input like
+        # "+" is non-empty pre-normalization but strips down to "" here.
+        # Checked post-normalization instead of pre- (found in /code-review)
+        # — an empty stored identifier could otherwise match an unparsed
+        # inbound user_id defaulting to "", granting staff status nobody
+        # actually configured (see ADR-006).
+        if not normalized:
+            raise ValueError("identifier must contain at least one non-punctuation character")
+        return normalized
 
 
 @router.get("/tenants/{slug}/staff")
