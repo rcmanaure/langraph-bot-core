@@ -177,7 +177,7 @@ async def test_compiled_graph_generation_prompt_carries_floor(decision, user_tex
 
     with (
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])),
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):
@@ -206,7 +206,7 @@ async def test_compiled_graph_static_reply_conforms_to_floor(decision, user_text
 
     with (
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])),
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
@@ -244,7 +244,7 @@ async def test_compiled_graph_register_variant_per_actor(is_staff):
             {"content": "x", "similarity": 0.1},
         ])),
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[{"content": "x", "similarity": 0.1}])),
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):

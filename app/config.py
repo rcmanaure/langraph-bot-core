@@ -11,11 +11,17 @@ class Settings(BaseSettings):
     db_max_overflow: int = 5
     db_checkpoint_pool_size: int = 5
 
-    # Chat LLM — routed through OpenRouter
+    # Chat LLM — routed through OpenRouter. Split by task rather than one
+    # dual-purpose model: triage is cheap structured classification, generate
+    # needs Spanish fluency/tone (see ADR-008). openai_model also backs
+    # retrieve.py's query-expansion rewrite and update_profile.py's
+    # extraction — both similarly cheap/structured, out of scope for the
+    # ADR-008 split, left on the general-purpose model for now.
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openai_model: str = "xiaomi/mimo-v2.5"
-    openai_fallback_model: str = "deepseek/deepseek-v4-flash"
+    openai_model: str = "mistralai/mistral-small-3.2-24b-instruct"
+    openai_fallback_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
+    triage_model: str = "openai/gpt-5-nano"
 
     # Embeddings — same key/base as chat; override only if using a different provider
     embedding_base_url: str = ""
@@ -82,7 +88,8 @@ class Settings(BaseSettings):
     # services/vision.py's own opt-in gate) -- deliberately not defaulted to
     # a real model, so a fresh deployment with no vision budget configured
     # doesn't silently start making (billed) vision calls. Recommended once
-    # configured: see docs/model-upgrade-baseline.md.
+    # configured: a vision-specialized model, not the chat model (see
+    # ADR-008 and docs/model-upgrade-baseline.md).
     openai_vision_model: str = ""
     web_search_url: str = ""
 

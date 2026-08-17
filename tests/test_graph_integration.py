@@ -108,7 +108,7 @@ async def test_full_rag_flow_retrieves_reranks_and_answers():
         # the API is ever called and hybrid order passes through untouched.
         patch("app.services.rag.settings.top_k_results", 1),
         patch("app.services.rerank.httpx.AsyncClient", return_value=rerank_client),
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):
@@ -169,7 +169,7 @@ async def test_retrieval_and_rerank_spans_are_emitted():
         patch("app.services.rag.settings.top_k_results", 1),
         patch("app.services.rerank.httpx.AsyncClient", return_value=rerank_client),
         patch("app.services.rerank._tracer", test_tracer),
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):
@@ -213,7 +213,7 @@ async def test_rerank_http_failure_falls_back_but_graph_still_completes():
         patch("app.services.rag.settings.rerank_enabled", True),
         patch("app.services.rag.settings.top_k_results", 1),
         patch("app.services.rerank.httpx.AsyncClient", return_value=failing_client),
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):
@@ -238,7 +238,7 @@ async def test_off_topic_skips_retrieve_and_rerank_entirely():
     with (
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
         patch("app.services.rerank.httpx.AsyncClient") as mock_rerank_client,
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
@@ -257,7 +257,7 @@ async def test_greeting_skips_retrieve_and_second_llm_call():
 
     with (
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
@@ -284,7 +284,7 @@ async def test_human_escalation_routes_through_interrupt_skipping_retrieve_and_g
 
     with (
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.interrupt.AsyncSessionLocal", MagicMock(return_value=interrupt_db)),
         patch("app.graph.nodes.interrupt.interrupt", MagicMock(return_value="un operador te va a contactar")),
     ):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Baseline benchmark for the chat/vision/rerank model upgrade (issue #21).
+"""Baseline benchmark for the triage/chat/vision/rerank model upgrade (issue #21, ADR-008).
 
 Measures per-stage latency and a small known-answer accuracy check. Run
 once against the current models, then again after swapping app/config.py's
@@ -29,7 +29,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from PIL import Image, ImageDraw
 
 from app.config import settings
-from app.services.llm import get_chat_llm, get_vision_llm
+from app.graph.nodes.triage import _TRIAGE_PROMPT
+from app.schemas.triage import TriageDecision
+from app.services.llm import get_chat_llm, get_triage_llm, get_vision_llm
 from app.services.rerank import _call_rerank_api
 
 _CATALOG_CONTEXT = """\
@@ -65,6 +67,36 @@ async def _bench_chat() -> dict:
         })
     return {
         "model": settings.openai_model,
+        "cases": results,
+        "accuracy": sum(r["correct"] for r in results) / len(results),
+        "avg_seconds": round(sum(r["seconds"] for r in results) / len(results), 2),
+    }
+
+
+_TRIAGE_CASES = [
+    ("hola", "greeting"),
+    ("cuanto cuesta la biopsia de pulmon", "rag"),
+    ("quiero ver todo el catalogo", "catalog"),
+    ("quien gano el partido de ayer", "off_topic"),
+]
+
+
+async def _bench_triage() -> dict:
+    llm = get_triage_llm()
+    results = []
+    for query, expected in _TRIAGE_CASES:
+        start = time.perf_counter()
+        result: TriageDecision = await llm.with_structured_output(TriageDecision).ainvoke(
+            [SystemMessage(content=_TRIAGE_PROMPT), HumanMessage(content=query)]
+        )
+        elapsed = time.perf_counter() - start
+        results.append({
+            "query": query,
+            "correct": result.decision == expected,
+            "seconds": round(elapsed, 2),
+        })
+    return {
+        "model": settings.triage_model,
         "cases": results,
         "accuracy": sum(r["correct"] for r in results) / len(results),
         "avg_seconds": round(sum(r["seconds"] for r in results) / len(results), 2),
@@ -120,6 +152,7 @@ async def _bench_vision() -> dict:
 
 
 async def main() -> None:
+    print("triage:", await _bench_triage())
     print("chat:", await _bench_chat())
     print("rerank:", await _bench_rerank())
     print("vision:", await _bench_vision())

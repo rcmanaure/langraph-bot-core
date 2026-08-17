@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, trim_messages
 
 from app.config import settings
 from app.schemas.triage import TriageDecision
-from app.services.llm import get_chat_llm
+from app.services.llm import get_triage_llm
 from app.services.rag import token_counter
 from app.state import AgentState
 
@@ -73,7 +73,7 @@ async def triage(state: AgentState) -> dict:
         include_system=True,
     )
 
-    llm = get_chat_llm()
+    llm = get_triage_llm()
     payload = [SystemMessage(content=_TRIAGE_PROMPT)] + trimmed
 
     # Primary: structured output (function calling)

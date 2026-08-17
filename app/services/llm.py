@@ -15,6 +15,21 @@ def get_chat_llm(fallback: bool = False) -> ChatOpenAI:
     )
 
 
+def get_triage_llm() -> ChatOpenAI:
+    """Dedicated cheap/structured-output model for triage.py's classification
+    call — split from get_chat_llm() (see ADR-008) since triage doesn't need
+    generate.py's Spanish-fluency model. No fallback param: triage already
+    degrades safely (JSON-parse retry, then defaults to "rag") without a
+    model swap."""
+    return ChatOpenAI(
+        model=settings.triage_model,
+        api_key=settings.openrouter_api_key,
+        base_url=settings.openrouter_base_url,
+        default_headers={"HTTP-Referer": f"https://{settings.app_domain}"},
+        timeout=60,
+    )
+
+
 def get_vision_llm() -> ChatOpenAI:
     return ChatOpenAI(
         model=settings.openai_vision_model,

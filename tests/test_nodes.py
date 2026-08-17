@@ -107,7 +107,7 @@ async def test_triage_returns_rag(base_state):
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="rag"))
     mock_llm.with_structured_output.return_value = mock_structured
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
 
     assert result == {"triage_decision": "rag"}
@@ -122,7 +122,7 @@ async def test_triage_returns_human(base_state):
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="human"))
     mock_llm.with_structured_output.return_value = mock_structured
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
 
     assert result == {"triage_decision": "human"}
@@ -136,7 +136,7 @@ async def test_triage_falls_back_to_rag_on_llm_error(base_state):
     mock_llm.with_structured_output.return_value = mock_structured
     mock_llm.ainvoke = AsyncMock(side_effect=Exception("also down"))
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
 
     assert result == {"triage_decision": "rag"}
@@ -161,7 +161,7 @@ async def test_triage_no_human_message_defaults_rag(base_state):
 )
 async def test_triage_regex_shortcut_pure_greeting_skips_llm(base_state, greeting):
     base_state["messages"] = [HumanMessage(content=greeting)]
-    with patch("app.graph.nodes.triage.get_chat_llm") as mock_get_llm:
+    with patch("app.graph.nodes.triage.get_triage_llm") as mock_get_llm:
         result = await triage(base_state)
     mock_get_llm.assert_not_called()
     assert result == {"triage_decision": "greeting"}
@@ -178,7 +178,7 @@ async def test_triage_regex_shortcut_does_not_match_greeting_plus_question(base_
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="rag"))
     mock_llm.with_structured_output.return_value = mock_structured
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm) as mock_get_llm:
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm) as mock_get_llm:
         result = await triage(base_state)
 
     mock_get_llm.assert_called_once()
@@ -196,7 +196,7 @@ async def test_triage_fallback_clean_json(base_state):
     raw_response.content = '{"decision": "rag"}'
     mock_llm.ainvoke = AsyncMock(return_value=raw_response)
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
 
     assert result == {"triage_decision": "rag"}
@@ -213,7 +213,7 @@ async def test_triage_fallback_strips_markdown_fences_no_tag(base_state):
     raw_response.content = '```\n{"decision": "catalog"}\n```'
     mock_llm.ainvoke = AsyncMock(return_value=raw_response)
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
 
     assert result == {"triage_decision": "catalog"}
@@ -230,7 +230,7 @@ async def test_triage_fallback_strips_markdown_fences_json_tag(base_state):
     raw_response.content = '```json\n{"decision": "human"}\n```'
     mock_llm.ainvoke = AsyncMock(return_value=raw_response)
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
 
     assert result == {"triage_decision": "human"}
@@ -247,7 +247,7 @@ async def test_triage_fallback_strips_markdown_fences_uppercase_tag(base_state):
     raw_response.content = '```JSON\n{"decision": "rag"}\n```'
     mock_llm.ainvoke = AsyncMock(return_value=raw_response)
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
 
     assert result == {"triage_decision": "rag"}
@@ -264,7 +264,7 @@ async def test_triage_fallback_invalid_json_returns_rag(base_state):
     raw_response.content = "sorry, I cannot determine the intent"
     mock_llm.ainvoke = AsyncMock(return_value=raw_response)
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
 
     assert result == {"triage_decision": "rag"}
@@ -281,7 +281,7 @@ async def test_triage_fallback_unknown_decision_returns_rag(base_state):
     raw_response.content = '{"decision": "unknown_value"}'
     mock_llm.ainvoke = AsyncMock(return_value=raw_response)
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
 
     assert result == {"triage_decision": "rag"}
@@ -302,7 +302,7 @@ async def test_triage_fallback_valid_json_missing_decision_key(base_state):
     raw_response.content = '{"intent": "rag"}'
     mock_llm.ainvoke = AsyncMock(return_value=raw_response)
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
 
     assert result == {"triage_decision": "rag"}
