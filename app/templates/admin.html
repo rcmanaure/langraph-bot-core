@@ -287,6 +287,12 @@ details.collapsible .details-body { padding: 0 var(--space-4) var(--space-4); }
 .key-value-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .key-value { flex: 1; background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-family: var(--font-mono); font-size: 12px; color: var(--fg); word-break: break-all; }
 
+/* ── Staff list ───────────────────────────────────────────────────── */
+.staff-list { display: flex; flex-direction: column; gap: 6px; margin-top: var(--space-2); }
+.staff-row { display: flex; align-items: center; gap: var(--space-3); padding: 8px 0; border-top: 1px solid var(--border); }
+.staff-row:first-child { border-top: none; }
+.staff-row .mono { flex: 1; color: var(--fg-2); }
+
 /* ── Add tenant form ──────────────────────────────────────────────── */
 .add-form { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-5); margin-top: var(--space-5); animation: expandIn var(--motion-base) var(--ease-standard); }
 .add-form h3 { font-size: var(--text-base); font-weight: 590; color: var(--fg); margin-bottom: var(--space-4); }
@@ -487,6 +493,11 @@ const state = {
   deleteState: {},
   deleteError: {},
   flashSlug: null,
+  staff: {},
+  staffLoading: {},
+  staffError: {},
+  staffAdding: {},
+  staffAddError: {},
 
   docsTenant: '',
   docsFile: null,
@@ -717,6 +728,9 @@ function renderExpandPanel(t) {
       </div>
     </div>
   </details>
+  <div class="panel-section" data-od-id="staff-section-${esc(t.slug)}">
+    ${renderStaffSection(t)}
+  </div>
   <div class="panel-actions">
     ${saveErr ? `<div class="inline-error show">${ic('alert')}<span>${esc(saveErr)}</span></div>` : ''}
     <button class="btn btn-ghost" data-action="collapse">Cancel</button>
@@ -754,6 +768,36 @@ function renderExpandPanel(t) {
       </div>
     </div>
   </div>`;
+}
+
+function renderStaffSection(t) {
+  const list = state.staff[t.slug] || [];
+  const loading = state.staffLoading[t.slug];
+  const err = state.staffError[t.slug];
+  const adding = state.staffAdding[t.slug];
+  const addErr = state.staffAddError[t.slug];
+  return `
+  <div class="panel-section-title">Staff <span class="hint">channel-and-identifier pairs — never inferred from a message</span></div>
+  ${loading ? `<div class="empty-state">Loading staff…</div>` : ''}
+  ${!loading && err ? `<div class="empty-state">${esc(err)}</div>` : ''}
+  ${!loading && !err && list.length === 0 ? `<div class="empty-state">No staff members yet.</div>` : ''}
+  ${!loading && !err && list.length ? `<div class="staff-list" data-od-id="staff-list-${esc(t.slug)}">${list.map(s => `
+    <div class="staff-row" data-od-id="staff-row-${s.id}">
+      <span class="badge badge-plan-free">${esc(s.channel)}</span>
+      <span class="mono">${esc(s.identifier)}</span>
+      <button class="btn btn-danger-outline btn-sm" data-action="remove-staff" data-slug="${esc(t.slug)}" data-staff-id="${s.id}" data-od-id="remove-staff-${s.id}">Remove</button>
+    </div>`).join('')}</div>` : ''}
+  <div class="field-grid" style="margin-top:10px">
+    <div class="field"><label>Channel</label>
+      <select data-field="staff-channel">
+        <option value="telegram">telegram</option>
+        <option value="whatsapp">whatsapp</option>
+      </select>
+    </div>
+    <div class="field"><label>Identifier</label><input type="text" class="mono" data-field="staff-identifier" placeholder="channel user id"></div>
+  </div>
+  ${addErr ? `<div class="inline-error show">${ic('alert')}<span>${esc(addErr)}</span></div>` : ''}
+  <button class="btn btn-ghost btn-sm" data-action="add-staff" data-slug="${esc(t.slug)}" data-od-id="add-staff-${esc(t.slug)}" ${adding?'disabled':''}>${adding?'Adding…':'Add staff member'}</button>`;
 }
 
 function renderAddTenantForm() {
@@ -932,8 +976,10 @@ function onMainClick(e) {
       break;
     case 'toggle-expand': {
       const rowSlug = row.dataset.slug;
-      state.expandedTenant = state.expandedTenant === rowSlug ? null : rowSlug;
+      const opening = state.expandedTenant !== rowSlug;
+      state.expandedTenant = opening ? rowSlug : null;
       render();
+      if (opening && !state.staff[rowSlug]) fetchStaff(rowSlug);
       break;
     }
     case 'collapse':
@@ -1004,6 +1050,12 @@ function onMainClick(e) {
       break;
     case 'delete-file':
       deleteFile(actionEl.dataset.name);
+      break;
+    case 'add-staff':
+      addStaffMember(slug);
+      break;
+    case 'remove-staff':
+      removeStaffMember(slug, Number(actionEl.dataset.staffId));
       break;
   }
 }
@@ -1169,6 +1221,7 @@ async function deleteTenant(slug) {
     delete state.webhookStatus[slug];
     delete state.regenState[slug];
     delete state.deleteState[slug];
+    delete state.staff[slug];
     state.expandedTenant = null;
     render();
     toast(`Tenant "${slug}" deleted.`, 'success');
@@ -1176,6 +1229,60 @@ async function deleteTenant(slug) {
     state.deleteError[slug] = err.message;
     state.deleteState[slug] = 'confirm';
     render();
+  }
+}
+
+/* ── Staff actions ────────────────────────────────────────────────── */
+async function fetchStaff(slug) {
+  state.staffLoading[slug] = true;
+  state.staffError[slug] = '';
+  render();
+  try {
+    state.staff[slug] = await api(`/admin/tenants/${encodeURIComponent(slug)}/staff`);
+  } catch (err) {
+    state.staffError[slug] = err.message;
+    state.staff[slug] = [];
+  }
+  state.staffLoading[slug] = false;
+  render();
+}
+
+async function addStaffMember(slug) {
+  const panel = document.querySelector(`[data-od-id="staff-section-${CSS.escape(slug)}"]`);
+  const channel = panel.querySelector('[data-field="staff-channel"]').value;
+  const identifierEl = panel.querySelector('[data-field="staff-identifier"]');
+  const identifier = identifierEl.value.trim();
+  if (!identifier) {
+    state.staffAddError[slug] = 'Identifier is required.';
+    render();
+    return;
+  }
+  state.staffAdding[slug] = true;
+  state.staffAddError[slug] = '';
+  render();
+  try {
+    await api(`/admin/tenants/${encodeURIComponent(slug)}/staff`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel, identifier }),
+    });
+    await fetchStaff(slug);
+    toast(`Added ${identifier} as staff on ${channel}.`, 'success');
+  } catch (err) {
+    state.staffAddError[slug] = err.message;
+  }
+  state.staffAdding[slug] = false;
+  render();
+}
+
+async function removeStaffMember(slug, staffId) {
+  try {
+    await api(`/admin/tenants/${encodeURIComponent(slug)}/staff/${staffId}`, { method: 'DELETE' });
+    state.staff[slug] = (state.staff[slug] || []).filter(s => s.id !== staffId);
+    render();
+    toast('Staff member removed.', 'success');
+  } catch (err) {
+    toast(`Remove failed: ${err.message}`, 'error');
   }
 }
 

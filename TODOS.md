@@ -2,13 +2,27 @@
 
 Items accepted for future work but out of current PR scope.
 
-- **WhatsApp: `WhatsAppAdapter.normalize()` is unused by the live webhook path.**
-  `whatsapp_webhook`/`_handle_message` (`app/channels/whatsapp.py`) parse the raw
-  payload directly instead of going through the `ChannelAdapter` Protocol, unlike
-  Telegram's text path. Already flagged in code as `ponytail: ... migrate when
-  adding a 3rd channel` — deferred again rather than refactored under time
-  pressure while getting WhatsApp ready for testing. Revisit when adding a 3rd
-  channel or when unifying the two handlers' message-type branching.
+- **`TelegramAdapter.parse` can 500 the webhook on a malformed message shape.**
+  (found during /code-review of the WhatsApp inbound-turn migration, 2026-08-16)
+  `telegram_webhook` calls `adapter.parse(body)` synchronously before
+  returning 200 (dedup needs the ids parse produces), and `parse` does
+  unguarded dict indexing (`media["file_id"]`, `photo["file_id"]`). A
+  malformed-but-valid-JSON message (e.g. a photo entry missing `file_id`)
+  raises `KeyError` inline and 500s instead of returning `{"ok": true}` —
+  exactly the retry storm the malformed-body guard next to it exists to
+  prevent, just one layer deeper. `WhatsAppAdapter.parse` was fixed to
+  degrade gracefully on this same class of input during the migration above;
+  Telegram's copy predates that fix and was left alone as out of scope for a
+  WhatsApp-only ticket. Wrap `TelegramAdapter._parse` message-type branches in
+  the same try/except KeyError → log + skip pattern.
+- **`POST /operator/resume` never delivers the operator's answer to the user.**
+  (found during the inbound-turn design review, 2026-08-15) It invokes the graph
+  and returns the answer in the HTTP response body only — nothing sends it back
+  over Telegram/WhatsApp, so a human takeover is invisible to the person who
+  asked. Now cheap to fix: `ChannelAdapter.send` is reachable outside the turn,
+  and `thread_id` carries tenant/user/channel (`app/graph/thread.py:parse_thread_part`).
+  Open questions before implementing: rebuilding channel credentials from a
+  `thread_id`, and what to do when WhatsApp's 24h service window has closed.
 - **Feedback de usuario 👍/👎 sobre respuestas del bot.** (movido desde plan
   voz/escalabilidad, eng-review 2026-07-06 D9 — no seleccionada en decisión CEO)
   Qué: botones inline (Telegram) / reacciones (WhatsApp) → tabla feedback.

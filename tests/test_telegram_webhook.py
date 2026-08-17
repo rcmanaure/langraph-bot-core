@@ -250,6 +250,21 @@ async def test_no_message_key_returns_ok(mock_db, mock_http):
 
 
 @pytest.mark.asyncio
+async def test_message_missing_chat_key_returns_ok_not_500(mock_db, mock_http, mock_graph):
+    """Found in /code-review: parse() indexed msg["chat"]["id"] unguarded --
+    an update missing "chat" raised KeyError uncaught, 500ing the webhook.
+    Worse, dedup_key() marks the update_id seen BEFORE parse() runs, so a
+    crash here meant Telegram's automatic retry of the same update_id got
+    silently dropped by the dedup check instead of getting a second try."""
+    app = make_app(mock_graph)
+    payload = {"update_id": 99, "message": {"from": {"id": 1}, "text": "hola"}}  # no 'chat'
+    r = await _post(app, payload)
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    mock_graph.ainvoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_edited_message_is_processed(mock_db, mock_http, mock_graph):
     """edited_message (no message key) should be processed normally."""
     app = make_app(mock_graph)
@@ -413,7 +428,7 @@ async def test_voice_stt_failure_sends_user_error(mock_db, mock_http, mock_graph
     send_calls = mock_http.post.call_args_list
     error_call = next((c for c in send_calls if "sendMessage" in str(c)), None)
     assert error_call is not None
-    assert "No pude procesar tu nota de voz" in str(error_call)
+    assert "No pude procesar su nota de voz" in str(error_call)
 
 
 @pytest.mark.asyncio
@@ -618,99 +633,40 @@ async def test_same_update_id_different_tenants_both_processed(mock_db, mock_htt
     assert mock_graph.ainvoke.await_count == 2
 
 
-# ── 8. Photo messages (vision extraction) ─────────────────────────────────────
+# ── 8. Photo messages ────────────────────────────────────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_photo_extracted_query_sent_to_graph(mock_db, mock_http, mock_graph):
-    """Vision extraction succeeds → extracted question becomes the graph input."""
-    with (
-        patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
-        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
-        patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
-        patch("app.channels.telegram._extract_procedure_query", new_callable=AsyncMock,
-              return_value="¿Cuánto cuesta un examen de IGRA?"),
-    ):
-        app = make_app(mock_graph)
-        r = await _post(app, photo_update())
-    assert r.status_code == 200
-    mock_graph.ainvoke.assert_awaited_once()
-    call_input = mock_graph.ainvoke.call_args[0][0]
-    assert call_input["messages"][0].content == "¿Cuánto cuesta un examen de IGRA?"
+# Vision extraction, size gating, uncertainty and failure handling are the
+# inbound turn's behaviour, not Telegram's — covered once in tests/test_turn.py.
+# What stays here is what the TelegramAdapter itself decides.
 
 
 @pytest.mark.asyncio
-async def test_photo_uncertain_extraction_asks_user_to_type(mock_db, mock_http, mock_graph):
-    """Vision model can't read the image confidently → ask the user to type it,
-    never forward a guessed procedure name into the RAG pipeline (that's how a
-    misread exam silently turns into a confidently wrong price downstream)."""
-    from app.channels.telegram import _VISION_UNCERTAIN
+async def test_photo_parsed_as_an_image_ref_at_largest_resolution(mock_db, mock_http, mock_graph):
+    """Telegram sends every rendition; the adapter must pick the last (largest)."""
+    from app.channels.telegram import TelegramAdapter
 
-    with (
-        patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
-        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
-        patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
-        patch("app.channels.telegram._extract_procedure_query", new_callable=AsyncMock,
-              return_value=_VISION_UNCERTAIN),
-    ):
-        app = make_app(mock_graph)
-        r = await _post(app, photo_update())
-    assert r.status_code == 200
-    mock_graph.ainvoke.assert_not_awaited()
-    send_calls = mock_http.post.call_args_list
-    send_msg = next((c for c in send_calls if "sendMessage" in str(c)), None)
-    assert send_msg is not None
-    assert "escrib" in str(send_msg).lower()
+    adapter = TelegramAdapter(SLUG, BOT, SECRET)
+    body = photo_update()
+    body["message"]["photo"] = [
+        {"file_id": "small", "file_size": 100},
+        {"file_id": "large", "file_size": 4000},
+    ]
+
+    [inbound] = await adapter.parse(body)
+    assert [(r.id, r.kind, r.size_bytes) for r in inbound.media] == [("large", "image", 4000)]
 
 
 @pytest.mark.asyncio
-async def test_photo_vision_disabled_sends_notice(mock_db, mock_http, mock_graph):
-    """Vision model not configured → user-facing notice, no crash, no graph call."""
-    with patch("app.channels.telegram.settings.openai_vision_model", ""):
-        app = make_app(mock_graph)
-        r = await _post(app, photo_update())
-    assert r.status_code == 200
-    mock_graph.ainvoke.assert_not_awaited()
-    send_calls = mock_http.post.call_args_list
-    send_msg = next((c for c in send_calls if "sendMessage" in str(c)), None)
-    assert send_msg is not None
-    assert "no está habilitado" in str(send_msg)
+async def test_document_parsed_as_a_document_ref(mock_db, mock_http, mock_graph):
+    """A PDF order used to fall through to the text branch and be ignored."""
+    from app.channels.telegram import TelegramAdapter
 
+    adapter = TelegramAdapter(SLUG, BOT, SECRET)
+    body = {"message": {"chat": {"id": 100}, "from": {"id": 42},
+                        "document": {"file_id": "d1", "mime_type": "application/pdf"}}}
 
-@pytest.mark.asyncio
-async def test_photo_extraction_failure_sends_error(mock_db, mock_http, mock_graph):
-    """Vision API call raises → user gets a Spanish error, no graph call, no 500."""
-    with (
-        patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
-        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
-        patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
-        patch("app.channels.telegram._extract_procedure_query", new_callable=AsyncMock,
-              side_effect=RuntimeError("Vision API returned 500")),
-    ):
-        app = make_app(mock_graph)
-        r = await _post(app, photo_update())
-    assert r.status_code == 200
-    mock_graph.ainvoke.assert_not_awaited()
-    send_calls = mock_http.post.call_args_list
-    send_msg = next((c for c in send_calls if "sendMessage" in str(c)), None)
-    assert send_msg is not None
-    assert "No pude procesar la imagen" in str(send_msg)
-
-
-@pytest.mark.asyncio
-async def test_photo_over_10mb_sends_size_error(mock_db, mock_http, mock_graph):
-    """Photo > 10 MB → rejected before download, no graph call. Regression test:
-    this branch used to skip the size check that voice/audio already had."""
-    with patch("app.channels.telegram.settings.openai_vision_model", "vision-model"):
-        app = make_app(mock_graph)
-        payload = photo_update()
-        payload["message"]["photo"][0]["file_size"] = 11 * 1024 * 1024
-        r = await _post(app, payload)
-    assert r.status_code == 200
-    mock_graph.ainvoke.assert_not_awaited()
-    send_calls = mock_http.post.call_args_list
-    error_call = next((c for c in send_calls if "sendMessage" in str(c)), None)
-    assert error_call is not None
-    assert "10MB" in str(error_call)
+    [inbound] = await adapter.parse(body)
+    assert [(r.id, r.kind) for r in inbound.media] == [("d1", "document")]
 
 
 # ── 9. Photo albums (media_group_id) ──────────────────────────────────────────
@@ -726,11 +682,11 @@ async def test_media_group_photos_combined_into_single_graph_call(mock_db, mock_
         return next(queries)
 
     with (
-        patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
-        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
+        patch("app.channels.turn.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.turn.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.telegram._MEDIA_GROUP_DEBOUNCE", 0.05),
         patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
-        patch("app.channels.telegram._extract_procedure_query", side_effect=fake_extract),
+        patch("app.channels.turn.extract_procedure_query", side_effect=fake_extract),
     ):
         app = make_app(mock_graph)
         r1 = await _post(app, photo_group_update("p1", "grp1"))
@@ -763,11 +719,11 @@ async def test_media_group_multi_sample_query_not_double_bulleted(mock_db, mock_
         return next(queries)
 
     with (
-        patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
-        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
+        patch("app.channels.turn.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.turn.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.telegram._MEDIA_GROUP_DEBOUNCE", 0.05),
         patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
-        patch("app.channels.telegram._extract_procedure_query", side_effect=fake_extract),
+        patch("app.channels.turn.extract_procedure_query", side_effect=fake_extract),
     ):
         app = make_app(mock_graph)
         await _post(app, photo_group_update("p1", "grp-multi"))
@@ -789,14 +745,14 @@ async def test_media_group_multi_sample_query_not_double_bulleted(mock_db, mock_
 async def test_media_group_all_uncertain_sends_single_message(mock_db, mock_http, mock_graph):
     """Every photo in the album is illegible → one combined "can't read" message,
     not one per photo."""
-    from app.channels.telegram import _VISION_UNCERTAIN
+    from app.channels.turn import VISION_UNCERTAIN as _VISION_UNCERTAIN
 
     with (
-        patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
-        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
+        patch("app.channels.turn.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.turn.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.telegram._MEDIA_GROUP_DEBOUNCE", 0.05),
         patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
-        patch("app.channels.telegram._extract_procedure_query", new_callable=AsyncMock,
+        patch("app.channels.turn.extract_procedure_query", new_callable=AsyncMock,
               return_value=_VISION_UNCERTAIN),
     ):
         app = make_app(mock_graph)
@@ -818,11 +774,11 @@ async def test_different_media_groups_not_mixed(mock_db, mock_http, mock_graph):
         return "¿Cuánto cuesta un examen X?"
 
     with (
-        patch("app.channels.telegram.settings.openai_vision_model", "vision-model"),
-        patch("app.channels.telegram.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
+        patch("app.channels.turn.settings.openai_vision_model", "vision-model"),
+        patch("app.channels.turn.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
         patch("app.channels.telegram._MEDIA_GROUP_DEBOUNCE", 0.05),
         patch("app.channels.telegram._download_file", new_callable=AsyncMock, return_value=b"img"),
-        patch("app.channels.telegram._extract_procedure_query", side_effect=fake_extract),
+        patch("app.channels.turn.extract_procedure_query", side_effect=fake_extract),
     ):
         app = make_app(mock_graph)
         await _post(app, photo_group_update("p1", "grp-a"))

@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import re
 import secrets
 import uuid
 from typing import Literal
@@ -7,7 +8,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
@@ -15,7 +16,7 @@ from app.auth import verify_operator_key
 from app.channels.telegram import delete_webhook, get_webhook_info, set_webhook
 from app.config import settings
 from app.db import AsyncSessionLocal
-from app.models import IndexJob, IndexJobStatus, Tenant
+from app.models import IndexJob, IndexJobStatus, StaffMember, Tenant
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.policies import TenantPolicy
 from app.services.indexer import run_index_job
@@ -292,6 +293,90 @@ async def webhook_status(slug: str, _: None = Depends(verify_operator_key)):
         status = "mismatch"
 
     return {"status": status, "url": registered_url}
+
+
+# ── Staff members ────────────────────────────────────────────────────────────
+# The per-tenant, per-channel allowlist backing staff resolution in the
+# inbound turn (app/services/staff.py) — see ADR-006. Membership is only ever
+# granted here, never inferred from a message.
+
+class StaffMemberCreate(BaseModel):
+    channel: Literal["telegram", "whatsapp"]
+    identifier: str = Field(max_length=128)
+
+    @field_validator("identifier")
+    @classmethod
+    def _normalize_identifier(cls, v: str) -> str:
+        # Channel identifiers are the raw digits a channel sends (Telegram
+        # user id, WhatsApp phone number) — never punctuated. An operator
+        # pasting a phone number as "+1 555-123-4567" must still match that
+        # raw value, so strip the punctuation a human would type but leave
+        # the identifier otherwise untouched (found in /code-review).
+        normalized = re.sub(r"[\s\-()]", "", v).lstrip("+")
+        # min_length=1 on the raw field wouldn't catch this: an input like
+        # "+" is non-empty pre-normalization but strips down to "" here.
+        # Checked post-normalization instead of pre- (found in /code-review)
+        # — an empty stored identifier could otherwise match an unparsed
+        # inbound user_id defaulting to "", granting staff status nobody
+        # actually configured (see ADR-006).
+        if not normalized:
+            raise ValueError("identifier must contain at least one non-punctuation character")
+        return normalized
+
+
+@router.get("/tenants/{slug}/staff")
+async def list_staff(slug: str, _: None = Depends(verify_operator_key)):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        rows = await db.execute(
+            text("""
+                SELECT id, channel, identifier, created_at
+                  FROM staff_members WHERE tenant_id = :tid ORDER BY created_at DESC
+            """),
+            {"tid": tenant_id},
+        )
+        return [dict(r._mapping) for r in rows.fetchall()]
+
+
+@router.post("/tenants/{slug}/staff", status_code=201)
+async def add_staff(slug: str, body: StaffMemberCreate, _: None = Depends(verify_operator_key)):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        member = StaffMember(tenant_id=tenant_id, channel=body.channel, identifier=body.identifier)
+        db.add(member)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="Already allowlisted on this channel")
+        await db.refresh(member)
+
+    return {"id": member.id, "channel": member.channel, "identifier": member.identifier}
+
+
+@router.delete("/tenants/{slug}/staff/{staff_id}", status_code=204)
+async def remove_staff(slug: str, staff_id: int, _: None = Depends(verify_operator_key)):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        # Scoped by tenant_id, not just staff_id — a staff row's numeric id
+        # must not let one tenant's operator remove another tenant's staff
+        # member by guessing an id.
+        result = await db.execute(
+            text("DELETE FROM staff_members WHERE id = :id AND tenant_id = :tid"),
+            {"id": staff_id, "tid": tenant_id},
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Staff member not found")
+        await db.commit()
 
 
 # ── API key rotation ─────────────────────────────────────────────────────────

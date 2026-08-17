@@ -438,13 +438,13 @@ def _mock_runtime(get_result=None):
     return Runtime(store=store)
 
 
-def _mock_extraction_llm(display_name=None, new_topic=None):
+def _mock_extraction_llm(new_topic=None):
     from app.schemas.profile import ProfileExtraction
 
     mock_llm = MagicMock()
     mock_structured = AsyncMock()
     mock_structured.ainvoke = AsyncMock(
-        return_value=ProfileExtraction(display_name=display_name, new_topic=new_topic)
+        return_value=ProfileExtraction(new_topic=new_topic)
     )
     mock_llm.with_structured_output.return_value = mock_structured
     return mock_llm
@@ -470,7 +470,7 @@ async def test_update_profile_noop_when_blocked(base_state):
 @pytest.mark.asyncio
 async def test_update_profile_creates_new_profile_when_none_exists(base_state):
     runtime = _mock_runtime(get_result=None)
-    mock_llm = _mock_extraction_llm(display_name="Ana", new_topic="precio biopsia")
+    mock_llm = _mock_extraction_llm(new_topic="precio biopsia")
 
     with patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm):
         result = await update_profile(base_state, runtime=runtime)
@@ -478,7 +478,6 @@ async def test_update_profile_creates_new_profile_when_none_exists(base_state):
     assert result == {}
     namespace, key, saved = runtime.store.aput.await_args.args
     assert key == "profile"
-    assert saved["display_name"] == "Ana"
     assert saved["topics_of_interest"] == ["precio biopsia"]
     assert saved["escalated_to_human_count"] == 0
 
@@ -486,7 +485,7 @@ async def test_update_profile_creates_new_profile_when_none_exists(base_state):
 @pytest.mark.asyncio
 async def test_update_profile_merges_new_topic_without_losing_existing(base_state):
     existing = MagicMock()
-    existing.value = {"display_name": "Ana", "topics_of_interest": ["horario atención"]}
+    existing.value = {"topics_of_interest": ["horario atención"]}
     runtime = _mock_runtime(get_result=existing)
     mock_llm = _mock_extraction_llm(new_topic="precio biopsia")
 
@@ -495,21 +494,6 @@ async def test_update_profile_merges_new_topic_without_losing_existing(base_stat
 
     _, _, saved = runtime.store.aput.await_args.args
     assert saved["topics_of_interest"] == ["precio biopsia", "horario atención"]
-    assert saved["display_name"] == "Ana"
-
-
-@pytest.mark.asyncio
-async def test_update_profile_never_overwrites_name_with_none(base_state):
-    existing = MagicMock()
-    existing.value = {"display_name": "Ana", "topics_of_interest": []}
-    runtime = _mock_runtime(get_result=existing)
-    mock_llm = _mock_extraction_llm(display_name=None)
-
-    with patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm):
-        await update_profile(base_state, runtime=runtime)
-
-    _, _, saved = runtime.store.aput.await_args.args
-    assert saved["display_name"] == "Ana"
 
 
 @pytest.mark.asyncio
@@ -539,55 +523,16 @@ async def test_update_profile_swallows_llm_failure(base_state):
 
 
 # ---------------------------------------------------------------------------
-# generate — personalizes the system prompt with the stored display_name
+# profile_namespace — per-user isolation under one tenant
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_generate_includes_display_name_in_prompt_when_profile_exists(base_state):
-    item = MagicMock()
-    item.value = {"display_name": "Ana"}
-    runtime = _mock_runtime(get_result=item)
+def test_profile_namespace_isolates_two_users_under_one_tenant():
+    from app.graph.thread import profile_namespace
 
-    mock_llm = MagicMock()
-    mock_llm.model_name = "test-model"
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hola Ana!"))
+    state_a = {"tenant_id": "test-tenant", "thread_id": "tenant:test-tenant:user:111:channel:telegram"}
+    state_b = {"tenant_id": "test-tenant", "thread_id": "tenant:test-tenant:user:222:channel:telegram"}
 
-    with (
-        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
-        patch(
-            "app.graph.nodes.generate._load_tenant",
-            AsyncMock(return_value={
-                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
-            }),
-        ),
-    ):
-        await generate(base_state, runtime=runtime)
-
-    system_content = mock_llm.ainvoke.await_args.args[0][0].content
-    assert "Ana" in system_content
-
-
-@pytest.mark.asyncio
-async def test_generate_omits_name_line_when_no_profile(base_state):
-    runtime = _mock_runtime(get_result=None)
-
-    mock_llm = MagicMock()
-    mock_llm.model_name = "test-model"
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hola!"))
-
-    with (
-        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
-        patch(
-            "app.graph.nodes.generate._load_tenant",
-            AsyncMock(return_value={
-                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
-            }),
-        ),
-    ):
-        await generate(base_state, runtime=runtime)
-
-    system_content = mock_llm.ainvoke.await_args.args[0][0].content
-    assert "se llama" not in system_content
+    assert profile_namespace(state_a) != profile_namespace(state_b)
 
 
 @pytest.mark.asyncio
@@ -642,9 +587,11 @@ async def test_generate_omits_specialization_block_when_absent(base_state):
 
 
 # ---------------------------------------------------------------------------
-# generate — surfaces retrieval similarity so the LLM can't silently assert a
-# price for a weak/wrong match (the IGRA -> "biopsia de ganglio" bug: the model
-# never saw how confident the retrieval actually was).
+# generate — the match decision (exact vs. approximate) is computed in code
+# from retrieval similarity, never handed to the model as a per-chunk
+# bracketed label (#25). Prevents the IGRA -> "biopsia de ganglio" bug: the
+# model can't silently assert a price for a weak/wrong match, and it can't
+# leak an internal label into the reply because no label ever reaches it.
 # ---------------------------------------------------------------------------
 
 async def _run_generate_with_chunks(base_state, chunks):
@@ -670,53 +617,64 @@ async def _run_generate_with_chunks(base_state, chunks):
 
 
 @pytest.mark.asyncio
-async def test_generate_rag_context_tags_low_similarity_as_approximation(base_state):
+async def test_generate_below_threshold_match_asks_for_confirmation(base_state):
     chunks = [{"content": "Biopsia de ganglio linfático $120.00", "similarity": 0.402}]
     system_content = await _run_generate_with_chunks(base_state, chunks)
 
-    assert "APROXIMACIÓN" in system_content
+    assert "NO contiene una coincidencia confiable" in system_content
+    assert "¿Es lo que necesita?" in system_content
     assert "0.40" not in system_content
 
 
 @pytest.mark.asyncio
-async def test_generate_rag_context_tags_high_similarity_as_exact(base_state):
+async def test_generate_above_threshold_match_answers_directly(base_state):
     chunks = [{"content": "Biopsia de ganglio linfático $120.00", "similarity": 0.9}]
     system_content = await _run_generate_with_chunks(base_state, chunks)
 
-    assert "COINCIDENCIA EXACTA" in system_content
+    assert "ya verificó que el contexto contiene una coincidencia confiable" in system_content
 
 
 @pytest.mark.asyncio
-async def test_generate_rag_prompt_forbids_recalculating_tag(base_state):
-    """The exact/approximate classification is precomputed in Python — the
-    prompt must tell the model to trust the tag, not recompute a threshold
-    itself (that arithmetic used to live in the prompt and was easy to ignore)."""
-    system_content = await _run_generate_with_chunks(
-        base_state, [{"content": "x", "similarity": 0.5}]
-    )
+async def test_generate_no_similarity_scores_treated_as_confirmed():
+    """Chunks with no similarity key (e.g. a raw catalog dump) default to the
+    confirmed-match instruction rather than silently falling into the
+    ask-for-confirmation branch with nothing to confirm against."""
+    from app.graph.nodes.generate import _has_confirmed_match
 
-    assert "NO la recalcules" in system_content
-    assert "0.65" not in system_content
+    assert _has_confirmed_match([{"content": "x"}]) is True
 
 
-@pytest.mark.asyncio
-async def test_generate_rag_prompt_forbids_leaking_tag_into_reply(base_state):
-    """Regression test: a live LLM call echoed '[COINCIDENCIA EXACTA]' verbatim
-    into the user-facing answer — the tag is an internal classification signal,
-    never meant to reach the customer. The prompt must explicitly forbid this,
-    not just explain what the tag means."""
-    system_content = await _run_generate_with_chunks(
-        base_state, [{"content": "x", "similarity": 0.9}]
-    )
+def test_has_confirmed_match_uses_top_ranked_chunk_not_max():
+    """/code-review 2026-08-17: an earlier version used max(similarity) across
+    every chunk, so one unrelated but numerically-similar low-ranked chunk
+    could falsely confirm a weak top match. retrieve.py already reranks by
+    relevance, so chunks[0] is the primary match and must decide alone."""
+    from app.graph.nodes.generate import _has_confirmed_match
 
-    assert "NUNCA las escribas literalmente" in system_content
+    weak_top_strong_second = [
+        {"content": "a", "similarity": 0.40},
+        {"content": "b", "similarity": 0.95},
+    ]
+    assert _has_confirmed_match(weak_top_strong_second) is False
 
 
 @pytest.mark.asyncio
-async def test_generate_rag_prompt_keeps_hedge_after_positive_confirmation(base_state):
+async def test_generate_rag_context_has_no_bracketed_confidence_label(base_state):
+    """No internal label — [COINCIDENCIA EXACTA] / [APROXIMACIÓN...] — ever
+    enters the context the model sees, for either match outcome (#25)."""
+    for similarity in (0.402, 0.9):
+        system_content = await _run_generate_with_chunks(
+            base_state, [{"content": "Ítem X $10.00", "similarity": similarity}]
+        )
+        assert "[COINCIDENCIA" not in system_content
+        assert "[APROXIMACIÓN" not in system_content
+
+
+@pytest.mark.asyncio
+async def test_generate_rag_prompt_keeps_hedge_on_unconfirmed_match(base_state):
     """Regression test: a real conversation showed the model correctly hedging
     on the FIRST approximate-match offer ("lo más cercano que tenemos... ¿es
-    lo que necesitas?"), but after the user confirmed "sí", the second turn
+    lo que necesita?"), but after the user confirmed "sí", the second turn
     dropped the hedge entirely and renamed the generic catalog item to match
     the user's specific wording — presenting an approximation with false
     confidence and false specificity. The prompt must instruct the model to
@@ -726,13 +684,12 @@ async def test_generate_rag_prompt_keeps_hedge_after_positive_confirmation(base_
         base_state, [{"content": "x", "similarity": 0.5}]
     )
 
-    assert "CONFIRMA que sí" in system_content
     assert "nombre EXACTO del ítem" in system_content
-    assert "nunca lo renombres" in system_content
+    assert "nunca lo renombre" in system_content
 
 
 @pytest.mark.asyncio
-async def test_generate_catalog_context_omits_confidence_score(base_state):
+async def test_generate_catalog_prompt_omits_match_labels_and_lists_everything(base_state):
     """Catalog listing shows everything regardless of match quality — no
     per-item confidence noise in that prompt."""
     base_state["triage_decision"] = "catalog"
@@ -740,6 +697,7 @@ async def test_generate_catalog_context_omits_confidence_score(base_state):
     system_content = await _run_generate_with_chunks(base_state, chunks)
 
     assert "confianza" not in system_content
+    assert "[APROXIMACIÓN" not in system_content
     assert "Ítem A" in system_content
 
 
@@ -747,3 +705,93 @@ async def test_generate_catalog_context_omits_confidence_score(base_state):
 async def test_generate_no_chunks_still_says_sin_contexto(base_state):
     system_content = await _run_generate_with_chunks(base_state, [])
     assert "Sin contexto disponible" in system_content
+
+
+# ---------------------------------------------------------------------------
+# generate — full-catalog replies return every item (#24): the brevity cap
+# that used to contradict "list every item, omit nothing" is RAG-only now.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_catalog_prompt_has_no_length_cap(base_state):
+    base_state["triage_decision"] = "catalog"
+    system_content = await _run_generate_with_chunks(base_state, [{"content": "Ítem A $10.00"}])
+
+    assert "BREVE" not in system_content
+    assert "máximo 4-5 líneas" not in system_content
+
+
+@pytest.mark.asyncio
+async def test_catalog_prompt_still_lists_every_item(base_state):
+    base_state["triage_decision"] = "catalog"
+    many_items = [{"content": f"Ítem {i} $10.00"} for i in range(20)]
+    system_content = await _run_generate_with_chunks(base_state, many_items)
+
+    for i in range(20):
+        assert f"Ítem {i}" in system_content
+
+
+@pytest.mark.asyncio
+async def test_rag_prompt_keeps_the_short_form_length_cap(base_state):
+    system_content = await _run_generate_with_chunks(base_state, [{"content": "Ítem A $10.00"}])
+
+    assert "BREVE" in system_content
+    assert "máximo 4-5 líneas" in system_content
+
+
+# ---------------------------------------------------------------------------
+# generate — terser staff register, no escalation line (#27). Staff gets a
+# different register-floor variant and never sees the contact/escalation
+# line pointing them at their own workplace; patients are unaffected.
+# ---------------------------------------------------------------------------
+
+async def _run_generate_as(base_state, chunks, *, is_staff: bool, contact_url="https://acme.example/contact"):
+    base_state["retrieved_chunks"] = chunks
+    base_state["is_staff"] = is_staff
+    runtime = _mock_runtime(get_result=None)
+
+    mock_llm = MagicMock()
+    mock_llm.model_name = "test-model"
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="ok"))
+
+    with (
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch(
+            "app.graph.nodes.generate._load_tenant",
+            AsyncMock(return_value={
+                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION,
+                "contact_hint": f"\nSi necesita más ayuda, contacte: {contact_url}",
+            }),
+        ),
+    ):
+        await generate(base_state, runtime=runtime)
+
+    return mock_llm.ainvoke.await_args.args[0][0].content
+
+
+@pytest.mark.asyncio
+async def test_staff_conversation_gets_terser_register(base_state):
+    from app.graph.nodes.generate import _REGISTER_FLOOR_STAFF
+
+    system_content = await _run_generate_as(base_state, [{"content": "x", "similarity": 0.9}], is_staff=True)
+    assert _REGISTER_FLOOR_STAFF in system_content
+
+
+@pytest.mark.asyncio
+async def test_staff_reply_never_contains_escalation_line(base_state):
+    chunks = [{"content": "x", "similarity": 0.1}]  # below threshold -> triggers rule 3
+    system_content = await _run_generate_as(base_state, chunks, is_staff=True)
+
+    assert "acme.example/contact" not in system_content
+    assert "eleve al contacto" not in system_content
+
+
+@pytest.mark.asyncio
+async def test_patient_reply_unchanged_by_staff_variant(base_state):
+    from app.graph.nodes.generate import _REGISTER_FLOOR
+
+    chunks = [{"content": "x", "similarity": 0.1}]
+    system_content = await _run_generate_as(base_state, chunks, is_staff=False)
+
+    assert _REGISTER_FLOOR in system_content
+    assert "acme.example/contact" in system_content

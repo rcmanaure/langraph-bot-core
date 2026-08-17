@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # Chat LLM — routed through OpenRouter
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openai_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
+    openai_model: str = "xiaomi/mimo-v2.5"
     openai_fallback_model: str = "deepseek/deepseek-v4-flash"
 
     # Embeddings — same key/base as chat; override only if using a different provider
@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     embedding_cache_enabled: bool = True
     retrieve_cache_enabled: bool = True
     rerank_candidate_k: int = 20
-    rerank_model: str = "nvidia/llama-nemotron-rerank-vl-1b-v2:free"
+    rerank_model: str = "cohere/rerank-v3.5"
 
     # Channels
     telegram_bot_token: str = ""
@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     app_domain: str = "localhost:8000"
 
     # Optional
+    # Empty disables vision extraction entirely (see channels/turn.py and
+    # services/vision.py's own opt-in gate) -- deliberately not defaulted to
+    # a real model, so a fresh deployment with no vision budget configured
+    # doesn't silently start making (billed) vision calls. Recommended once
+    # configured: see docs/model-upgrade-baseline.md.
     openai_vision_model: str = ""
     web_search_url: str = ""
 
@@ -91,6 +96,12 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Shared cap for every inbound media download (voice, audio, image), enforced
+# by the inbound turn before any adapter fetches bytes. Lives here rather than
+# in a feature module so neither the vision nor the STT path owns a limit the
+# other also depends on.
+MAX_MEDIA_BYTES = 10 * 1024 * 1024  # 10 MB
 
 PLAN_LIMITS: dict[str, dict] = {
     "free":  {"docs": 5,   "chunks": 500,   "queries_monthly": 500},

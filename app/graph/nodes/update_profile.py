@@ -16,7 +16,6 @@ _SCHEMA_VERSION = "1.0.0"
 
 _EXTRACT_PROMPT = """\
 Given the user's latest message and the assistant's reply, extract:
-- display_name: the user's name, ONLY if they explicitly stated it in this message (e.g. "me llamo Ana", "soy Carlos"). Otherwise null.
 - new_topic: a short (2-5 word) label for what this exchange was about (e.g. "precio biopsia", "horario atención"). Null if off-topic or unclear.
 Reply with the extraction fields only — do not invent information not present in the message.
 """
@@ -53,9 +52,6 @@ async def update_profile(state: AgentState, runtime: Runtime | None = None) -> d
         extraction: ProfileExtraction = await llm.with_structured_output(
             ProfileExtraction
         ).ainvoke(payload)
-
-        if extraction.display_name:
-            profile["display_name"] = extraction.display_name
 
         topics = list(profile.get("topics_of_interest") or [])
         if extraction.new_topic and extraction.new_topic not in topics:

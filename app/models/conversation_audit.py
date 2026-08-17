@@ -20,7 +20,6 @@ class ConversationAudit(Base):
     channel = Column(String(20), nullable=False)
     user_message = Column(Text, nullable=True)
     bot_response = Column(Text, nullable=True)
-    langsmith_trace_url = Column(String(512), nullable=True)
     # Interrupt tracking — queried by expire_interrupted_threads scheduler
     interrupt_started_at = Column(DateTime(timezone=True), nullable=True)
     expired_at = Column(DateTime(timezone=True), nullable=True)
@@ -29,6 +28,9 @@ class ConversationAudit(Base):
     __table_args__ = (
         Index("ix_conversation_audit_thread", "thread_id"),
         Index("ix_conversation_audit_tenant_created", "tenant_id", "created_at"),
+        # Serves the retention purge's created_at-only predicate — the
+        # composite index above can't (created_at isn't its leftmost column).
+        Index("ix_conversation_audit_created_at", "created_at"),
         # Partial index: scheduler query is O(interrupted rows) not O(all rows)
         Index(
             "ix_conversation_audit_interrupt_pending",

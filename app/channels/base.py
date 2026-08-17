@@ -1,43 +1,144 @@
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from collections import OrderedDict
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Literal, Protocol
 
 if TYPE_CHECKING:
     from fastapi import Request
 
 
+def thread_id_for(tenant_slug: str, user_id: str, channel: str) -> str:
+    """The graph checkpoint key — see ADR-002. The single place this format is
+    written; parse it back with app/graph/thread.py:parse_thread_part."""
+    return f"tenant:{tenant_slug}:user:{user_id}:channel:{channel}"
+
+
+MediaKind = Literal["image", "audio", "document"]
+
+
 @dataclass
-class ChannelEvent:
-    """Normalized inbound message after crossing the channel boundary into the graph."""
+class MediaRef:
+    """A pointer to media the channel holds, resolvable to bytes via
+    ChannelAdapter.fetch_media.
+
+    Carries size_bytes so the inbound turn can reject oversized media without
+    downloading it. None means the channel didn't say — the turn does not
+    gate on an unknown size.
+    """
+    id: str
+    kind: MediaKind
+    size_bytes: int | None = None
+    mime_type: str | None = None
+    filename: str | None = None
+
+
+@dataclass
+class Inbound:
+    """A parsed inbound message: the only thing that crosses from a channel
+    adapter into the inbound turn.
+
+    `text` and `media` are exclusive — text messages carry no refs, media
+    messages carry no text (a caption travels in `caption`). More than one
+    ref means the channel batched them (a Telegram album).
+    """
     tenant_slug: str
-    channel: str       # discriminator: "telegram" | "whatsapp" | ...
+    channel: str
     user_id: str
-    chat_id: str       # delivery target (may differ from user_id on some channels)
-    text: str
-    thread_id: str     # graph checkpoint key: tenant:{slug}:user:{id}:channel:{channel}
+    chat_id: str
+    message_id: str = ""
+    caption: str = ""
+    text: str | None = None
+    media: list[MediaRef] = field(default_factory=list)
+
+    @property
+    def thread_id(self) -> str:
+        return thread_id_for(self.tenant_slug, self.user_id, self.channel)
 
 
 class ChannelAdapter(Protocol):
-    """Contract every channel adapter must satisfy.
+    """Everything that varies between channels. Everything that doesn't lives
+    in the inbound turn (app/channels/turn.py) instead.
 
-    Concrete implementations: TelegramAdapter (channels/telegram.py),
+    Concrete adapters: TelegramAdapter (channels/telegram.py),
     WhatsAppAdapter (channels/whatsapp.py).
-
-    Adding a new channel requires exactly these three methods — nothing else.
     """
     channel: str
 
     async def verify(self, request: "Request") -> bool:
-        """Return True if the request's authentication credential is valid."""
+        """Return True if the request's authentication credential is valid.
+        The enforcement point named by ADR-004 — a webhook route must call
+        this before doing anything else with the body."""
         ...
 
-    async def normalize(self, body: dict) -> ChannelEvent | None:
-        """Parse raw webhook payload → ChannelEvent; None if no user text message.
+    def dedup_key(self, body: dict) -> str | None:
+        """Stable key identifying this delivery, for drop-on-redelivery.
+        None when the payload carries no usable id.
 
-        ponytail: returns first text message only; multi-message payloads (rare on WA)
-        are not iterated — extend when a channel routinely batches messages.
+        The dict passed is whatever unit of delivery the channel naturally
+        dedupes on, not necessarily the raw webhook body: Telegram passes the
+        whole body (one update = one message), while WhatsApp — where one
+        webhook payload can carry several messages needing independent dedup
+        keys — passes each parsed message's id as {"id": message_id}. Check
+        the concrete adapter's implementation before writing a third one.
+
+        Must be unique across tenants: Telegram's update_id is sequential per
+        bot, not globally, so two tenants can emit the same one and a
+        tenant-blind key would silently drop one of their messages."""
+        ...
+
+    async def parse(self, body: dict) -> list["Inbound"]:
+        """Parse a raw webhook payload into zero or more inbound messages.
+
+        A list, not a single value: one WhatsApp payload can carry several
+        messages, and each becomes its own turn. Telegram returns 0 or 1.
         """
         ...
 
-    async def send(self, event: ChannelEvent, text: str) -> None:
-        """Deliver text response to the originating user."""
+    async def acknowledge(self, inbound: "Inbound") -> None:
+        """Signal receipt to the user (typing indicator, read receipt).
+        Best-effort — the turn swallows failures here."""
         ...
+
+    async def fetch_media(self, ref: "MediaRef") -> bytes:
+        """Download the bytes behind a MediaRef."""
+        ...
+
+    async def send(self, inbound: "Inbound", text: str) -> None:
+        """Deliver a reply to the originating user."""
+        ...
+
+
+class SeenKeys:
+    """Bounded LRU of dedup keys already handled.
+
+    Per-process, so it only dedupes redeliveries hitting the same worker —
+    fine while entrypoint.sh pins --workers 1 (see app/runtime.py). A second
+    worker needs a shared adapter behind this same interface.
+    """
+
+    def __init__(self, max_entries: int = 1000) -> None:
+        self._seen: OrderedDict[str, bool] = OrderedDict()
+        self._max = max_entries
+
+    def check_and_add(self, key: str) -> bool:
+        """True if the key was already seen. Records it either way."""
+        if key in self._seen:
+            return True
+        self._seen[key] = True
+        if len(self._seen) > self._max:
+            self._seen.popitem(last=False)
+        return False
+
+    def clear(self) -> None:
+        self._seen.clear()
+
+    def __len__(self) -> int:
+        return len(self._seen)
+
+
+class MediaTooLarge(Exception):
+    """Raised by ChannelAdapter.fetch_media when a channel can only learn a
+    file's real size during the fetch itself — too late for the turn's own
+    pre-fetch gate on MediaRef.size_bytes (see WhatsAppAdapter.fetch_media).
+    The turn maps this to the same AUDIO_TOO_LARGE/IMAGE_TOO_LARGE message
+    its own gate would have sent, so the user can't tell which layer refused.
+    """

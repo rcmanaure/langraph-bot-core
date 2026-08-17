@@ -1,6 +1,7 @@
 import logging
 
 import tiktoken
+from opentelemetry import trace
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +11,7 @@ from app.services.llm import get_embeddings
 logger = logging.getLogger(__name__)
 
 _enc = tiktoken.get_encoding("cl100k_base")
+_tracer = trace.get_tracer(__name__)
 
 
 def token_counter(msgs) -> int:
@@ -23,6 +25,17 @@ async def retrieve_chunks(db: AsyncSession, query: str, namespace: str) -> list[
     covers those; RRF combines both without needing to normalize/compare
     scores across the two different scales.
     """
+    # Named span: neither the embedding call nor the raw SQL query below is
+    # a LangChain runnable, so OpenInference's auto-instrumentation never
+    # sees this step -- without it, this whole round-trip shows up as
+    # unattributed dead time between the triage and generate spans.
+    with _tracer.start_as_current_span(
+        "chunk_retrieval", attributes={"openinference.span.kind": "RETRIEVER"}
+    ):
+        return await _retrieve_chunks(db, query, namespace)
+
+
+async def _retrieve_chunks(db: AsyncSession, query: str, namespace: str) -> list[dict]:
     query_vec = await get_embeddings().aembed_query(query)
 
     ef = settings.hnsw_ef_search

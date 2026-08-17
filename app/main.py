@@ -89,12 +89,13 @@ def _setup_sentry() -> None:
 
 def _verify_redaction() -> None:
     """Hard boot-gate for exactly one failure mode: confirmed unmasked
-    content in an exported span. Everything else (Phoenix unreachable,
-    query timeout, ingest lag) is a soft failure identical in kind to
-    _setup_phoenix's own soft-dependency contract -- register() succeeding
-    does NOT mean Phoenix is actually reachable (OTel exporters are
-    optimistic by design), so connectivity failures surface here instead,
-    and must be treated the same way: log, don't trace, keep booting.
+    content in an exported span's input. Everything else (Phoenix
+    unreachable, query timeout, ingest lag) is a soft failure identical in
+    kind to _setup_phoenix's own soft-dependency contract -- register()
+    succeeding does NOT mean Phoenix is actually reachable (OTel exporters
+    are optimistic by design), so connectivity failures surface here
+    instead, and must be treated the same way: log, don't trace, keep
+    booting.
 
     Only the positive-confirmation case -- we reached Phoenix, found our own
     synthetic span, and the marker string is sitting in it unmasked -- is
@@ -107,13 +108,26 @@ def _verify_redaction() -> None:
     self-check accidentally reintroduces the exact hard-boot-on-Phoenix-
     outage bug 1A exists to prevent.
 
+    Input only, not output: the model's own answer is deliberately left
+    visible in traces (it's the thing a developer needs to see to judge
+    answer quality), so a marker placed in "output" would legitimately
+    survive and isn't a redaction failure. What must stay masked -- and what
+    this checks -- is the raw input.value blob, unconditionally dropped by
+    RedactingSpanExporter (app/services/trace_redaction.py) regardless of
+    span shape, which is what a manual span like this one exercises. Its
+    other job, masking only "user"-role llm.input_messages content so the
+    system prompt/retrieved chunks stay visible, needs a real multi-message
+    LLM call to exercise and isn't reachable from this generic span; that
+    path is covered live in tests/test_observability_integration.py instead.
+
     Creates one synthetic span with a known marker string in its input,
     force-flushes it, then queries Phoenix's own API for that span and
-    asserts the marker is absent -- proving OPENINFERENCE_HIDE_* actually
-    masks content rather than merely being set.
+    asserts the marker is absent -- proving RedactingSpanExporter actually
+    masks content rather than merely being wired in.
     """
     import time
     import uuid
+    from urllib.parse import urlparse
 
     from opentelemetry import trace
     from phoenix.client import Client
@@ -124,13 +138,40 @@ def _verify_redaction() -> None:
         "redaction_selfcheck", openinference_span_kind="llm"
     ) as span:
         span.set_input(marker)
-        span.set_output(marker)
 
     try:
         trace.get_tracer_provider().force_flush()
         time.sleep(1)  # let Phoenix finish ingesting the flushed span
 
-        client = Client()
+        # Client() alone would resolve its base_url from
+        # PHOENIX_COLLECTOR_ENDPOINT if set -- but that var (and
+        # OTEL_EXPORTER_OTLP_ENDPOINT) point at Phoenix's gRPC OTLP port
+        # (4317), not its REST API port (6006, always -- Phoenix doesn't
+        # make it configurable). Verified live: pointing the REST client at
+        # 4317 raises httpx.RemoteProtocolError ("illegal request line"),
+        # which this function's own except-block would silently treat as
+        # "Phoenix unreachable" -- masking a config mismatch as a soft
+        # failure and leaving the hard redaction gate never actually
+        # exercised in this repo's own docker-compose.dev.yml deployment
+        # (PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317). Reusing the
+        # collector endpoint's host with the fixed REST port fixes it
+        # without a new setting.
+        collector_endpoint = os.environ.get(
+            "PHOENIX_COLLECTOR_ENDPOINT"
+        ) or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+        if collector_endpoint:
+            host = urlparse(collector_endpoint).hostname
+            if not host:
+                # A scheme-less "host:port" form (legal OTLP-endpoint
+                # syntax, just not this repo's own convention) parses as
+                # path+scheme instead of netloc, so .hostname comes back
+                # None -- verified live (urlparse("phoenix:4317").hostname
+                # is None). Re-parsed with a leading "//" so urlparse reads
+                # it as authority instead.
+                host = urlparse(f"//{collector_endpoint}").hostname
+            client = Client(base_url=f"http://{host or 'localhost'}:6006")
+        else:
+            client = Client()
         spans = client.spans.get_spans(
             project_identifier="langraph-bot-v1",
             name="redaction_selfcheck",
@@ -158,11 +199,17 @@ def _verify_redaction() -> None:
         return
 
     for s in spans:
-        if marker in str(s.attributes):
+        # get_spans() returns plain dicts, not span objects -- verified live
+        # against Phoenix (same finding already noted in
+        # tests/test_observability_integration.py). This loop never used to
+        # be reached at all: the Client() call above always raised first,
+        # from a base_url pointed at the gRPC port -- see the comment on
+        # that call.
+        if marker in str(s["attributes"]):
             raise RuntimeError(
                 "Redaction self-check FAILED: marker string found in an "
-                "exported span. OPENINFERENCE_HIDE_* env vars are not "
-                "masking content. Refusing to boot with "
+                "exported span. RedactingSpanExporter is not masking "
+                "input.value. Refusing to boot with "
                 "OBSERVABILITY_ENABLED=true -- fix redaction before enabling "
                 "tracing against real traffic."
             )
@@ -173,10 +220,22 @@ def _setup_phoenix() -> None:
     """Soft-dependency Phoenix tracing -- must never block app boot on its
     own account (unreachable, misconfigured, missing package).
 
-    Redaction is mandatory whenever tracing runs, not configurable per-field:
-    HIDE_INPUT_TEXT/HIDE_OUTPUT_TEXT/HIDE_INPUT_IMAGES are set unconditionally
-    here rather than exposed as separate settings, so there's no toggle that
-    could accidentally leave medical content unmasked.
+    Redaction policy is selective, not blanket: the system prompt and the
+    retrieved chunks it contains (generate.py always sends them as
+    llm.input_messages.0, role "system") are useful for debugging answer
+    quality and aren't patient-originated, so they stay visible. The
+    requester's own message text and any inbound image must not appear in a
+    trace. OpenInference's OPENINFERENCE_HIDE_* env vars can't express that
+    split -- they hide a field for every role or none, and OPENINFERENCE_-
+    HIDE_INPUTS in particular erases llm.input_messages.* entirely (verified
+    live), which would take the system prompt down with it. So the split is
+    done in app/services/trace_redaction.py's RedactingSpanExporter instead,
+    added below: it drops the raw input.value blob (mixes every role into
+    one string -- can't be redacted per-role) and masks only "user"-role
+    llm.input_messages.N.message.* content, after OpenInference sets it.
+    Images stay on the blanket env var (OPENINFERENCE_HIDE_INPUT_IMAGES) --
+    only the human side of a conversation ever attaches one, so there's no
+    role that flag could wrongly hide.
 
     _verify_redaction() runs OUTSIDE the try/except below on purpose: once
     Phoenix is reachable and register() succeeds, a broken redaction check
@@ -186,29 +245,38 @@ def _setup_phoenix() -> None:
     if not settings.observability_enabled:
         return
 
-    # HIDE_INPUT_TEXT/HIDE_OUTPUT_TEXT alone do NOT cover it -- verified live
-    # against Phoenix: those two only mask the structured
-    # llm.input_messages.N.message.content attributes. The separate
-    # input.value/output.value attributes (raw serialized request/response,
-    # also populated on LLM-kind spans by LangChainInstrumentor) leaked the
-    # full unmasked content until HIDE_INPUTS/HIDE_OUTPUTS were added here.
-    os.environ["OPENINFERENCE_HIDE_INPUTS"] = "true"
-    os.environ["OPENINFERENCE_HIDE_OUTPUTS"] = "true"
-    os.environ["OPENINFERENCE_HIDE_INPUT_TEXT"] = "true"
-    os.environ["OPENINFERENCE_HIDE_OUTPUT_TEXT"] = "true"
     os.environ["OPENINFERENCE_HIDE_INPUT_IMAGES"] = "true"
 
     try:
-        from phoenix.otel import register
+        from phoenix.otel import BatchSpanProcessor, SimpleSpanProcessor, register
 
-        # batch=True: default is a SimpleSpanProcessor, which exports
-        # synchronously on every span end -- every LLM call would block on
-        # a network round-trip to Phoenix before returning, inflating the
-        # exact p95 this instrumentation exists to measure, and turning a
-        # Phoenix hang into a bot-response hang. Found by actually running
-        # this against a stopped Phoenix and reading register()'s own
-        # warning, not assumed.
-        register(project_name="langraph-bot-v1", auto_instrument=True, batch=True)
+        from app.services.trace_redaction import RedactingSpanExporter
+
+        # batch=False here on purpose: this call's own default processor is
+        # discarded a few lines down (replaced by the redacting one), so a
+        # BatchSpanProcessor here would start a background export thread
+        # only to have it shut down unused.
+        tracer_provider = register(
+            project_name="langraph-bot-v1", auto_instrument=True, batch=False
+        )
+
+        # A second, throwaway SimpleSpanProcessor exists only to reuse
+        # phoenix's own endpoint/protocol inference for a *fresh* exporter
+        # instance. Reusing register()'s own default exporter instead would
+        # break it: add_span_processor() below shuts down the processor it
+        # replaces, which shuts down that processor's exporter too.
+        probe_exporter = SimpleSpanProcessor().span_exporter
+
+        # batch=True (real processor, unlike the throwaway above): a
+        # SimpleSpanProcessor exports synchronously on every span end --
+        # every LLM call would block on a network round-trip to Phoenix
+        # before returning, inflating the exact p95 this instrumentation
+        # exists to measure, and turning a Phoenix hang into a bot-response
+        # hang. Found by actually running this against a stopped Phoenix
+        # and reading register()'s own warning, not assumed.
+        tracer_provider.add_span_processor(
+            BatchSpanProcessor(span_exporter=RedactingSpanExporter(probe_exporter))
+        )
         logger.info("phoenix_tracing_enabled")
     except Exception as e:
         logger.warning(

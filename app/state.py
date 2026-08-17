@@ -15,3 +15,4 @@ class AgentState(TypedDict):
     triage_decision: str  # "rag" | "catalog" | "human" | "off_topic"
     answer: str
     blocked: NotRequired[bool]  # set by validate node on injection detection
+    is_staff: NotRequired[bool]  # resolved once per turn from the allowlist, never from message text

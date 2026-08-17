@@ -53,20 +53,18 @@ if _TESSERACT_AVAILABLE and not shutil.which("tesseract"):
             # the path tesseract receives and breaks --tessdata-dir entirely.
             _TESSDATA_OVERRIDE = f"--tessdata-dir {_user_tessdata}"
 
-MAX_MEDIA_BYTES = 10 * 1024 * 1024  # 10 MB — shared cap for voice/audio/image downloads
-
 VISION_UNCERTAIN = "__VISION_UNCERTAIN__"
 
 _VISION_EXTRACT_PROMPT = """\
-Analiza esta imagen (documento, orden, comprobante, etiqueta de producto, ficha...).
+Analice esta imagen (documento, orden, comprobante, etiqueta de producto, ficha...).
 
-Marca is_legible=true SOLO si podés leer con certeza el nombre del ítem o \
+Marque is_legible=true SOLO si puede leer con certeza el nombre del ítem o \
 procedimiento escrito en la imagen, letra por letra. Si el texto está borroso, \
-cortado, o tenés la MÍNIMA duda sobre qué dice — marcá is_legible=false y dejá \
-procedure_name, price_question y samples vacíos. NUNCA adivines ni asumas un \
-ítem "parecido" solo porque el contexto del negocio te resulte familiar.
+cortado, o tiene la MÍNIMA duda sobre qué dice — marque is_legible=false y deje \
+procedure_name, price_question y samples vacíos. NUNCA adivine ni asuma un \
+ítem "parecido" solo porque el contexto del negocio le resulte familiar.
 
-IMPORTANTE — distinguí tres tipos de texto y usá SOLO el tercero:
+IMPORTANTE — distinga tres tipos de texto y use SOLO el tercero:
 1. Encabezado/membrete: nombre del negocio, logo, eslóganes de marketing \
 (ej. "Calidad y Experiencia en..."), datos de contacto, direcciones, fecha.
 2. Título del documento o tipo de trámite: ej. "Solicitud de Biopsia", "Rp.", \
@@ -74,28 +72,28 @@ IMPORTANTE — distinguí tres tipos de texto y usá SOLO el tercero:
 ítem/procedimiento en sí.
 3. El valor específico dentro de un campo etiquetado del cuerpo del documento \
 — típicamente después de una etiqueta como "Muestra:", "Estudio:", "Diagnóstico:" \
-o similar. ESTE es el único texto que extraés.
-Nunca uses (1) ni (2) como procedure_name/samples, aunque sean el texto más \
-grande, legible, o el primero que veas en la imagen.
+o similar. ESTE es el único texto que extrae.
+Nunca use (1) ni (2) como procedure_name/samples, aunque sean el texto más \
+grande, legible, o el primero que vea en la imagen.
 
-CASO A — un solo ítem/procedimiento/muestra (el caso más común): completá:
+CASO A — un solo ítem/procedimiento/muestra (el caso más común): complete:
 - procedure_name: el nombre EXACTO y LITERAL del ítem o procedimiento tal como \
 está escrito en la imagen, sin agregar palabras (ejemplo: "IGRA", "zapatilla \
 running talla 42").
 - price_question: una pregunta de precio en español usando ese mismo texto, por \
 ejemplo: "¿Cuánto cuesta un examen de IGRA?" o "¿Cuánto cuesta una zapatilla \
-running talla 42?". No traduzcas a un sinónimo ni asumas qué ítem "similar" \
+running talla 42?". No traduzca a un sinónimo ni asuma qué ítem "similar" \
 podría ser.
-- samples: dejalo vacío (null).
+- samples: déjelo vacío (null).
 
 CASO B — la imagen lista 2 O MÁS muestras/ítems DISTINTOS bajo una misma orden \
 (ejemplo: una solicitud de biopsia con "Muestra #1: Epiplón", "Muestra #2: \
 Líquido peritoneal", etc.) — NO es motivo para is_legible=false, es un caso \
 válido y frecuente:
-- procedure_name y price_question: dejalos vacíos (null).
+- procedure_name y price_question: déjelos vacíos (null).
 - samples: una lista con el nombre EXACTO y LITERAL de cada muestra/ítem, uno \
 por elemento, en el mismo orden en que aparecen (ejemplo: ["Epiplón", "TU de \
-ovario izquierdo (fracción)", "Líquido peritoneal"]). No incluyas valores de \
+ovario izquierdo (fracción)", "Líquido peritoneal"]). No incluya valores de \
 laboratorio ni firmas, solo los nombres de muestra/ítem en sí.
 """
 
@@ -106,14 +104,14 @@ _EXTRACT_JSON_SUFFIX = (
 )
 
 _VERIFY_PROMPT_TEMPLATE = """\
-Mirá esta imagen otra vez, con atención. ¿Aparece literalmente escrito en la imagen \
+Mire esta imagen otra vez, con atención. ¿Aparece literalmente escrito en la imagen \
 el siguiente texto, o una variante muy cercana del mismo ítem/procedimiento?
 
 Texto a verificar: "{claim}"
 
-Marcá text_visible=true SOLO si podés señalar con certeza dónde en la imagen aparece \
-ese texto o uno equivalente. Si no lo ves, no estás seguro, o la imagen no contiene \
-ese texto, marcá text_visible=false. No asumas por contexto general — esto es \
+Marque text_visible=true SOLO si puede señalar con certeza dónde en la imagen aparece \
+ese texto o uno equivalente. Si no lo ve, no está seguro, o la imagen no contiene \
+ese texto, marque text_visible=false. No asuma por contexto general — esto es \
 una verificación de presencia literal del texto, no un juicio de plausibilidad.
 """
 
@@ -130,9 +128,9 @@ _VERIFY_JSON_SUFFIX = '\nReply ONLY with JSON: {"text_visible": <true|false>}'
 # empty — byte-identical verify prompt for every tenant that doesn't use it.
 _VERIFY_SPECIALIZATION_CAVEAT = """
 ADVERTENCIA: el texto a verificar pudo haber sido influenciado por jerga \
-específica del negocio durante la extracción. Sé especialmente estricto acá — \
-si tenés cualquier duda de que el texto exacto esté escrito en la imagen (en vez \
-de sonar simplemente "razonable" para este tipo de negocio), marcá \
+específica del negocio durante la extracción. Sea especialmente estricto acá — \
+si tiene cualquier duda de que el texto exacto esté escrito en la imagen (en vez \
+de sonar simplemente "razonable" para este tipo de negocio), marque \
 text_visible=false.
 """
 

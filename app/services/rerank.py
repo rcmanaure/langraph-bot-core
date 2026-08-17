@@ -1,27 +1,35 @@
 import logging
 
 import httpx
+from opentelemetry import trace
 
 from app.config import settings
 from app.services.llm import get_openrouter_headers
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 
 async def _call_rerank_api(query: str, documents: list[str], top_n: int) -> list[dict]:
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.post(
-            f"{settings.openrouter_base_url}/rerank",
-            headers=get_openrouter_headers(),
-            json={
-                "model": settings.rerank_model,
-                "query": query,
-                "documents": documents,
-                "top_n": top_n,
-            },
-        )
-        response.raise_for_status()
-        return response.json()["results"]
+    # Named span: a raw httpx POST, not a LangChain runnable, so
+    # OpenInference's auto-instrumentation never sees it -- without this it
+    # shows up as unattributed dead time between retrieval and generation.
+    with _tracer.start_as_current_span(
+        "rerank", attributes={"openinference.span.kind": "RERANKER"}
+    ):
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{settings.openrouter_base_url}/rerank",
+                headers=get_openrouter_headers(),
+                json={
+                    "model": settings.rerank_model,
+                    "query": query,
+                    "documents": documents,
+                    "top_n": top_n,
+                },
+            )
+            response.raise_for_status()
+            return response.json()["results"]
 
 
 async def rerank_chunks(query: str, chunks: list[dict], top_k: int) -> list[dict]:

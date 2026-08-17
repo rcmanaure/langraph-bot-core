@@ -9,6 +9,7 @@ from app.db import AsyncSessionLocal
 logger = logging.getLogger(__name__)
 
 _INTERRUPT_TTL_MINUTES = 30  # operator must respond within 30 min
+_AUDIT_RETENTION_DAYS = 90
 
 scheduler = AsyncIOScheduler(timezone="UTC")
 
@@ -33,6 +34,20 @@ async def expire_old_interrupts() -> None:
 
     if expired:
         logger.info("interrupts_expired count=%d threads=%s", len(expired), expired[:5])
+
+
+@scheduler.scheduled_job("interval", hours=24, id="purge_conversation_audit")
+async def purge_old_conversation_audit() -> None:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=_AUDIT_RETENTION_DAYS)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            text("DELETE FROM conversation_audit WHERE created_at < :cutoff"),
+            {"cutoff": cutoff},
+        )
+        await db.commit()
+
+    if result.rowcount:
+        logger.info("conversation_audit_purged count=%d", result.rowcount)
 
 
 def start() -> None:
