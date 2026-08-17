@@ -587,9 +587,11 @@ async def test_generate_omits_specialization_block_when_absent(base_state):
 
 
 # ---------------------------------------------------------------------------
-# generate — surfaces retrieval similarity so the LLM can't silently assert a
-# price for a weak/wrong match (the IGRA -> "biopsia de ganglio" bug: the model
-# never saw how confident the retrieval actually was).
+# generate — the match decision (exact vs. approximate) is computed in code
+# from retrieval similarity, never handed to the model as a per-chunk
+# bracketed label (#25). Prevents the IGRA -> "biopsia de ganglio" bug: the
+# model can't silently assert a price for a weak/wrong match, and it can't
+# leak an internal label into the reply because no label ever reaches it.
 # ---------------------------------------------------------------------------
 
 async def _run_generate_with_chunks(base_state, chunks):
@@ -615,53 +617,50 @@ async def _run_generate_with_chunks(base_state, chunks):
 
 
 @pytest.mark.asyncio
-async def test_generate_rag_context_tags_low_similarity_as_approximation(base_state):
+async def test_generate_below_threshold_match_asks_for_confirmation(base_state):
     chunks = [{"content": "Biopsia de ganglio linfático $120.00", "similarity": 0.402}]
     system_content = await _run_generate_with_chunks(base_state, chunks)
 
-    assert "APROXIMACIÓN" in system_content
+    assert "NO contiene una coincidencia confiable" in system_content
+    assert "¿Es lo que necesita?" in system_content
     assert "0.40" not in system_content
 
 
 @pytest.mark.asyncio
-async def test_generate_rag_context_tags_high_similarity_as_exact(base_state):
+async def test_generate_above_threshold_match_answers_directly(base_state):
     chunks = [{"content": "Biopsia de ganglio linfático $120.00", "similarity": 0.9}]
     system_content = await _run_generate_with_chunks(base_state, chunks)
 
-    assert "COINCIDENCIA EXACTA" in system_content
+    assert "ya verificó que el contexto contiene una coincidencia confiable" in system_content
 
 
 @pytest.mark.asyncio
-async def test_generate_rag_prompt_forbids_recalculating_tag(base_state):
-    """The exact/approximate classification is precomputed in Python — the
-    prompt must tell the model to trust the tag, not recompute a threshold
-    itself (that arithmetic used to live in the prompt and was easy to ignore)."""
-    system_content = await _run_generate_with_chunks(
-        base_state, [{"content": "x", "similarity": 0.5}]
-    )
+async def test_generate_no_similarity_scores_treated_as_confirmed():
+    """Chunks with no similarity key (e.g. a raw catalog dump) default to the
+    confirmed-match instruction rather than silently falling into the
+    ask-for-confirmation branch with nothing to confirm against."""
+    from app.graph.nodes.generate import _has_confirmed_match
 
-    assert "NO la recalcule" in system_content
-    assert "0.65" not in system_content
+    assert _has_confirmed_match([{"content": "x"}]) is True
 
 
 @pytest.mark.asyncio
-async def test_generate_rag_prompt_forbids_leaking_tag_into_reply(base_state):
-    """Regression test: a live LLM call echoed '[COINCIDENCIA EXACTA]' verbatim
-    into the user-facing answer — the tag is an internal classification signal,
-    never meant to reach the customer. The prompt must explicitly forbid this,
-    not just explain what the tag means."""
-    system_content = await _run_generate_with_chunks(
-        base_state, [{"content": "x", "similarity": 0.9}]
-    )
-
-    assert "NUNCA las escriba literalmente" in system_content
+async def test_generate_rag_context_has_no_bracketed_confidence_label(base_state):
+    """No internal label — [COINCIDENCIA EXACTA] / [APROXIMACIÓN...] — ever
+    enters the context the model sees, for either match outcome (#25)."""
+    for similarity in (0.402, 0.9):
+        system_content = await _run_generate_with_chunks(
+            base_state, [{"content": "Ítem X $10.00", "similarity": similarity}]
+        )
+        assert "[COINCIDENCIA" not in system_content
+        assert "[APROXIMACIÓN" not in system_content
 
 
 @pytest.mark.asyncio
-async def test_generate_rag_prompt_keeps_hedge_after_positive_confirmation(base_state):
+async def test_generate_rag_prompt_keeps_hedge_on_unconfirmed_match(base_state):
     """Regression test: a real conversation showed the model correctly hedging
     on the FIRST approximate-match offer ("lo más cercano que tenemos... ¿es
-    lo que necesitas?"), but after the user confirmed "sí", the second turn
+    lo que necesita?"), but after the user confirmed "sí", the second turn
     dropped the hedge entirely and renamed the generic catalog item to match
     the user's specific wording — presenting an approximation with false
     confidence and false specificity. The prompt must instruct the model to
@@ -671,13 +670,12 @@ async def test_generate_rag_prompt_keeps_hedge_after_positive_confirmation(base_
         base_state, [{"content": "x", "similarity": 0.5}]
     )
 
-    assert "CONFIRMA que sí" in system_content
     assert "nombre EXACTO del ítem" in system_content
     assert "nunca lo renombre" in system_content
 
 
 @pytest.mark.asyncio
-async def test_generate_catalog_context_omits_confidence_score(base_state):
+async def test_generate_catalog_prompt_omits_match_labels_and_lists_everything(base_state):
     """Catalog listing shows everything regardless of match quality — no
     per-item confidence noise in that prompt."""
     base_state["triage_decision"] = "catalog"
@@ -685,6 +683,7 @@ async def test_generate_catalog_context_omits_confidence_score(base_state):
     system_content = await _run_generate_with_chunks(base_state, chunks)
 
     assert "confianza" not in system_content
+    assert "[APROXIMACIÓN" not in system_content
     assert "Ítem A" in system_content
 
 

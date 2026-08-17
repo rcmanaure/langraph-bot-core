@@ -49,21 +49,12 @@ conocimiento de dominio para interpretar jerga, sinónimos o abreviaturas del us
 respuesta final SIEMPRE respeta el formato breve indicado más abajo, sin importar cuán detallado
 sea ese conocimiento.
 
-Cada ítem del contexto ya viene etiquetado por el sistema de búsqueda como [COINCIDENCIA EXACTA] o
-[APROXIMACIÓN (confianza baja)] — es una clasificación ya calculada, NO la recalcule ni la
-cuestione aunque el nombre le "suene" parecido:
-- [COINCIDENCIA EXACTA]: trátelo como tal si además el nombre corresponde a lo que pide el usuario.
-- [APROXIMACIÓN (confianza baja)]: SIEMPRE es aproximación, sin excepción. Nunca afirme un precio
-  directo en este caso — primero confirme con el usuario.
-- Estas etiquetas son solo para su clasificación interna — NUNCA las escriba literalmente en su
-  respuesta al usuario (nada de "[COINCIDENCIA EXACTA]" ni "[APROXIMACIÓN...]" en el texto final).
+{match_instruction}
 
 REGLAS (en orden de prioridad):
 1. AMBIGÜEDAD: Si lo que pide el usuario puede referirse a varios ítems distintos, haga UNA sola pregunta breve y amable de aclaración. No asuma. EXCEPCIÓN: si el usuario ya incluyó en su mensaje el detalle que distingue entre los ítems similares (ej. pidió "con anexos" o mencionó explícitamente lo que un ítem incluye y otro no — "trompas y ovarios" especifica CON anexos), eso NO es ambigüedad — el usuario ya eligió, responda directo con ESE ítem, no pregunte de nuevo algo que ya contestó.
-2. COINCIDENCIA EXACTA (etiquetado [COINCIDENCIA EXACTA] Y el nombre corresponde): Muestre TODOS los ítems del contexto cuyo nombre coincida con lo que el usuario menciona, sin filtrar por categoría o tipo.
-3. APROXIMACIÓN — primera vez (etiquetado [APROXIMACIÓN] O el nombre no corresponde exactamente): Si el ítem exacto no está en el contexto pero hay algo relacionado, preséntelo de forma natural y pregunte: "¿Es lo que necesita?" NO eleve al contacto todavía — espere la confirmación del usuario. NUNCA dé el precio como si fuera seguro.
-4. APROXIMACIÓN — el usuario CONFIRMA que sí: Dé el precio, pero SIEMPRE con el nombre EXACTO del ítem tal como aparece en el contexto — nunca lo renombre para que suene igual a lo que pidió el usuario. Mantenga una aclaración breve de que es lo más cercano disponible (ej. "el precio de *Citología de otros sitios*, que es lo más cercano que tenemos, es..."). La confirmación del usuario valida que quiere ESE ítem, no que el ítem sea una coincidencia exacta.
-5. CONFIRMACIÓN NEGATIVA: Si el usuario responde que la aproximación NO es lo que busca, o si definitivamente no hay nada relacionado, diga en una línea que no lo ofrecemos y eleve al contacto: {contact_hint}
+2. Si el contexto trae varios ítems cuyo nombre coincide con lo que pide el usuario, muéstrelos TODOS, sin filtrar por categoría o tipo.
+3. CONFIRMACIÓN NEGATIVA: Si el usuario responde que la aproximación NO es lo que busca, o si definitivamente no hay nada relacionado, diga en una línea que no lo ofrecemos y eleve al contacto: {contact_hint}
 - NO invente precios ni servicios.
 {format_hint}
 Contexto:
@@ -86,9 +77,37 @@ _GREETING_MSG = "Hola, gracias por escribirnos. Somos especialistas en {expertis
 _FALLBACK = "Lo siento, no pude procesar su consulta en este momento. Por favor intente de nuevo."
 
 
-def _match_tag(similarity: float) -> str:
-    is_exact = similarity >= settings.exact_match_threshold
-    return "COINCIDENCIA EXACTA" if is_exact else "APROXIMACIÓN (confianza baja)"
+# The match decision — exact vs. approximate — used to be computed here and
+# then handed to the model as a per-chunk bracketed label ([COINCIDENCIA
+# EXACTA] / [APROXIMACIÓN...]) plus several rules telling it not to
+# recompute, question, or leak those labels. That's bookkeeping the code
+# already did; the outcome now reaches the model as a single instruction
+# instead (see ADR-007), and the labels never enter the context at all.
+_MATCH_CONFIRMED_INSTRUCTION = (
+    "El sistema ya verificó que el contexto contiene una coincidencia confiable para lo que pide "
+    "el usuario: responda directo, con el precio y el nombre EXACTO del ítem tal como aparece en "
+    "el contexto."
+)
+
+_MATCH_UNCONFIRMED_INSTRUCTION = (
+    "El sistema determinó que el contexto NO contiene una coincidencia confiable para lo que pide "
+    'el usuario, solo algo relacionado. Preséntelo de forma natural y pregunte: "¿Es lo que '
+    'necesita?". NUNCA dé el precio como si fuera seguro hasta que el usuario confirme. Cuando '
+    "confirme, dé el precio con el nombre EXACTO del ítem tal como aparece en el contexto — nunca "
+    "lo renombre para que suene igual a lo que pidió el usuario — y mantenga una aclaración breve "
+    "de que es lo más cercano disponible."
+)
+
+
+def _has_confirmed_match(chunks: list[dict]) -> bool:
+    """The match decision, computed in code from the retrieval similarity —
+    never handed to the model to recompute or narrate. True when the best
+    scored chunk clears the exact-match threshold, or when no chunk carries
+    a similarity score at all (e.g. chunks built from a raw catalog dump)."""
+    scored = [c["similarity"] for c in chunks if "similarity" in c]
+    if not scored:
+        return True
+    return max(scored) >= settings.exact_match_threshold
 
 
 async def _load_tenant(slug: str) -> dict:
@@ -162,19 +181,13 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
             chunks = [{"content": r.content} for r in result.fetchall()]
             chunks = cap_chunks_to_tokens(chunks, settings.retrieval_max_tokens)
 
-    if not chunks:
-        context = "Sin contexto disponible."
-    elif is_catalog:
-        context = "\n\n---\n\n".join(c["content"] for c in chunks)
-    else:
-        context = "\n\n---\n\n".join(
-            f"{c['content']} [{_match_tag(c['similarity'])}]"
-            if "similarity" in c else c["content"]
-            for c in chunks
-        )
+    context = "Sin contexto disponible." if not chunks else "\n\n---\n\n".join(c["content"] for c in chunks)
     template = _CATALOG_SYSTEM if is_catalog else _RAG_SYSTEM
     hint_template = _CATALOG_FORMAT_HINT if is_catalog else _FORMAT_HINT
     format_hint = hint_template.format(tone_description=tenant_ctx["tone_description"])
+    match_instruction = (
+        _MATCH_CONFIRMED_INSTRUCTION if _has_confirmed_match(chunks) else _MATCH_UNCONFIRMED_INSTRUCTION
+    )
     # Defensive .get(), not a bare {specialization_context} placeholder relying on
     # **tenant_ctx always containing the key — existing tests mock _load_tenant()'s
     # return dict directly and don't include this key; a missing key would KeyError.
@@ -183,7 +196,7 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
     if specialization:
         logger.debug("generate_specialization_applied tenant=%s len=%d", state["tenant_id"], len(specialization))
     system = template.format(
-        context=context, format_hint=format_hint,
+        context=context, format_hint=format_hint, match_instruction=match_instruction,
         specialization_block=specialization_block, **tenant_ctx,
     )
 
