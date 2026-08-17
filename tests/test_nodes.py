@@ -692,3 +692,35 @@ async def test_generate_catalog_context_omits_confidence_score(base_state):
 async def test_generate_no_chunks_still_says_sin_contexto(base_state):
     system_content = await _run_generate_with_chunks(base_state, [])
     assert "Sin contexto disponible" in system_content
+
+
+# ---------------------------------------------------------------------------
+# generate — full-catalog replies return every item (#24): the brevity cap
+# that used to contradict "list every item, omit nothing" is RAG-only now.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_catalog_prompt_has_no_length_cap(base_state):
+    base_state["triage_decision"] = "catalog"
+    system_content = await _run_generate_with_chunks(base_state, [{"content": "Ítem A $10.00"}])
+
+    assert "BREVE" not in system_content
+    assert "máximo 4-5 líneas" not in system_content
+
+
+@pytest.mark.asyncio
+async def test_catalog_prompt_still_lists_every_item(base_state):
+    base_state["triage_decision"] = "catalog"
+    many_items = [{"content": f"Ítem {i} $10.00"} for i in range(20)]
+    system_content = await _run_generate_with_chunks(base_state, many_items)
+
+    for i in range(20):
+        assert f"Ítem {i}" in system_content
+
+
+@pytest.mark.asyncio
+async def test_rag_prompt_keeps_the_short_form_length_cap(base_state):
+    system_content = await _run_generate_with_chunks(base_state, [{"content": "Ítem A $10.00"}])
+
+    assert "BREVE" in system_content
+    assert "máximo 4-5 líneas" in system_content

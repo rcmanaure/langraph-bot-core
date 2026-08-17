@@ -24,14 +24,22 @@ Registro (fijo — el tono del negocio no lo cambia):
 - Sin frase de apertura de relleno ("¡Claro!", "¡Por supuesto!") — responda directo.
 - Nunca se dirija al usuario por su nombre de pila."""
 
-_FORMAT_HINT = _REGISTER_FLOOR + """
+# Item layout/emphasis/list rules shared by both paths. The total-length cap
+# is NOT here — it's RAG-only (see _FORMAT_HINT below). A total-length cap on
+# the catalog path directly contradicts "list every item, omit nothing" the
+# moment the catalog has more than 4-5 lines' worth of items.
+_ITEM_FORMAT_RULES = """
 Formato (OBLIGATORIO — compatible WhatsApp/Telegram):
 - Tono: {tone_description}.
-- BREVE: máximo 4-5 líneas en total. Sin párrafos largos.
 - *negrita* con asteriscos simples para códigos y nombres de ítems.
 - _cursiva_ con guiones bajos para notas o aclaraciones breves.
 - Listas con guión (- item). Sin tablas, sin encabezados Markdown (##).
 - Por ítem: - *CÓDIGO* Nombre: $precio"""
+
+_FORMAT_HINT = _REGISTER_FLOOR + _ITEM_FORMAT_RULES + """
+- BREVE: máximo 4-5 líneas en total. Sin párrafos largos."""
+
+_CATALOG_FORMAT_HINT = _REGISTER_FLOOR + _ITEM_FORMAT_RULES
 
 _RAG_SYSTEM = """\
 Es un asistente de {expertise}. Su tono es {tone_description}.{specialization_block}
@@ -165,7 +173,8 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
             for c in chunks
         )
     template = _CATALOG_SYSTEM if is_catalog else _RAG_SYSTEM
-    format_hint = _FORMAT_HINT.format(tone_description=tenant_ctx["tone_description"])
+    hint_template = _CATALOG_FORMAT_HINT if is_catalog else _FORMAT_HINT
+    format_hint = hint_template.format(tone_description=tenant_ctx["tone_description"])
     # Defensive .get(), not a bare {specialization_context} placeholder relying on
     # **tenant_ctx always containing the key — existing tests mock _load_tenant()'s
     # return dict directly and don't include this key; a missing key would KeyError.
