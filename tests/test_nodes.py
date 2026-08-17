@@ -723,3 +723,61 @@ async def test_rag_prompt_keeps_the_short_form_length_cap(base_state):
 
     assert "BREVE" in system_content
     assert "máximo 4-5 líneas" in system_content
+
+
+# ---------------------------------------------------------------------------
+# generate — terser staff register, no escalation line (#27). Staff gets a
+# different register-floor variant and never sees the contact/escalation
+# line pointing them at their own workplace; patients are unaffected.
+# ---------------------------------------------------------------------------
+
+async def _run_generate_as(base_state, chunks, *, is_staff: bool, contact_url="https://acme.example/contact"):
+    base_state["retrieved_chunks"] = chunks
+    base_state["is_staff"] = is_staff
+    runtime = _mock_runtime(get_result=None)
+
+    mock_llm = MagicMock()
+    mock_llm.model_name = "test-model"
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="ok"))
+
+    with (
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch(
+            "app.graph.nodes.generate._load_tenant",
+            AsyncMock(return_value={
+                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION,
+                "contact_hint": f"\nSi necesita más ayuda, contacte: {contact_url}",
+            }),
+        ),
+    ):
+        await generate(base_state, runtime=runtime)
+
+    return mock_llm.ainvoke.await_args.args[0][0].content
+
+
+@pytest.mark.asyncio
+async def test_staff_conversation_gets_terser_register(base_state):
+    from app.graph.nodes.generate import _REGISTER_FLOOR_STAFF
+
+    system_content = await _run_generate_as(base_state, [{"content": "x", "similarity": 0.9}], is_staff=True)
+    assert _REGISTER_FLOOR_STAFF in system_content
+
+
+@pytest.mark.asyncio
+async def test_staff_reply_never_contains_escalation_line(base_state):
+    chunks = [{"content": "x", "similarity": 0.1}]  # below threshold -> triggers rule 3
+    system_content = await _run_generate_as(base_state, chunks, is_staff=True)
+
+    assert "acme.example/contact" not in system_content
+    assert "eleve al contacto" not in system_content
+
+
+@pytest.mark.asyncio
+async def test_patient_reply_unchanged_by_staff_variant(base_state):
+    from app.graph.nodes.generate import _REGISTER_FLOOR
+
+    chunks = [{"content": "x", "similarity": 0.1}]
+    system_content = await _run_generate_as(base_state, chunks, is_staff=False)
+
+    assert _REGISTER_FLOOR in system_content
+    assert "acme.example/contact" in system_content

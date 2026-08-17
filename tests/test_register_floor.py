@@ -214,3 +214,46 @@ async def test_compiled_graph_static_reply_conforms_to_floor(decision, user_text
     answer = result["answer"]
     assert "ayudarte" not in answer
     assert not any(ch in answer for ch in "😀😄🎉👋")
+
+
+# ---------------------------------------------------------------------------
+# Compiled-graph seam — terser staff register (#27), one case per actor.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_staff", [True, False])
+async def test_compiled_graph_register_variant_per_actor(is_staff):
+    from app.graph.nodes.generate import _REGISTER_FLOOR, _REGISTER_FLOOR_STAFF
+
+    tenant_row = MagicMock(
+        expertise_area="diagnóstico histológico",
+        tone_description=DEFAULT_TONE_DESCRIPTION,
+        contact_url="https://acme.example/contact",
+        specialization_context="",
+    )
+    graph = build_graph(checkpointer=None)
+    state = _initial_state("cuánto cuesta un examen que no existe", triage_decision="rag")
+    state["is_staff"] = is_staff
+    llm = _mock_chat_llm("respuesta", triage_decision="rag")
+    db = _mock_db_session(tenant_row)
+
+    with (
+        # Low similarity -> triggers the negative-confirmation rule, the one
+        # that carries the contact/escalation line for patients.
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[
+            {"content": "x", "similarity": 0.1},
+        ])),
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[{"content": "x", "similarity": 0.1}])),
+        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
+    ):
+        await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
+
+    system_prompt = llm.ainvoke.call_args[0][0][0].content
+    if is_staff:
+        assert _REGISTER_FLOOR_STAFF in system_prompt
+        assert "acme.example/contact" not in system_prompt
+    else:
+        assert _REGISTER_FLOOR in system_prompt
+        assert "acme.example/contact" in system_prompt

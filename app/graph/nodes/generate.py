@@ -41,6 +41,23 @@ _FORMAT_HINT = _REGISTER_FLOOR + _ITEM_FORMAT_RULES + """
 
 _CATALOG_FORMAT_HINT = _REGISTER_FLOOR + _ITEM_FORMAT_RULES
 
+# Staff variant of the floor (#27) — same core (usted, no emoji, no
+# diminutives, no first-name address) but terser: no courtesy/filler at all,
+# not just no opener, since a staff conversation is operational rather than
+# a customer exchange. Patients get _REGISTER_FLOOR unchanged.
+_REGISTER_FLOOR_STAFF = """\
+Registro para staff (fijo — el tono del negocio no lo cambia):
+- Trate al staff siempre de "usted", nunca de "tú" ni de "vos".
+- Sin emojis.
+- Sin diminutivos.
+- Directo a la respuesta operativa — sin cortesías ni frases de relleno.
+- Nunca se dirija al staff por su nombre de pila."""
+
+_FORMAT_HINT_STAFF = _REGISTER_FLOOR_STAFF + _ITEM_FORMAT_RULES + """
+- BREVE: máximo 4-5 líneas en total. Sin párrafos largos."""
+
+_CATALOG_FORMAT_HINT_STAFF = _REGISTER_FLOOR_STAFF + _ITEM_FORMAT_RULES
+
 _RAG_SYSTEM = """\
 Es un asistente de {expertise}. Su tono es {tone_description}.{specialization_block}
 Para precios y disponibilidad use ÚNICAMENTE el contexto proporcionado — NUNCA invente un producto
@@ -54,7 +71,7 @@ sea ese conocimiento.
 REGLAS (en orden de prioridad):
 1. AMBIGÜEDAD: Si lo que pide el usuario puede referirse a varios ítems distintos, haga UNA sola pregunta breve y amable de aclaración. No asuma. EXCEPCIÓN: si el usuario ya incluyó en su mensaje el detalle que distingue entre los ítems similares (ej. pidió "con anexos" o mencionó explícitamente lo que un ítem incluye y otro no — "trompas y ovarios" especifica CON anexos), eso NO es ambigüedad — el usuario ya eligió, responda directo con ESE ítem, no pregunte de nuevo algo que ya contestó.
 2. Si el contexto trae varios ítems cuyo nombre coincide con lo que pide el usuario, muéstrelos TODOS, sin filtrar por categoría o tipo.
-3. CONFIRMACIÓN NEGATIVA: Si el usuario responde que la aproximación NO es lo que busca, o si definitivamente no hay nada relacionado, diga en una línea que no lo ofrecemos y eleve al contacto: {contact_hint}
+3. {negative_confirmation_rule}
 - NO invente precios ni servicios.
 {format_hint}
 Contexto:
@@ -96,6 +113,21 @@ _MATCH_UNCONFIRMED_INSTRUCTION = (
     "confirme, dé el precio con el nombre EXACTO del ítem tal como aparece en el contexto — nunca "
     "lo renombre para que suene igual a lo que pidió el usuario — y mantenga una aclaración breve "
     "de que es lo más cercano disponible."
+)
+
+
+# Negative-confirmation rule variants (#27) — the patient version refers the
+# requester to the tenant's contact; a staff member IS the business, so
+# nothing points them at a contact line for their own workplace.
+_NEGATIVE_CONFIRMATION_RULE = (
+    "CONFIRMACIÓN NEGATIVA: Si el usuario responde que la aproximación NO es lo que busca, o si "
+    "definitivamente no hay nada relacionado, diga en una línea que no lo ofrecemos y eleve al "
+    "contacto: {contact_hint}"
+)
+
+_NEGATIVE_CONFIRMATION_RULE_STAFF = (
+    "CONFIRMACIÓN NEGATIVA: Si la aproximación NO es lo que busca, o si definitivamente no hay nada "
+    "relacionado, dígalo en una línea."
 )
 
 
@@ -149,7 +181,12 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
     chunks = list(state.get("retrieved_chunks") or [])
     decision = state.get("triage_decision", "rag")
     is_catalog = decision == "catalog"
+    is_staff = bool(state.get("is_staff"))
     tenant_ctx = await _load_tenant(state["tenant_id"])
+    if is_staff:
+        # A staff member IS the business — no referral line pointing them at
+        # their own workplace's contact (#27).
+        tenant_ctx["contact_hint"] = ""
 
     logger.info("generate_called decision=%s chunks=%d", decision, len(chunks))
 
@@ -183,10 +220,17 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
 
     context = "Sin contexto disponible." if not chunks else "\n\n---\n\n".join(c["content"] for c in chunks)
     template = _CATALOG_SYSTEM if is_catalog else _RAG_SYSTEM
-    hint_template = _CATALOG_FORMAT_HINT if is_catalog else _FORMAT_HINT
+    if is_catalog:
+        hint_template = _CATALOG_FORMAT_HINT_STAFF if is_staff else _CATALOG_FORMAT_HINT
+    else:
+        hint_template = _FORMAT_HINT_STAFF if is_staff else _FORMAT_HINT
     format_hint = hint_template.format(tone_description=tenant_ctx["tone_description"])
     match_instruction = (
         _MATCH_CONFIRMED_INSTRUCTION if _has_confirmed_match(chunks) else _MATCH_UNCONFIRMED_INSTRUCTION
+    )
+    negative_confirmation_rule = (
+        _NEGATIVE_CONFIRMATION_RULE_STAFF if is_staff
+        else _NEGATIVE_CONFIRMATION_RULE.format(contact_hint=tenant_ctx["contact_hint"])
     )
     # Defensive .get(), not a bare {specialization_context} placeholder relying on
     # **tenant_ctx always containing the key — existing tests mock _load_tenant()'s
@@ -197,6 +241,7 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         logger.debug("generate_specialization_applied tenant=%s len=%d", state["tenant_id"], len(specialization))
     system = template.format(
         context=context, format_hint=format_hint, match_instruction=match_instruction,
+        negative_confirmation_rule=negative_confirmation_rule,
         specialization_block=specialization_block, **tenant_ctx,
     )
 
