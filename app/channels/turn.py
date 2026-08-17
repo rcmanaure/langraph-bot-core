@@ -13,7 +13,9 @@ import logging
 from langchain_core.messages import HumanMessage
 
 from app.channels.base import ChannelAdapter, Inbound, MediaRef, MediaTooLarge
+from app.channels.silent import SilentAdapter
 from app.config import MAX_MEDIA_BYTES, settings
+from app.services.human_control import is_under_human_control, record_message
 from app.services.redaction import redact_document_numbers
 from app.services.staff import resolve_staff
 from app.services.tenant_context import get_tenant_specialization
@@ -54,13 +56,29 @@ async def run_turn(adapter: ChannelAdapter, inbound: Inbound, graph) -> None:
     already returned 200, so an escaping exception would be invisible to the
     platform and silent to the user.
     """
+    # Ack first, unconditionally -- it's identical whether or not the thread
+    # is under human control (SilentAdapter delegates it unchanged), so it
+    # must not wait on a DB round trip to reach the user.
     await _acknowledge(adapter, inbound)
+
+    under_control = await is_under_human_control(inbound.tenant_slug, inbound.channel, inbound.user_id)
+    if under_control:
+        # The bot goes silent for the rest of this turn -- media is still
+        # fetched/transcribed/extracted so the operator reads text, not a
+        # placeholder, but nothing reaches the user. See ADR-009.
+        adapter = SilentAdapter(adapter)
+
     text = await _resolve_text(adapter, inbound)
     if text is None:
         return  # nothing to answer, or the user was already told why
     # Masked before the text becomes part of persisted graph state or a
     # conversation audit record — see app/services/redaction.py.
     text = redact_document_numbers(text)
+
+    if under_control:
+        await record_message(inbound.tenant_slug, inbound.thread_id, "user", text)
+        return  # the graph is never invoked while a thread is under human control
+
     await _reply(adapter, inbound, text, graph)
 
 

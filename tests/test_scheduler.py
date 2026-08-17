@@ -49,7 +49,8 @@ async def test_expire_old_interrupts_no_expired():
 
 @pytest.mark.asyncio
 async def test_purge_old_conversation_audit_deletes_and_commits():
-    """purge_old_conversation_audit issues a DELETE against created_at and commits."""
+    """purge_old_conversation_audit issues a DELETE against created_at for
+    both conversation_audit and human_control_messages, and commits once."""
     mock_result = MagicMock(rowcount=3)
 
     mock_db = AsyncMock()
@@ -62,11 +63,12 @@ async def test_purge_old_conversation_audit_deletes_and_commits():
         from app.scheduler import purge_old_conversation_audit
         await purge_old_conversation_audit()
 
-    mock_db.execute.assert_called_once()
+    assert mock_db.execute.call_count == 2
     mock_db.commit.assert_called_once()
-    sql_clause = mock_db.execute.call_args[0][0]
-    assert "DELETE" in str(sql_clause)
-    assert "created_at" in str(sql_clause)
+    sql_clauses = [str(call.args[0]) for call in mock_db.execute.call_args_list]
+    assert any("DELETE" in c and "conversation_audit" in c for c in sql_clauses)
+    assert any("DELETE" in c and "human_control_messages" in c for c in sql_clauses)
+    assert all("created_at" in c for c in sql_clauses)
 
 
 @pytest.mark.asyncio

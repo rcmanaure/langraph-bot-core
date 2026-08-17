@@ -26,6 +26,17 @@ def mock_resolve_staff():
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def mock_under_human_control():
+    """Same rationale as mock_resolve_staff above -- app.channels.turn checks
+    a real DB-backed predicate (is_under_human_control) before every graph
+    invocation. Default every test to "not under human control" so tests
+    that don't care don't need their own DB mock; tests/test_turn.py's
+    under_human_control fixture overrides this for the cases that do."""
+    with patch("app.channels.turn.is_under_human_control", new_callable=AsyncMock, return_value=False) as mock:
+        yield mock
+
+
 @pytest.fixture
 def tenant_id() -> str:
     return "test-tenant"

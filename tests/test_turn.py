@@ -95,6 +95,15 @@ def vision_on():
 
 
 RESOLVE_STAFF = "app.channels.turn.resolve_staff"
+UNDER_CONTROL = "app.channels.turn.is_under_human_control"
+RECORD_MESSAGE = "app.channels.turn.record_message"
+
+
+@pytest.fixture()
+def under_human_control():
+    with patch(UNDER_CONTROL, new_callable=AsyncMock, return_value=True), \
+         patch(RECORD_MESSAGE, new_callable=AsyncMock) as record:
+        yield record
 
 
 # ── Text ──────────────────────────────────────────────────────────────────────
@@ -229,6 +238,113 @@ async def test_missing_graph_sends_service_unavailable():
     adapter = FakeAdapter()
     await run_turn(adapter, make_inbound(text="hola"), None)
     assert adapter.sent == [turn_module.SERVICE_UNAVAILABLE]
+
+
+# ── Human control ─────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_under_human_control_text_is_recorded_not_sent_graph_not_invoked(graph, under_human_control):
+    adapter = FakeAdapter()
+    await run_turn(adapter, make_inbound(text="sigo esperando"), graph)
+
+    assert adapter.sent == []
+    graph.ainvoke.assert_not_awaited()
+    under_human_control.assert_awaited_once_with(
+        "demo", "tenant:demo:user:42:channel:fake", "user", "sigo esperando"
+    )
+
+
+@pytest.mark.asyncio
+async def test_under_human_control_document_number_is_masked_before_recording(graph, under_human_control):
+    await run_turn(FakeAdapter(), make_inbound(text="mi cédula es 12345678"), graph)
+
+    content = under_human_control.await_args.args[3]
+    assert "12345678" not in content
+    assert "[documento]" in content
+
+
+@pytest.mark.asyncio
+async def test_under_human_control_audio_is_transcribed_and_recorded_not_sent(graph, under_human_control):
+    adapter = FakeAdapter()
+    with patch(TRANSCRIBE, new_callable=AsyncMock, return_value="tengo dudas sobre el resultado"):
+        await run_turn(adapter, make_inbound(media=[audio()]), graph)
+
+    assert adapter.sent == []
+    graph.ainvoke.assert_not_awaited()
+    assert len(adapter.fetched) == 1  # media still fetched -- operator reads text, not a placeholder
+    under_human_control.assert_awaited_once_with(
+        "demo", "tenant:demo:user:42:channel:fake", "user", "tengo dudas sobre el resultado"
+    )
+
+
+@pytest.mark.asyncio
+async def test_under_human_control_image_is_extracted_and_recorded_not_sent(graph, under_human_control, vision_on):
+    adapter = FakeAdapter()
+    with patch(EXTRACT, new_callable=AsyncMock, return_value="¿Cuánto cuesta un examen de IGRA?"):
+        await run_turn(adapter, make_inbound(media=[image()]), graph)
+
+    assert adapter.sent == []
+    graph.ainvoke.assert_not_awaited()
+    assert len(adapter.fetched) == 1
+    under_human_control.assert_awaited_once_with(
+        "demo", "tenant:demo:user:42:channel:fake", "user", "¿Cuánto cuesta un examen de IGRA?"
+    )
+
+
+@pytest.mark.asyncio
+async def test_under_human_control_unsupported_document_sends_nothing(graph, under_human_control):
+    adapter = FakeAdapter()
+    document = MediaRef(id="doc-1", kind="document", mime_type="application/pdf")
+
+    await run_turn(adapter, make_inbound(media=[document]), graph)
+
+    assert adapter.sent == []
+    graph.ainvoke.assert_not_awaited()
+    under_human_control.assert_not_awaited()  # nothing resolved to text -- nothing to record
+
+
+@pytest.mark.asyncio
+async def test_under_human_control_oversized_audio_sends_nothing(graph, under_human_control):
+    adapter = FakeAdapter()
+    await run_turn(adapter, make_inbound(media=[audio(11 * 1024 * 1024)]), graph)
+
+    assert adapter.sent == []
+    assert adapter.fetched == []
+    graph.ainvoke.assert_not_awaited()
+    under_human_control.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_under_human_control_failed_transcription_sends_nothing(graph, under_human_control):
+    adapter = FakeAdapter()
+    with patch(TRANSCRIBE, new_callable=AsyncMock, side_effect=RuntimeError("whisper down")):
+        await run_turn(adapter, make_inbound(media=[audio()]), graph)
+
+    assert adapter.sent == []
+    graph.ainvoke.assert_not_awaited()
+    under_human_control.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_under_human_control_uncertain_vision_sends_nothing(graph, under_human_control, vision_on):
+    adapter = FakeAdapter()
+    with patch(EXTRACT, new_callable=AsyncMock, return_value=turn_module.VISION_UNCERTAIN):
+        await run_turn(adapter, make_inbound(media=[image()]), graph)
+
+    assert adapter.sent == []
+    graph.ainvoke.assert_not_awaited()
+    under_human_control.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_not_under_human_control_replies_as_normal(graph):
+    """Regression guard for the default (mock_under_human_control returns
+    False): everything above must not fire when a thread isn't escalated."""
+    adapter = FakeAdapter()
+    await run_turn(adapter, make_inbound(text="hola"), graph)
+
+    assert adapter.sent == ["Respuesta OK"]
+    graph.ainvoke.assert_awaited_once()
 
 
 # ── Best-effort side channels ─────────────────────────────────────────────────

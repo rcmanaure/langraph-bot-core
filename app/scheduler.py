@@ -38,16 +38,25 @@ async def expire_old_interrupts() -> None:
 
 @scheduler.scheduled_job("interval", hours=24, id="purge_conversation_audit")
 async def purge_old_conversation_audit() -> None:
+    """Purges both conversation_audit and human_control_messages on the same
+    ninety-day cutoff -- the operator-visible message log gets the same
+    retention as the turn summaries it accompanies, by the same job."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=_AUDIT_RETENTION_DAYS)
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             text("DELETE FROM conversation_audit WHERE created_at < :cutoff"),
             {"cutoff": cutoff},
         )
+        messages_result = await db.execute(
+            text("DELETE FROM human_control_messages WHERE created_at < :cutoff"),
+            {"cutoff": cutoff},
+        )
         await db.commit()
 
     if result.rowcount:
         logger.info("conversation_audit_purged count=%d", result.rowcount)
+    if messages_result.rowcount:
+        logger.info("human_control_messages_purged count=%d", messages_result.rowcount)
 
 
 def start() -> None:
