@@ -21,14 +21,18 @@ Multi-tenant conversational RAG bot for Telegram (and WhatsApp) built on LangGra
 | Layer | Tech |
 |---|---|
 | Graph / RAG | LangGraph 0.3+, LangChain Core |
-| LLM + embeddings | OpenRouter (any model; default `openrouter/free`, embeddings `openai/text-embedding-3-small`) |
+| LLM (generation) | OpenRouter — `mistralai/mistral-small-3.2-24b-instruct` (fallback `nvidia/nemotron-3-super-120b-a12b:free`) |
+| LLM (triage) | OpenRouter — `amazon/nova-micro-v1`, dedicated classifier model (see [ADR-008](docs/adr/ADR-008-specialized-paid-models.md)) |
+| Reranking | Cohere `rerank-v3.5` — cross-encoder rerank over hybrid search candidates |
+| Embeddings | OpenRouter — `openai/text-embedding-3-small` |
+| Vision (optional) | Configurable model (e.g. `qwen/qwen3-vl-32b-instruct`); unset disables photo support |
 | Database | PostgreSQL 16 + pgvector 0.8 |
 | Checkpoints | LangGraph `AsyncPostgresSaver` |
 | API | FastAPI + Uvicorn |
 | Admin UI | Single-page HTML, Alpine.js, Tailwind CDN |
 | Channels | Telegram Bot API, WhatsApp Cloud API (optional) |
 | STT | Groq Whisper (optional, for voice messages) |
-| Observability | LangSmith |
+| Observability | Arize Phoenix (self-hosted, OTel-based; off by default) |
 | Infra | Docker Compose + Traefik (production), cloudflared (local dev) |
 | Package manager | uv |
 
@@ -37,17 +41,27 @@ Multi-tenant conversational RAG bot for Telegram (and WhatsApp) built on LangGra
 ## LangGraph flow
 
 ```
-validate → retrieve → triage ──► generate → validate_output → respond
-                              └──► interrupt_node  (human escalation)
+validate ──blocked──► respond
+   │
+   ▼
+triage ──human───────────────► interrupt_node ──► respond
+   │
+   ├──off_topic/greeting──► generate ──► validate_output ──► respond
+   │
+   └──rag/catalog─────────► retrieve ──► generate ──► validate_output ──► respond
+
+respond ──► update_profile ──► prune_history ──► END
 ```
 
-- **validate** — injection scan, message trimming
-- **retrieve** — pgvector similarity search against tenant namespace
-- **triage** — LLM classifies intent: `rag` / `catalog` / `human` / `off_topic`
-- **generate** — LLM answers using retrieved chunks (or full catalog)
-- **validate_output** — safety check on generated answer
-- **respond** — sends final message back to channel
+- **validate** — injection scan, message trimming; blocked input skips straight to `respond`
+- **triage** — LLM classifies intent: `rag` / `catalog` / `human` / `off_topic` / `greeting`
+- **retrieve** — hybrid (dense + keyword, RRF-fused) pgvector search against the tenant namespace, then cross-encoder rerank
+- **generate** — LLM answers using retrieved chunks (or full catalog); `off_topic`/`greeting` skip `retrieve` and answer directly
+- **validate_output** — safety check (canary) on generated answer
+- **respond** — terminal node; channel handlers read `state["answer"]`
 - **interrupt_node** — pauses thread; operator resumes via `/operator/resume`
+- **update_profile** — extracts profile/topic updates from the turn into the LangGraph store
+- **prune_history** — trims persisted message history once it grows past a threshold (batched, not per-turn)
 
 ---
 
@@ -200,16 +214,23 @@ X-Operator-Key: <SECRET_KEY value, raw — not hashed>
 |---|---|---|
 | `DATABASE_URL` | Yes | PostgreSQL connection string (`postgresql+asyncpg://...`) |
 | `OPENROUTER_API_KEY` | Yes | OpenRouter API key |
-| `OPENAI_MODEL` | No | Chat model (default: `openrouter/free`) |
-| `OPENAI_FALLBACK_MODEL` | No | Fallback if primary fails |
+| `OPENAI_MODEL` | No | Generation model (default: `mistralai/mistral-small-3.2-24b-instruct`) |
+| `OPENAI_FALLBACK_MODEL` | No | Fallback if the generation model fails |
+| `TRIAGE_MODEL` | No | Dedicated intent-classification model (default: `amazon/nova-micro-v1`, see [ADR-008](docs/adr/ADR-008-specialized-paid-models.md)) |
+| `RERANK_MODEL` | No | Cross-encoder rerank model (default: `cohere/rerank-v3.5`) |
+| `RERANK_ENABLED` | No | Toggle reranking of hybrid-search candidates (default: `true`) |
 | `EMBEDDING_MODEL` | No | Embedding model (default: `openai/text-embedding-3-small`) |
 | `SECRET_KEY` | Yes | Used to derive the operator key |
 | `FERNET_KEY` | Yes | Fernet key for encrypting WhatsApp tokens at rest |
+| `CSRF_SECRET` | No | CSRF protection secret for the admin panel |
+| `OPERATOR_TOKEN` | No | If set, used for operator/admin auth instead of `SECRET_KEY` |
 | `TELEGRAM_BOT_TOKEN` | No | Global fallback bot token (per-tenant overrides this) |
-| `LANGCHAIN_API_KEY` | No | LangSmith API key for tracing |
-| `LANGCHAIN_PROJECT` | No | LangSmith project name |
+| `OBSERVABILITY_ENABLED` | No | Enable Phoenix tracing (default: `false`) |
+| `PHOENIX_COLLECTOR_ENDPOINT` | No | Phoenix OTel collector URL (e.g. `http://phoenix:4317`) |
+| `PHOENIX_SECRET` / `PHOENIX_ADMIN_PASSWORD` | Prod only | Required once `OBSERVABILITY_ENABLED=true` in `docker-compose.yml` |
 | `GROQ_API_KEY` | No | Groq API key for voice transcription |
 | `OPENAI_VISION_MODEL` | No | Vision model for photo messages on Telegram (unset disables photo support) |
+| `VISION_CACHE_ENABLED` / `EMBEDDING_CACHE_ENABLED` / `RETRIEVE_CACHE_ENABLED` | No | Per-layer cache toggles, default `true`; set `false` during active testing |
 | `TRAEFIK_HOST` | No | Production domain (e.g. `bot.yourdomain.com`) |
 | `SENTRY_DSN` | No | Sentry error tracking |
 
@@ -237,18 +258,37 @@ uv run pytest -m "not eval" --tb=short -q
 
 | File | What it covers |
 |---|---|
-| `test_telegram_webhook.py` | Webhook handler edge cases (auth, routing, voice, graph errors) — no live services |
-| `test_whatsapp_dedup.py` | WhatsApp dedup cache — LRU eviction, duplicate message detection |
+| `test_telegram_webhook.py` | Telegram webhook handler edge cases (auth, routing, voice, graph errors) — no live services |
+| `test_whatsapp_webhook.py` | WhatsApp webhook handler edge cases — no live services |
+| `test_channels_base.py` | Shared bounded dedup cache (`SeenKeys`) used by both channel adapters |
+| `test_turn.py` | Channel-agnostic inbound turn (`app/channels/turn.py`) via a `FakeAdapter` |
 | `test_tenant_crud.py` | Tenant CRUD endpoints (create, patch, delete, regen-key, webhook-status) — no live services |
+| `test_staff_admin_api.py` | Staff-member admin endpoints — mocked, no live services |
+| `test_staff.py` | `resolve_staff` — staff-member allowlist resolution |
 | `test_admin_api.py` | Admin API edge cases (auth, tenant CRUD, indexing jobs) — no live services |
 | `test_catalog_qa.py` | Catalog response QA — verifies correct context/chunks passed to LLM |
 | `test_graph.py` | LangGraph routing logic |
+| `test_graph_integration.py` | End-to-end compiled graph — real nodes, only true I/O (DB, embeddings, chat LLM, rerank HTTP) mocked |
 | `test_nodes.py` | Individual node behavior (triage fallback paths, fence stripping) |
+| `test_retrieve_node.py` | `retrieve()` node — chains hybrid search → rerank → token cap together |
+| `test_rag.py` | Hybrid (dense + keyword) retrieval query — DB and embeddings mocked |
+| `test_rerank.py` | Cross-encoder reranking — httpx mocked, no network |
+| `test_embedding_cache.py` | Content-addressed embedding cache — DB and embedder mocked |
+| `test_register_floor.py` | Non-overridable register floor across generation/extraction/static prompts |
+| `test_redaction.py` | `redact_document_numbers` — document-number redaction at ingest |
+| `test_trace_redaction.py` | `RedactingSpanExporter` — redaction applied to real OTel spans from a live LangChain call |
+| `test_observability.py` | Phoenix tracing setup in `app/main.py` — mocked, no live services |
+| `test_observability_integration.py` | Phoenix tracing against a live instance — auto-skips if unreachable |
+| `test_tenant_context.py` | `get_tenant_specialization` |
+| `test_runtime.py` | `build_runtime()` — shared bootstrap factory used by the FastAPI lifespan |
 | `test_policies.py` | Plan-based policy enforcement (free/basic/pro limits) |
 | `test_indexing.py` | Document chunking + embedding pipeline |
 | `test_security.py` | Injection scanner, rate limiting |
 | `test_scheduler.py` | APScheduler interrupt expiry |
+| `test_vision.py` | Vision procedure extraction — mocked, including the two-pass `VISION_UNCERTAIN` verification |
+| `test_stt.py` | `transcribe()` — voice transcription |
 | `test_evals.py` | LLM quality evals (slow, requires API keys) |
+| `test_integration_ocr_medical_data.py`, `test_medical_orders_real.py`, `test_real_images_manual.py` | OCR/vision accuracy against real sample images — manual/integration, not part of the default run |
 
 ---
 
@@ -272,25 +312,32 @@ Traefik must be running on the `lgbot-net` Docker network with a `letsencrypt` c
 ```
 app/
 ├── channels/
-│   ├── base.py      # ChannelEvent dataclass + ChannelAdapter Protocol
+│   ├── base.py      # ChannelEvent dataclass + ChannelAdapter Protocol + shared dedup cache
+│   ├── turn.py       # Channel-agnostic inbound turn: one pass from received message to reply
 │   ├── telegram.py  # TelegramAdapter + webhook handler
 │   └── whatsapp.py  # WhatsAppAdapter + webhook handler
 ├── graph/
 │   ├── builder.py   # LangGraph StateGraph definition
-│   └── nodes/       # validate, retrieve, triage, generate, validate_output
+│   └── nodes/       # validate, triage, retrieve, generate, validate_output,
+│                     # interrupt, respond, update_profile, prune_history
 ├── middleware/      # Security headers, request size limit
-├── models/          # SQLAlchemy ORM models
+├── models/          # SQLAlchemy ORM models (Tenant, StaffMember, DocumentChunk,
+│                     # IndexJob, ConversationAudit, EmbeddingCache, VisionCache, WaServiceWindow)
+├── schemas/         # Pydantic I/O schemas for LLM calls (triage, retrieve rewrite, profile, vision)
 ├── routes/          # admin.py, operator.py
-├── services/        # indexer, rag, llm, stt
+├── services/        # indexer, rag, rerank, llm, stt, vision, redaction, staff, tenant_context, trace_redaction
 ├── templates/       # admin.html (admin panel)
 ├── policies.py      # TenantPolicy + PolicyEngine (policy-as-code)
 ├── state.py         # AgentState TypedDict (versioned schema contract)
-└── main.py          # FastAPI app + lifespan
+├── runtime.py       # Shared bootstrap factory (FastAPI lifespan)
+└── main.py          # FastAPI app + lifespan, Phoenix observability setup
 alembic/             # Database migrations
 docs/
-├── adr/                 # Architecture Decision Records (ADR-001 … ADR-004)
-├── agent-dna.md         # AgentState field-by-field contract and versioning rules
-└── catalog-schema.jsonl # JSONL catalog format reference (fields, examples)
+├── adr/                       # Architecture Decision Records (ADR-001 … ADR-008)
+├── agents/                    # Docs consumed by the engineering agent skills (issue tracker, triage labels, domain)
+├── agent-dna.md               # AgentState field-by-field contract and versioning rules
+├── model-upgrade-baseline.md  # Model swap evaluation results (accuracy/latency per candidate)
+└── catalog-schema.jsonl       # JSONL catalog format reference (fields, examples)
 tests/               # pytest test suite
 CHANGELOG.md         # Release history
 DESIGN.md            # Admin panel design system (colors, typography, components)
@@ -298,4 +345,5 @@ TODOS.md             # Accepted deferred work items
 VERSION              # Current version (semver: major.minor.patch.build)
 scripts/start-tunnel.ps1  # Windows: starts cloudflared tunnel + registers Telegram webhook
 scripts/benchmark_accuracy.py  # Vision/OCR extraction accuracy benchmark
+scripts/benchmark_model_upgrade.py  # Triage/generation model swap evaluation
 ```
