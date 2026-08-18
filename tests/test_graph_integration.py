@@ -293,7 +293,11 @@ async def test_human_escalation_routes_through_interrupt_skipping_retrieve_and_g
 
     mock_retrieve.assert_not_called()
     llm.ainvoke.assert_not_called()  # generate() never runs on the human path
-    assert result["answer"] == "un operador te va a contactar"
+    # The resume value is discarded, never folded into "answer" or the
+    # message history (see ADR-009 / #39) -- delivering a reply to the user
+    # is #37's job (send through the channel), not this node's.
+    assert result["answer"] == ""
+    assert not any(m.content == "un operador te va a contactar" for m in result["messages"])
 
 
 @pytest.mark.asyncio

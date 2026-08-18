@@ -141,6 +141,25 @@ async def record_message(
         logger.warning("human_control_record_failed thread=%s err=%s", thread_id, exc)
 
 
+async def end(thread_id: str) -> None:
+    """Return a thread to the bot -- the explicit end of human control (#39).
+    Silent by design (see ADR-009): this only closes the audit row, it never
+    writes anything to the graph's checkpoint or to the user. Idempotent --
+    a thread with no open row (already ended, or never escalated) is a no-op."""
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            text("""
+                UPDATE conversation_audit
+                   SET expired_at = :now
+                 WHERE thread_id = :thread
+                   AND expired_at IS NULL
+                   AND interrupt_started_at IS NOT NULL
+            """),
+            {"now": datetime.now(timezone.utc), "thread": thread_id},
+        )
+        await db.commit()
+
+
 async def thread_messages(thread_id: str) -> list[dict]:
     """The ordered human_control_messages log for one thread -- what a user
     sent while under control, and what an operator replied. Oldest first."""

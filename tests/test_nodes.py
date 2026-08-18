@@ -383,18 +383,22 @@ async def test_validate_output_fallback_on_double_fail(base_state):
 # ---------------------------------------------------------------------------
 # interrupt_node — opening the escalation delegates to human_control.start(),
 # which is unit-tested for idempotency in tests/test_human_control.py.
+# The interrupt()/resume value itself is discarded (#39): whatever an
+# operator or the scheduler resumes with never becomes an "answer" or an
+# AIMessage in the graph's own history (see ADR-009).
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_interrupt_node_opens_the_escalation_before_suspending(base_state):
     with (
         patch("app.graph.nodes.interrupt.human_control.start", new_callable=AsyncMock) as start,
-        patch("app.graph.nodes.interrupt.interrupt", MagicMock(return_value="respuesta del operador")),
+        patch("app.graph.nodes.interrupt.interrupt", MagicMock(return_value=None)) as mock_interrupt,
     ):
         result = await interrupt_node(base_state)
 
     start.assert_awaited_once_with(base_state["tenant_id"], base_state["thread_id"], "")
-    assert result["answer"] == "respuesta del operador"
+    mock_interrupt.assert_called_once_with({"type": "needs_human", "thread_id": base_state["thread_id"]})
+    assert result == {"awaiting_confirmation": False}
 
 
 @pytest.mark.asyncio
@@ -406,7 +410,11 @@ async def test_interrupt_node_forwards_chat_id_to_human_control_start(base_state
         patch("app.graph.nodes.interrupt.human_control.start", new_callable=AsyncMock) as start,
         patch("app.graph.nodes.interrupt.interrupt", MagicMock(return_value="respuesta del operador")),
     ):
-        await interrupt_node(base_state)
+        result = await interrupt_node(base_state)
+
+    # Discarded even when a real resume value comes through -- not folded
+    # into the graph's history (see ADR-009 / #39).
+    assert result == {"awaiting_confirmation": False}
 
     start.assert_awaited_once_with(base_state["tenant_id"], base_state["thread_id"], "998877")
 

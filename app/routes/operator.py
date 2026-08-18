@@ -31,18 +31,30 @@ def _wa_window_remaining_seconds(channel: str, last_seen: datetime | None, now: 
     return max(0, int((_WA_WINDOW - (now - last_seen)).total_seconds()))
 
 
-class ResumeRequest(BaseModel):
-    text: str
-
-
 @router.post("/resume/{thread_id}")
 @_limiter.limit("20/minute")
 async def resume(
     thread_id: str,
-    body: ResumeRequest,
     request: Request,
     _: None = Depends(verify_operator_key),
 ):
+    """The explicit end of human control (#39) -- no longer the operator's
+    reply (that's POST /threads/{thread_id}/messages, #37). Two cases:
+    a thread the reactive path (triage_decision == "human") suspended at
+    interrupt_node is still genuinely blocked and must be unblocked with
+    Command(resume=...) before the bot can answer again; a thread the
+    proactive path (generate.py's own escalation) opened never suspended
+    the graph at all, so there is nothing to resume -- only the audit row
+    needs closing. graph.aget_state()'s `.next` distinguishes the two:
+    non-empty means a node is still pending (genuinely suspended).
+
+    ponytail: the check-then-act pair (aget_state, then ainvoke) races
+    app/scheduler.py's own auto-expiry job, which resumes the same class of
+    thread on its own 5-minute tick -- both sides check .next first, but
+    nothing locks the row between the check and the resume. Same class of
+    gap ADR-009 already accepts for two operators answering one thread at
+    once ("a lock brings its own questions... a queue this size has not yet
+    earned"); revisit together if either race actually bites in practice."""
     if not validate_thread_id(thread_id):
         raise HTTPException(status_code=422, detail="Invalid thread_id format")
 
@@ -51,37 +63,16 @@ async def resume(
     graph = request.app.state.graph
     config = {"configurable": {"thread_id": thread_id}}
 
-    result = await graph.ainvoke(Command(resume=body.text), config=config)
+    snapshot = await graph.aget_state(config)
+    if snapshot.next:
+        # The resume value is discarded (see interrupt_node's own comment) --
+        # per ADR-009, nothing said while a thread was held is folded back
+        # into the graph's message history.
+        await graph.ainvoke(Command(resume=None), config=config)
 
-    # Mark interrupt resolved in audit
-    try:
-        async with AsyncSessionLocal() as db:
-            await db.execute(
-                text("""
-                    UPDATE conversation_audit
-                       SET expired_at = :now,
-                           bot_response = :resp
-                     WHERE thread_id = :tid
-                       AND expired_at IS NULL
-                       AND interrupt_started_at IS NOT NULL
-                """),
-                {
-                    "now": datetime.now(timezone.utc),
-                    "resp": body.text,
-                    "tid": thread_id,
-                },
-            )
-            await db.commit()
-    except Exception as exc:
-        # Non-fatal — audit failure must not block the operator response
-        import logging
-        logging.getLogger(__name__).warning("audit_update_failed thread=%s err=%s", thread_id, exc)
+    await human_control.end(thread_id)
 
-    answer = body.text
-    if result and isinstance(result, dict):
-        answer = result.get("answer") or answer
-
-    return {"status": "resumed", "thread_id": thread_id, "answer": answer}
+    return {"status": "resumed", "thread_id": thread_id}
 
 
 @router.get("/pending")

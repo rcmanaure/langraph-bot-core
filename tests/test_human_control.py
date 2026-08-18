@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.human_control import (
+    end,
     is_under_human_control,
     record_message,
     start,
@@ -155,6 +156,22 @@ async def test_record_message_unknown_tenant_logs_instead_of_failing_silently():
 async def test_record_message_failure_never_raises():
     with patch("app.services.human_control.AsyncSessionLocal", side_effect=RuntimeError("db down")):
         await record_message("acme", "tenant:acme:user:42:channel:telegram", "user", "hola")  # must not raise
+
+
+# ── end() -- the explicit end of human control (#39) ────────────────────────
+
+@pytest.mark.asyncio
+async def test_end_closes_the_open_audit_row():
+    session, ctx = _mock_db()
+    with patch("app.services.human_control.AsyncSessionLocal", return_value=ctx):
+        await end("tenant:acme:user:42:channel:telegram")
+
+    session.commit.assert_awaited_once()
+    params = session.execute.await_args.args[1]
+    assert params["thread"] == "tenant:acme:user:42:channel:telegram"
+    sql = str(session.execute.await_args.args[0])
+    assert "expired_at" in sql
+    assert "human_control_messages" not in sql  # only closes the audit row, writes nothing else
 
 
 # ── thread_messages() -- the ordered log an operator reads (#37) ────────────

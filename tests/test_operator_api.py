@@ -1,6 +1,6 @@
 """
-Edge-case tests for the operator API (#37 -- reading a waiting thread and
-replying through the channel).
+Edge-case tests for the operator API: reading a waiting thread and replying
+through the channel (#37), and ending human control explicitly (#39).
 DB calls, the channel adapter, and the graph checkpoint are mocked -- no
 live services required. Follows tests/test_admin_api.py's ASGI app factory
 and auth-override pattern.
@@ -81,6 +81,17 @@ async def test_pending_rejects_wrong_operator_key():
         mock_settings.operator_token = ""
         mock_settings.secret_key = SECRET_KEY
         r = await _request(app, "get", "/operator/pending",
+                            headers={"x-operator-key": "wrong-key"})
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_resume_rejects_wrong_operator_key():
+    app = make_app(bypass_auth=False, graph=AsyncMock())
+    with patch("app.auth.settings") as mock_settings:
+        mock_settings.operator_token = ""
+        mock_settings.secret_key = SECRET_KEY
+        r = await _request(app, "post", f"/operator/resume/{THREAD_ID}",
                             headers={"x-operator-key": "wrong-key"})
     assert r.status_code == 401
 
@@ -389,3 +400,47 @@ async def test_send_message_tenant_not_found_returns_404():
         r = await _request(app, "post", f"/operator/threads/{THREAD_ID}/messages",
                             json={"text": "hola", "author": "María"})
     assert r.status_code == 404
+
+
+# ── POST /operator/resume/{thread_id} -- end human control explicitly (#39) ──
+
+@pytest.mark.asyncio
+async def test_resume_invalid_thread_id_returns_422():
+    app = make_app(graph=AsyncMock())
+    r = await _request(app, "post", "/operator/resume/not-a-thread-id")
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_resume_unblocks_a_genuinely_suspended_interrupt():
+    """The reactive path (triage_decision == "human") really did suspend the
+    graph at interrupt_node -- .next is non-empty, so this must be unblocked
+    with Command(resume=...) before the bot can answer again."""
+    graph = AsyncMock()
+    graph.aget_state = AsyncMock(return_value=SimpleNamespace(next=("interrupt_node",)))
+    app = make_app(graph=graph)
+
+    with patch("app.routes.operator.human_control.end", new_callable=AsyncMock) as end:
+        r = await _request(app, "post", f"/operator/resume/{THREAD_ID}")
+
+    assert r.status_code == 200
+    graph.ainvoke.assert_awaited_once()
+    end.assert_awaited_once_with(THREAD_ID)
+
+
+@pytest.mark.asyncio
+async def test_resume_skips_ainvoke_for_a_proactive_escalation_that_never_suspended():
+    """generate.py's own escalation (#36/#38) never called interrupt() --
+    .next is empty, so there's nothing to resume. Calling Command(resume=...)
+    on a thread with no pending interrupt is the single-shot-resume bug
+    #35/#36 flagged; this is the fix (#39)."""
+    graph = AsyncMock()
+    graph.aget_state = AsyncMock(return_value=SimpleNamespace(next=()))
+    app = make_app(graph=graph)
+
+    with patch("app.routes.operator.human_control.end", new_callable=AsyncMock) as end:
+        r = await _request(app, "post", f"/operator/resume/{THREAD_ID}")
+
+    assert r.status_code == 200
+    graph.ainvoke.assert_not_awaited()
+    end.assert_awaited_once_with(THREAD_ID)
