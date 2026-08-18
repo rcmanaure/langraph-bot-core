@@ -43,7 +43,8 @@ _GREETING_RE = re.compile(
     r"(?:hola+|holis|buen[oa]s?(?:\s+(?:d[ií]as?|tardes|noches))?|"
     r"gracias|muchas\s+gracias|mil\s+gracias|de\s+nada|"
     r"hasta\s+luego|nos\s+vemos|chao|adi[oó]s|"
-    r"mucho\s+gusto|un\s+gusto)"
+    r"mucho\s+gusto|un\s+gusto|"
+    r"hi+|hey+|hello+|thanks|thank\s+you|bye)"
     r"\s*[.!¡?¿,]*\s*$",
     re.IGNORECASE,
 )

@@ -61,6 +61,13 @@ _FORMAT_HINT_STAFF = _REGISTER_FLOOR_STAFF + _ITEM_FORMAT_RULES + """
 
 _CATALOG_FORMAT_HINT_STAFF = _REGISTER_FLOOR_STAFF + _ITEM_FORMAT_RULES
 
+# Applies whenever a price is quoted (RAG or catalog) — not per-item, one
+# line at the end of the reply.
+_RESULTS_NOTE_RULE = (
+    'Si menciona algún precio, agregue al final una nota breve: '
+    '"_Resultados: 3 a 5 días hábiles._"'
+)
+
 _RAG_SYSTEM = """\
 Es un asistente de {expertise}. Su tono es {tone_description}.{specialization_block}
 Para precios y disponibilidad use ÚNICAMENTE el contexto proporcionado — NUNCA invente un producto
@@ -75,6 +82,7 @@ REGLAS (en orden de prioridad):
 1. AMBIGÜEDAD: Si lo que pide el usuario puede referirse a varios ítems distintos, haga UNA sola pregunta breve y amable de aclaración. No asuma. EXCEPCIÓN: si el usuario ya incluyó en su mensaje el detalle que distingue entre los ítems similares (ej. pidió "con anexos" o mencionó explícitamente lo que un ítem incluye y otro no — "trompas y ovarios" especifica CON anexos), eso NO es ambigüedad — el usuario ya eligió, responda directo con ESE ítem, no pregunte de nuevo algo que ya contestó.
 2. Si el contexto trae varios ítems cuyo nombre coincide con lo que pide el usuario, muéstrelos TODOS, sin filtrar por categoría o tipo.
 3. {negative_confirmation_rule}
+4. """ + _RESULTS_NOTE_RULE + """
 - NO invente precios ni servicios.
 {format_hint}
 Contexto:
@@ -85,6 +93,7 @@ _CATALOG_SYSTEM = """\
 Es un asistente de {expertise}.
 Liste TODOS los ítems del catálogo a continuación, organizados por sección.
 No omita ningún ítem. Use los nombres y precios exactos del catálogo.{contact_hint}
+""" + _RESULTS_NOTE_RULE + """
 {format_hint}
 Catálogo:
 {context}
@@ -115,7 +124,13 @@ _MATCH_UNCONFIRMED_INSTRUCTION = (
     'necesita?". NUNCA dé el precio como si fuera seguro hasta que el usuario confirme. Cuando '
     "confirme, dé el precio con el nombre EXACTO del ítem tal como aparece en el contexto — nunca "
     "lo renombre para que suene igual a lo que pidió el usuario — y mantenga una aclaración breve "
-    "de que es lo más cercano disponible."
+    "de que es lo más cercano disponible.\n"
+    "EXCEPCIÓN — varios ítems (regla 2): si el contexto trae VARIOS ítems que coinciden por nombre, "
+    'esto NO es una aproximación incierta de un solo ítem — no pregunte genérico "¿Es lo que '
+    'necesita?"; si no es obvio cuál busca, pregunte si necesita todos o uno en particular. Si el '
+    'usuario ya confirmó (p. ej. "sí") sin especificar cuál, NO repita la lista de precios que ya '
+    'dio — confirme en una línea breve (p. ej. "Perfecto, esos son los tres.") sin re-listar, salvo '
+    "que el usuario pida verla de nuevo."
 )
 
 
