@@ -16,3 +16,9 @@ class AgentState(TypedDict):
     answer: str
     blocked: NotRequired[bool]  # set by validate node on injection detection
     is_staff: NotRequired[bool]  # resolved once per turn from the allowlist, never from message text
+    # True only when THIS turn's reply was an unconfirmed-approximation offer
+    # awaiting the user's yes/no -- read by the NEXT turn to decide whether a
+    # bare rejection escalates. Every generate()/interrupt_node return sets
+    # it explicitly (never omits the key) so it cannot survive past the one
+    # turn it describes. See ADR-009 / #38.
+    awaiting_confirmation: NotRequired[bool]

@@ -2,9 +2,10 @@ import json
 import logging
 import re
 
-from langchain_core.messages import HumanMessage, SystemMessage, trim_messages
+from langchain_core.messages import SystemMessage, trim_messages
 
 from app.config import settings
+from app.graph.nodes.retrieve import is_bare_rejection, last_human_text
 from app.schemas.triage import TriageDecision
 from app.services.llm import get_triage_llm
 from app.services.rag import token_counter
@@ -48,16 +49,20 @@ _GREETING_RE = re.compile(
 )
 
 
-def _last_human_text(state: AgentState) -> str | None:
-    for m in reversed(state["messages"]):
-        if isinstance(m, HumanMessage):
-            return m.content if isinstance(m.content, str) else None
-    return None
-
-
 async def triage(state: AgentState) -> dict:
-    last_human = _last_human_text(state)
+    last_human = last_human_text(state)
     if last_human is None:
+        return {"triage_decision": "rag"}
+
+    # A bare rejection answering last turn's approximation offer must reach
+    # generate()'s signal-2 escalation check, which needs retrieve() to have
+    # run first -- off_topic/greeting skip retrieve() entirely (see
+    # builder.py's _route_triage), so classifying it as either would silently
+    # defeat the whole rejection-escalation feature (see ADR-009 / #38).
+    # Checked ahead of both the regex shortcut and the LLM call: a bare "no"
+    # would otherwise never match the greeting regex, but the LLM could still
+    # call it off_topic.
+    if is_bare_rejection(last_human) and state.get("awaiting_confirmation"):
         return {"triage_decision": "rag"}
 
     if _GREETING_RE.match(last_human):

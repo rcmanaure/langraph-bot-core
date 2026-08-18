@@ -19,6 +19,12 @@ async def validate_output(state: AgentState) -> dict:
         return {}
 
     # Empty/malformed — retry generate once
+    # ponytail: `state` here already carries THIS turn's own awaiting_confirmation
+    # (generate() already ran and merged once before validate_output started), so
+    # this retry's signal-2 rejection check reads that instead of the true prior-turn
+    # value the first attempt saw -- narrow edge case (needs a <=10-char answer on a
+    # rejection-escalation turn), deferred; fix needs generate()/validate_output to
+    # share the pre-turn value explicitly rather than round-tripping through state.
     logger.warning("validate_output_empty retrying generate thread=%s", state.get("thread_id"))
     try:
         from app.graph.nodes.generate import generate

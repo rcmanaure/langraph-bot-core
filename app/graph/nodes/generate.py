@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import AsyncSessionLocal
+from app.graph.nodes.retrieve import is_bare_rejection, last_human_text
 from app.messages import HUMAN_HANDOFF
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.services import human_control
@@ -198,7 +199,9 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
     if decision == "off_topic":
         content = _OFF_TOPIC_MSG.format(**tenant_ctx)
         msg = AIMessage(content=content)
-        return {"answer": content, "messages": [msg]}
+        # Explicit False, not omitted -- an unrelated message closes out any
+        # approximation offered last turn (see AgentState.awaiting_confirmation).
+        return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
 
     if decision == "greeting":
         # Static reply — a bare greeting has no question to answer, so this
@@ -208,7 +211,7 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         # triage call needed to classify the message in the first place.
         content = _GREETING_MSG.format(**tenant_ctx)
         msg = AIMessage(content=content)
-        return {"answer": content, "messages": [msg]}
+        return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
 
     if is_catalog and not chunks:
         async with AsyncSessionLocal() as db:
@@ -223,29 +226,46 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
             chunks = [{"content": r.content} for r in result.fetchall()]
             chunks = cap_chunks_to_tokens(chunks, settings.retrieval_max_tokens)
 
-    # Escalation signal: nothing in the retrieved pool is close to what was
-    # asked. Reads the MAXIMUM similarity across the pool — the opposite of
-    # _has_confirmed_match's chunks[0], deliberately: that guards against a
-    # false confirmation, this guards against a false escalation, and chunk
-    # order is fused/reranked so chunks[0] is frequently not the highest-
-    # similarity chunk (see ADR-009). Catalog and staff never escalate — a
-    # catalog dump may carry no similarity at all, and a staff member IS the
-    # business, nobody to hand them to. An empty pool never escalates either:
-    # it means the tenant was never indexed, an operational fault, not a
-    # conversation. Computed fresh from this turn's own chunks, never stored
-    # in state, so a prior turn's escalation can't leak into this one.
+    confirmed = _has_confirmed_match(chunks)
+
+    # Two escalation signals, neither the model's opinion (see ADR-009).
+    # Catalog and staff never escalate on either signal — a catalog dump may
+    # carry no similarity at all, and a staff member IS the business, nobody
+    # to hand them to. Computed fresh from this turn's own chunks/message,
+    # never stored in state, so a prior turn's escalation can't leak into
+    # this one (the *rejection* signal below does read one bit of state, but
+    # only the guard that expires after exactly one turn).
     escalate = False
     if not is_catalog and not is_staff:
+        # Signal 1: nothing in the retrieved pool is close to what was
+        # asked. Reads the MAXIMUM similarity across the pool — the
+        # opposite of _has_confirmed_match's chunks[0], deliberately: that
+        # guards against a false confirmation, this guards against a false
+        # escalation, and chunk order is fused/reranked so chunks[0] is
+        # frequently not the highest-similarity chunk. An empty pool never
+        # escalates either: it means the tenant was never indexed, an
+        # operational fault, not a conversation.
         similarities = [c["similarity"] for c in chunks if "similarity" in c]
         if similarities and max(similarities) < settings.handoff_threshold:
             escalate = True
             logger.info(
-                "generate_escalating tenant=%s max_similarity=%.3f threshold=%.3f",
+                "generate_escalating reason=similarity tenant=%s max_similarity=%.3f threshold=%.3f",
                 state["tenant_id"], max(similarities), settings.handoff_threshold,
             )
-            # Pointing at a contact URL while queueing a person for the same
-            # question is two answers to one question (#27's staff variant
-            # already suppresses this for the same reason).
+        elif not confirmed and is_bare_rejection(last_human_text(state) or "") and state.get("awaiting_confirmation"):
+            # Signal 2: the user rejected the approximation the bot offered
+            # LAST turn -- only when that turn actually offered one, or
+            # every "no" would escalate, including one answering a reply
+            # that was confidently correct. Retrieval stays anchored to the
+            # original question on a bare rejection (see retrieve.py), so
+            # this fires alongside a still-unconfirmed match, never instead
+            # of the similarity signal above.
+            escalate = True
+            logger.info("generate_escalating reason=rejection tenant=%s", state["tenant_id"])
+        if escalate:
+            # Pointing at a contact URL while queueing a person for the
+            # same question is two answers to one question (#27's staff
+            # variant already suppresses this for the same reason).
             tenant_ctx["contact_hint"] = ""
 
     context = "Sin contexto disponible." if not chunks else "\n\n---\n\n".join(c["content"] for c in chunks)
@@ -255,9 +275,7 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
     else:
         hint_template = _FORMAT_HINT_STAFF if is_staff else _FORMAT_HINT
     format_hint = hint_template.format(tone_description=tenant_ctx["tone_description"])
-    match_instruction = (
-        _MATCH_CONFIRMED_INSTRUCTION if _has_confirmed_match(chunks) else _MATCH_UNCONFIRMED_INSTRUCTION
-    )
+    match_instruction = _MATCH_CONFIRMED_INSTRUCTION if confirmed else _MATCH_UNCONFIRMED_INSTRUCTION
     negative_confirmation_rule = (
         _NEGATIVE_CONFIRMATION_RULE_STAFF if is_staff
         else _NEGATIVE_CONFIRMATION_RULE.format(contact_hint=tenant_ctx["contact_hint"])
@@ -309,4 +327,8 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         response = response.model_copy(update={"content": content})
         await human_control.start(state["tenant_id"], state["thread_id"])
 
-    return {"answer": content, "messages": [response]}
+    # True only for a genuine unconfirmed-RAG offer that didn't itself
+    # escalate -- catalog/staff turns and confirmed matches all close the
+    # question out, same as escalating does.
+    awaiting_confirmation = not is_catalog and not is_staff and not escalate and not confirmed
+    return {"answer": content, "messages": [response], "awaiting_confirmation": awaiting_confirmation}

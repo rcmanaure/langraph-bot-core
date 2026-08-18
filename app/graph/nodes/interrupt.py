@@ -25,4 +25,9 @@ async def interrupt_node(state: AgentState) -> dict:
     return {
         "answer": operator_answer,
         "messages": [AIMessage(content=operator_answer)],
+        # Whatever the bot offered before this escalation is moot once a
+        # person has answered instead -- explicit False, not omitted, or a
+        # stale True from before the handoff could escalate an unrelated
+        # rejection turns later (see AgentState.awaiting_confirmation).
+        "awaiting_confirmation": False,
     }

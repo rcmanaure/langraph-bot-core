@@ -371,3 +371,50 @@ async def test_low_similarity_pool_escalates_through_the_compiled_graph():
     assert "No tenemos ese examen en particular." in result["answer"]
     assert HUMAN_HANDOFF in result["answer"]
     audit_db.commit.assert_awaited_once()  # human_control.start() opened the escalation
+
+
+@pytest.mark.asyncio
+async def test_rejection_after_approximation_escalates_across_two_turns():
+    """Turn 1: an unconfirmed match, the bot offers an approximation. Turn 2:
+    a bare "no" -- retrieval re-anchors to the original query (#34) and
+    generate() reads turn 1's awaiting_confirmation off the checkpoint to
+    escalate. A real checkpointer, not mocked state, carries that marker
+    between the two separate ainvoke() calls. See #38."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    graph = build_graph(checkpointer=InMemorySaver())
+    thread_id = "tenant:acme:user:1:channel:telegram"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    rows = [_db_row("SRP009 | Algo relacionado | $50.00", similarity=0.5)]
+    llm = _mock_chat_llm(
+        "Lo más cercano que tenemos es Algo relacionado, ¿es lo que necesita?",
+        triage_decision="rag",
+    )
+    db = _mock_db_session(fetchall_rows=rows)
+
+    audit_db = AsyncMock()
+    audit_result = MagicMock()
+    audit_result.first.return_value = None  # no open escalation yet
+    audit_db.execute = AsyncMock(return_value=audit_result)
+    audit_db.commit = AsyncMock()
+    audit_db.__aenter__ = AsyncMock(return_value=audit_db)
+    audit_db.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.services.human_control.AsyncSessionLocal", MagicMock(return_value=audit_db)),
+    ):
+        turn1 = await graph.ainvoke(_initial_state("cuanto cuesta algo relacionado"), config=config)
+        assert HUMAN_HANDOFF not in turn1["answer"]
+        audit_db.commit.assert_not_awaited()
+
+        turn2 = await graph.ainvoke(_initial_state("no"), config=config)
+
+    assert HUMAN_HANDOFF in turn2["answer"]
+    audit_db.commit.assert_awaited_once()  # only on turn 2, when the rejection escalates

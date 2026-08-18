@@ -45,6 +45,28 @@ _REJECTION_RE = re.compile(
 )
 
 
+def last_human_text(state: AgentState) -> str | None:
+    """The literal text of the last human message, unanchored (contrast
+    _last_human_query above, which walks past bare confirmations/rejections).
+    Callers that need to inspect THIS turn's own message -- not what it's
+    answering -- want this, not _last_human_query. Shared by triage.py and
+    generate.py so both read the same message the same way."""
+    for m in reversed(state["messages"]):
+        if isinstance(m, HumanMessage):
+            return m.content if isinstance(m.content, str) else None
+    return None
+
+
+def is_bare_rejection(text: str) -> bool:
+    """Whether text is a whole-message rejection with no content of its own
+    -- the same pattern _last_human_query anchors on above, exposed so
+    generate.py can decide whether THIS turn's message is a rejection to
+    escalate (see ADR-009 / #38). Anchoring and escalating are separate
+    decisions: this says nothing about whether escalation is warranted,
+    only whether the message is a bare "no"."""
+    return isinstance(text, str) and bool(_REJECTION_RE.match(text))
+
+
 def _last_human_query(state: AgentState) -> str:
     """The message retrieval should search for. A bare confirmation/rejection
     carries no content of its own, so walk back past any run of them to the
