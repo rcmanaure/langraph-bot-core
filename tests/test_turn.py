@@ -54,10 +54,11 @@ class FakeAdapter:
             raise self._media
         return self._media
 
-    async def send(self, inbound: Inbound, text: str) -> None:
+    async def send(self, inbound: Inbound, text: str) -> bool:
         if self.send_error:
             raise self.send_error
         self.sent.append(text)
+        return True
 
 
 def make_inbound(**overrides) -> Inbound:
@@ -152,6 +153,16 @@ async def test_ordinary_message_reaches_the_graph_unmodified(graph):
     await run_turn(FakeAdapter(), make_inbound(text="cuánto cuesta la biopsia"), graph)
 
     assert graph.ainvoke.call_args[0][0]["messages"][0].content == "cuánto cuesta la biopsia"
+
+
+@pytest.mark.asyncio
+async def test_chat_id_reaches_graph_state(graph):
+    """Carried so human_control.start() can persist it if this turn escalates
+    -- an operator reply outside a webhook needs the channel's delivery
+    target, which differs from user_id on Telegram (#37)."""
+    await run_turn(FakeAdapter(), make_inbound(text="hola", chat_id="999888"), graph)
+
+    assert graph.ainvoke.call_args[0][0]["chat_id"] == "999888"
 
 
 # ── Staff resolution ──────────────────────────────────────────────────────────

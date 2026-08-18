@@ -15,6 +15,9 @@ class HumanControlMessage(Base):
     thread_id = Column(String(255), nullable=False)
     sender = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
+    # Free-text, self-declared by whoever sent -- attribution, not identity;
+    # nothing verifies it (see CONTEXT.md's Operator entry). Null for "user" rows.
+    author = Column(String(128), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (

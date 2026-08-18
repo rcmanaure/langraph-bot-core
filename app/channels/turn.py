@@ -234,6 +234,7 @@ async def _reply(adapter: ChannelAdapter, inbound: Inbound, text: str, graph) ->
                 "messages": [HumanMessage(content=text)],
                 "answer": "",
                 "is_staff": is_staff,
+                "chat_id": inbound.chat_id,
             },
             config={"configurable": {"thread_id": inbound.thread_id}},
         )

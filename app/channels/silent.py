@@ -21,5 +21,5 @@ class SilentAdapter:
     async def fetch_media(self, ref: MediaRef) -> bytes:
         return await self._adapter.fetch_media(ref)
 
-    async def send(self, inbound: Inbound, text: str) -> None:
-        pass
+    async def send(self, inbound: Inbound, text: str) -> bool:
+        return True  # nothing attempted, so nothing failed -- this is intentional suppression

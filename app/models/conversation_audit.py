@@ -18,6 +18,11 @@ class ConversationAudit(Base):
     thread_id = Column(String(255), nullable=False)
     user_id = Column(String(64), nullable=False)
     channel = Column(String(20), nullable=False)
+    # The channel's delivery target, captured once at escalation
+    # (human_control.start()) -- Telegram's chat id differs from its user id
+    # and isn't derivable from thread_id, so an operator reply built outside
+    # a webhook needs it persisted here (see ADR-009 / #37).
+    chat_id = Column(String(100), nullable=True)
     user_message = Column(Text, nullable=True)
     bot_response = Column(Text, nullable=True)
     # Interrupt tracking — queried by expire_interrupted_threads scheduler

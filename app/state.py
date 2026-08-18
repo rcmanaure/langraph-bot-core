@@ -16,6 +16,11 @@ class AgentState(TypedDict):
     answer: str
     blocked: NotRequired[bool]  # set by validate node on injection detection
     is_staff: NotRequired[bool]  # resolved once per turn from the allowlist, never from message text
+    # The channel's delivery target for this thread (e.g. Telegram's chat id,
+    # which differs from its user id) -- carried so human_control.start() can
+    # persist it to conversation_audit the moment a thread escalates, letting
+    # an operator reply outside a webhook. See ADR-009 / #37.
+    chat_id: NotRequired[str]
     # True only when THIS turn's reply was an unconfirmed-approximation offer
     # awaiting the user's yes/no -- read by the NEXT turn to decide whether a
     # bare rejection escalates. Every generate()/interrupt_node return sets

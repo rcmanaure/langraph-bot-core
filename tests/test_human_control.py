@@ -3,7 +3,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.human_control import is_under_human_control, record_message, start
+from app.services.human_control import (
+    is_under_human_control,
+    record_message,
+    start,
+    thread_messages,
+)
 
 
 def _mock_db(row=None, rowcount=1):
@@ -44,6 +49,18 @@ async def test_start_skips_duplicate_insert_when_already_open():
     # Only the SELECT ran — no INSERT, no commit
     assert session.execute.await_count == 1
     session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_persists_the_channel_chat_id():
+    """Captured only on the insert that actually opens the escalation -- an
+    operator reply outside a webhook needs it (#37)."""
+    session, ctx = _mock_db(row=None)
+    with patch("app.services.human_control.AsyncSessionLocal", return_value=ctx):
+        await start("acme", "tenant:acme:user:42:channel:telegram", "998877")
+
+    insert_params = session.execute.await_args_list[1].args[1]
+    assert insert_params["chat_id"] == "998877"
 
 
 @pytest.mark.asyncio
@@ -99,8 +116,22 @@ async def test_record_message_inserts_and_commits():
         "thread": "tenant:acme:user:42:channel:telegram",
         "sender": "user",
         "content": "hola",
+        "author": None,
         "slug": "acme",
     }
+
+
+@pytest.mark.asyncio
+async def test_record_message_stores_the_operators_author_name():
+    session, ctx = _mock_db()
+    with patch("app.services.human_control.AsyncSessionLocal", return_value=ctx):
+        await record_message(
+            "acme", "tenant:acme:user:42:channel:telegram", "operator", "claro, sí está disponible",
+            author="María",
+        )
+
+    params = session.execute.await_args.args[1]
+    assert params["author"] == "María"
 
 
 @pytest.mark.asyncio
@@ -124,3 +155,28 @@ async def test_record_message_unknown_tenant_logs_instead_of_failing_silently():
 async def test_record_message_failure_never_raises():
     with patch("app.services.human_control.AsyncSessionLocal", side_effect=RuntimeError("db down")):
         await record_message("acme", "tenant:acme:user:42:channel:telegram", "user", "hola")  # must not raise
+
+
+# ── thread_messages() -- the ordered log an operator reads (#37) ────────────
+
+@pytest.mark.asyncio
+async def test_thread_messages_returns_rows_in_order():
+    rows = [
+        MagicMock(_mapping={"sender": "user", "content": "hola", "author": None, "created_at": "t1"}),
+        MagicMock(_mapping={"sender": "operator", "content": "buenas", "author": "María", "created_at": "t2"}),
+    ]
+    result = MagicMock()
+    result.fetchall.return_value = rows
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=result)
+    ctx = AsyncMock()
+    ctx.__aenter__ = AsyncMock(return_value=session)
+    ctx.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("app.services.human_control.AsyncSessionLocal", return_value=ctx):
+        messages = await thread_messages("tenant:acme:user:42:channel:telegram")
+
+    assert messages == [
+        {"sender": "user", "content": "hola", "author": None, "created_at": "t1"},
+        {"sender": "operator", "content": "buenas", "author": "María", "created_at": "t2"},
+    ]

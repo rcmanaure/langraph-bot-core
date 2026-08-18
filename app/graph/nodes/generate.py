@@ -325,7 +325,7 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         # or tracing consumer reads for the turn that just escalated.
         content = f"{content.rstrip()}\n\n{HUMAN_HANDOFF}"
         response = response.model_copy(update={"content": content})
-        await human_control.start(state["tenant_id"], state["thread_id"])
+        await human_control.start(state["tenant_id"], state["thread_id"], state.get("chat_id", ""))
 
     # True only for a genuine unconfirmed-RAG offer that didn't itself
     # escalate -- catalog/staff turns and confirmed matches all close the

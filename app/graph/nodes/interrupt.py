@@ -16,7 +16,7 @@ async def interrupt_node(state: AgentState) -> dict:
     # the escalation must be idempotent — human_control.start() only writes
     # the audit row the first time this thread hits an open interrupt, not
     # on each resume replay.
-    await human_control.start(state["tenant_id"], thread_id)
+    await human_control.start(state["tenant_id"], thread_id, state.get("chat_id", ""))
 
     # Suspend graph — resumes via POST /operator/resume/{thread_id}
     # with Command(resume=operator_text)

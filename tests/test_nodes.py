@@ -393,8 +393,22 @@ async def test_interrupt_node_opens_the_escalation_before_suspending(base_state)
     ):
         result = await interrupt_node(base_state)
 
-    start.assert_awaited_once_with(base_state["tenant_id"], base_state["thread_id"])
+    start.assert_awaited_once_with(base_state["tenant_id"], base_state["thread_id"], "")
     assert result["answer"] == "respuesta del operador"
+
+
+@pytest.mark.asyncio
+async def test_interrupt_node_forwards_chat_id_to_human_control_start(base_state):
+    """An operator reply outside a webhook needs the channel's delivery
+    target, which differs from user_id on Telegram (#37)."""
+    base_state["chat_id"] = "998877"
+    with (
+        patch("app.graph.nodes.interrupt.human_control.start", new_callable=AsyncMock) as start,
+        patch("app.graph.nodes.interrupt.interrupt", MagicMock(return_value="respuesta del operador")),
+    ):
+        await interrupt_node(base_state)
+
+    start.assert_awaited_once_with(base_state["tenant_id"], base_state["thread_id"], "998877")
 
 
 # ---------------------------------------------------------------------------
@@ -854,7 +868,7 @@ async def test_low_max_similarity_escalates_after_answering(base_state):
 
     assert result["answer"].startswith("ok")
     assert HUMAN_HANDOFF in result["answer"]
-    start.assert_awaited_once_with(base_state["tenant_id"], base_state["thread_id"])
+    start.assert_awaited_once_with(base_state["tenant_id"], base_state["thread_id"], "")
 
 
 @pytest.mark.asyncio
@@ -968,7 +982,7 @@ async def test_rejection_after_an_approximation_escalates(base_state):
     result, start = await _run_generate_after_rejection(base_state, chunks, awaiting_confirmation=True)
 
     assert HUMAN_HANDOFF in result["answer"]
-    start.assert_awaited_once_with(base_state["tenant_id"], base_state["thread_id"])
+    start.assert_awaited_once_with(base_state["tenant_id"], base_state["thread_id"], "")
 
 
 @pytest.mark.asyncio

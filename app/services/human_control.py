@@ -15,12 +15,15 @@ from app.graph.thread import parse_thread_part
 logger = logging.getLogger(__name__)
 
 
-async def start(tenant_slug: str, thread_id: str) -> None:
+async def start(tenant_slug: str, thread_id: str, chat_id: str = "") -> None:
     """Open the escalation that puts a thread under human control -- the
     same conversation_audit row interrupt_node's reactive suspend writes, and
     the one is_under_human_control() below reads. Idempotent: a thread that
     already has an open row (e.g. interrupt_node re-running on a resume, or
-    a redelivered webhook racing this same insert) is left alone.
+    a redelivered webhook racing this same insert) is left alone -- so
+    chat_id is captured only from the turn that actually opens the
+    escalation, which is exactly the guarantee an operator reply needs (see
+    ADR-009 / #37: "persisted when the thread escalates").
     """
     try:
         async with AsyncSessionLocal() as db:
@@ -41,13 +44,14 @@ async def start(tenant_slug: str, thread_id: str) -> None:
                     text("""
                         INSERT INTO conversation_audit
                             (id, tenant_id, thread_id, user_id, channel,
-                             interrupt_started_at, created_at)
+                             chat_id, interrupt_started_at, created_at)
                         SELECT
                             :id,
                             t.id,
                             :thread,
                             :user_id,
                             :channel,
+                            :chat_id,
                             :now,
                             :now
                         FROM tenants t WHERE t.slug = :slug
@@ -57,6 +61,7 @@ async def start(tenant_slug: str, thread_id: str) -> None:
                         "thread": thread_id,
                         "user_id": parse_thread_part(thread_id, "user"),
                         "channel": parse_thread_part(thread_id, "channel"),
+                        "chat_id": chat_id or None,
                         "now": datetime.now(timezone.utc),
                         "slug": tenant_slug,
                     },
@@ -99,26 +104,30 @@ async def is_under_human_control(tenant_slug: str, channel: str, user_id: str) -
         return False
 
 
-async def record_message(tenant_slug: str, thread_id: str, sender: str, content: str) -> None:
+async def record_message(
+    tenant_slug: str, thread_id: str, sender: str, content: str, author: str | None = None,
+) -> None:
     """Append to the ordered log the operator inbox reads from.
 
     Best-effort: a logging failure here must not turn into a second reply to
     the user, and the caller (app/channels/turn.py) has already decided not
-    to send anything back.
+    to send anything back. `author` is the operator's free-text self-declared
+    name (see CONTEXT.md's Operator entry) -- always None for sender="user".
     """
     try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 text("""
                     INSERT INTO human_control_messages
-                        (tenant_id, thread_id, sender, content)
-                    SELECT t.id, :thread, :sender, :content
+                        (tenant_id, thread_id, sender, content, author)
+                    SELECT t.id, :thread, :sender, :content, :author
                       FROM tenants t WHERE t.slug = :slug
                 """),
                 {
                     "thread": thread_id,
                     "sender": sender,
                     "content": content,
+                    "author": author,
                     "slug": tenant_slug,
                 },
             )
@@ -130,3 +139,19 @@ async def record_message(tenant_slug: str, thread_id: str, sender: str, content:
                 logger.warning("human_control_record_no_tenant thread=%s slug=%s", thread_id, tenant_slug)
     except Exception as exc:
         logger.warning("human_control_record_failed thread=%s err=%s", thread_id, exc)
+
+
+async def thread_messages(thread_id: str) -> list[dict]:
+    """The ordered human_control_messages log for one thread -- what a user
+    sent while under control, and what an operator replied. Oldest first."""
+    async with AsyncSessionLocal() as db:
+        rows = await db.execute(
+            text("""
+                SELECT sender, content, author, created_at
+                  FROM human_control_messages
+                 WHERE thread_id = :thread
+                 ORDER BY created_at
+            """),
+            {"thread": thread_id},
+        )
+        return [dict(r._mapping) for r in rows.fetchall()]
