@@ -6,7 +6,9 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import AsyncSessionLocal
+from app.messages import HUMAN_HANDOFF
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
+from app.services import human_control
 from app.services.llm import get_chat_llm
 from app.services.rag import cap_chunks_to_tokens, token_counter
 from app.state import AgentState
@@ -221,6 +223,31 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
             chunks = [{"content": r.content} for r in result.fetchall()]
             chunks = cap_chunks_to_tokens(chunks, settings.retrieval_max_tokens)
 
+    # Escalation signal: nothing in the retrieved pool is close to what was
+    # asked. Reads the MAXIMUM similarity across the pool — the opposite of
+    # _has_confirmed_match's chunks[0], deliberately: that guards against a
+    # false confirmation, this guards against a false escalation, and chunk
+    # order is fused/reranked so chunks[0] is frequently not the highest-
+    # similarity chunk (see ADR-009). Catalog and staff never escalate — a
+    # catalog dump may carry no similarity at all, and a staff member IS the
+    # business, nobody to hand them to. An empty pool never escalates either:
+    # it means the tenant was never indexed, an operational fault, not a
+    # conversation. Computed fresh from this turn's own chunks, never stored
+    # in state, so a prior turn's escalation can't leak into this one.
+    escalate = False
+    if not is_catalog and not is_staff:
+        similarities = [c["similarity"] for c in chunks if "similarity" in c]
+        if similarities and max(similarities) < settings.handoff_threshold:
+            escalate = True
+            logger.info(
+                "generate_escalating tenant=%s max_similarity=%.3f threshold=%.3f",
+                state["tenant_id"], max(similarities), settings.handoff_threshold,
+            )
+            # Pointing at a contact URL while queueing a person for the same
+            # question is two answers to one question (#27's staff variant
+            # already suppresses this for the same reason).
+            tenant_ctx["contact_hint"] = ""
+
     context = "Sin contexto disponible." if not chunks else "\n\n---\n\n".join(c["content"] for c in chunks)
     template = _CATALOG_SYSTEM if is_catalog else _RAG_SYSTEM
     if is_catalog:
@@ -270,4 +297,16 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
             [SystemMessage(content=system)] + trimmed
         )
 
-    return {"answer": response.content, "messages": [response]}
+    content = response.content
+    if escalate:
+        # The bot answers, then escalates — closes with the same handover
+        # line the reactive suspend path sends, never the model's own words:
+        # this is a decision computed in code, not something it narrates.
+        # model_copy (not a fresh AIMessage) keeps response_metadata/
+        # usage_metadata/id intact — this is the message a token-accounting
+        # or tracing consumer reads for the turn that just escalated.
+        content = f"{content.rstrip()}\n\n{HUMAN_HANDOFF}"
+        response = response.model_copy(update={"content": content})
+        await human_control.start(state["tenant_id"], state["thread_id"])
+
+    return {"answer": content, "messages": [response]}

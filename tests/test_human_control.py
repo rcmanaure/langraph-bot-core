@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.human_control import is_under_human_control, record_message
+from app.services.human_control import is_under_human_control, record_message, start
 
 
 def _mock_db(row=None, rowcount=1):
@@ -17,6 +17,39 @@ def _mock_db(row=None, rowcount=1):
     ctx.__aenter__ = AsyncMock(return_value=session)
     ctx.__aexit__ = AsyncMock(return_value=None)
     return session, ctx
+
+
+# ── start() -- opens the escalation, idempotently ───────────────────────────
+
+@pytest.mark.asyncio
+async def test_start_inserts_audit_row_when_none_open():
+    """First time this thread escalates: no open row yet -> insert one."""
+    session, ctx = _mock_db(row=None)
+    with patch("app.services.human_control.AsyncSessionLocal", return_value=ctx):
+        await start("acme", "tenant:acme:user:42:channel:telegram")
+
+    # SELECT (existence check) + INSERT
+    assert session.execute.await_count == 2
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_start_skips_duplicate_insert_when_already_open():
+    """interrupt_node re-runs this on every resume; a second escalation
+    trigger firing on an already-escalated thread must not duplicate it."""
+    session, ctx = _mock_db(row=(1,))
+    with patch("app.services.human_control.AsyncSessionLocal", return_value=ctx):
+        await start("acme", "tenant:acme:user:42:channel:telegram")
+
+    # Only the SELECT ran — no INSERT, no commit
+    assert session.execute.await_count == 1
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_failure_never_raises():
+    with patch("app.services.human_control.AsyncSessionLocal", side_effect=RuntimeError("db down")):
+        await start("acme", "tenant:acme:user:42:channel:telegram")  # must not raise
 
 
 @pytest.mark.asyncio

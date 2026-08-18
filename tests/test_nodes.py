@@ -1,4 +1,5 @@
 """Unit tests for graph nodes — all LLM/DB calls are mocked."""
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,6 +13,7 @@ from app.graph.nodes.triage import triage
 from app.graph.nodes.update_profile import update_profile
 from app.graph.nodes.validate import validate
 from app.graph.nodes.validate_output import validate_output
+from app.messages import HUMAN_HANDOFF
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 
 # ---------------------------------------------------------------------------
@@ -338,51 +340,19 @@ async def test_validate_output_fallback_on_double_fail(base_state):
 
 
 # ---------------------------------------------------------------------------
-# interrupt_node — audit insert must be idempotent across resume re-runs
+# interrupt_node — opening the escalation delegates to human_control.start(),
+# which is unit-tested for idempotency in tests/test_human_control.py.
 # ---------------------------------------------------------------------------
 
-def _mock_db(select_result):
-    mock_result = MagicMock()
-    mock_result.first.return_value = select_result
-    mock_db = AsyncMock()
-    mock_db.execute = AsyncMock(return_value=mock_result)
-    mock_db.commit = AsyncMock()
-    mock_db.__aenter__ = AsyncMock(return_value=mock_db)
-    mock_db.__aexit__ = AsyncMock(return_value=False)
-    return mock_db
-
-
 @pytest.mark.asyncio
-async def test_interrupt_node_inserts_audit_row_when_none_open(base_state):
-    """First time hitting the interrupt: no open row yet -> insert one."""
-    mock_db = _mock_db(select_result=None)
-
+async def test_interrupt_node_opens_the_escalation_before_suspending(base_state):
     with (
-        patch("app.graph.nodes.interrupt.AsyncSessionLocal", MagicMock(return_value=mock_db)),
+        patch("app.graph.nodes.interrupt.human_control.start", new_callable=AsyncMock) as start,
         patch("app.graph.nodes.interrupt.interrupt", MagicMock(return_value="respuesta del operador")),
     ):
         result = await interrupt_node(base_state)
 
-    # SELECT (existence check) + INSERT
-    assert mock_db.execute.await_count == 2
-    mock_db.commit.assert_awaited_once()
-    assert result["answer"] == "respuesta del operador"
-
-
-@pytest.mark.asyncio
-async def test_interrupt_node_skips_duplicate_insert_on_resume(base_state):
-    """Resuming re-runs the node from the top; an already-open row must not be duplicated."""
-    mock_db = _mock_db(select_result=(1,))
-
-    with (
-        patch("app.graph.nodes.interrupt.AsyncSessionLocal", MagicMock(return_value=mock_db)),
-        patch("app.graph.nodes.interrupt.interrupt", MagicMock(return_value="respuesta del operador")),
-    ):
-        result = await interrupt_node(base_state)
-
-    # Only the SELECT ran — no INSERT, no commit
-    assert mock_db.execute.await_count == 1
-    mock_db.commit.assert_not_awaited()
+    start.assert_awaited_once_with(base_state["tenant_id"], base_state["thread_id"])
     assert result["answer"] == "respuesta del operador"
 
 
@@ -790,8 +760,145 @@ async def test_staff_reply_never_contains_escalation_line(base_state):
 async def test_patient_reply_unchanged_by_staff_variant(base_state):
     from app.graph.nodes.generate import _REGISTER_FLOOR
 
-    chunks = [{"content": "x", "similarity": 0.1}]
+    # Below exact_match_threshold but above handoff_threshold -- unconfirmed
+    # match, not an automatic escalation (which would suppress contact_hint
+    # for patients too; see #36).
+    chunks = [{"content": "x", "similarity": 0.5}]
     system_content = await _run_generate_as(base_state, chunks, is_staff=False)
 
     assert _REGISTER_FLOOR in system_content
     assert "acme.example/contact" in system_content
+
+
+# ---------------------------------------------------------------------------
+# generate — automatic escalation when nothing in the corpus is close (#36).
+# The bot answers, then escalates: the reply keeps the model's own content
+# and closes with the same handover line the reactive suspend path sends.
+# ---------------------------------------------------------------------------
+
+async def _run_generate_full(
+    base_state, chunks, *, is_staff=False, is_catalog=False,
+    contact_url="https://acme.example/contact", llm_content="ok",
+):
+    base_state["retrieved_chunks"] = chunks
+    base_state["is_staff"] = is_staff
+    if is_catalog:
+        base_state["triage_decision"] = "catalog"
+    runtime = _mock_runtime(get_result=None)
+
+    mock_llm = MagicMock()
+    mock_llm.model_name = "test-model"
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=llm_content))
+
+    with (
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch(
+            "app.graph.nodes.generate._load_tenant",
+            AsyncMock(return_value={
+                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION,
+                "contact_hint": "" if is_staff else f"\nSi necesita más ayuda, contacte: {contact_url}",
+            }),
+        ),
+        patch("app.graph.nodes.generate.human_control.start", new_callable=AsyncMock) as start,
+    ):
+        result = await generate(base_state, runtime=runtime)
+
+    return result, start
+
+
+@pytest.mark.asyncio
+async def test_low_max_similarity_escalates_after_answering(base_state):
+    chunks = [{"content": "x", "similarity": 0.1}]
+    result, start = await _run_generate_full(base_state, chunks)
+
+    assert result["answer"].startswith("ok")
+    assert HUMAN_HANDOFF in result["answer"]
+    start.assert_awaited_once_with(base_state["tenant_id"], base_state["thread_id"])
+
+
+@pytest.mark.asyncio
+async def test_high_max_similarity_does_not_escalate(base_state):
+    chunks = [{"content": "x", "similarity": 0.9}]
+    result, start = await _run_generate_full(base_state, chunks)
+
+    assert result["answer"] == "ok"
+    assert HUMAN_HANDOFF not in result["answer"]
+    start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_low_first_chunk_high_later_chunk_does_not_escalate(base_state):
+    """chunks[0] can rank first on a keyword hit despite a low dense score --
+    the floor reads the pool's MAXIMUM, not the first chunk (see ADR-009)."""
+    chunks = [{"content": "a", "similarity": 0.1}, {"content": "b", "similarity": 0.9}]
+    result, start = await _run_generate_full(base_state, chunks)
+
+    assert HUMAN_HANDOFF not in result["answer"]
+    start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_catalog_never_escalates(base_state):
+    chunks = [{"content": "x", "similarity": 0.01}]
+    result, start = await _run_generate_full(base_state, chunks, is_catalog=True)
+
+    assert HUMAN_HANDOFF not in result["answer"]
+    start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_staff_never_escalates(base_state):
+    chunks = [{"content": "x", "similarity": 0.01}]
+    result, start = await _run_generate_full(base_state, chunks, is_staff=True)
+
+    assert HUMAN_HANDOFF not in result["answer"]
+    start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_empty_chunk_pool_never_escalates(base_state):
+    """An empty pool means the tenant was never indexed -- an operational
+    fault, not a conversation to hand off."""
+    result, start = await _run_generate_full(base_state, [])
+
+    assert HUMAN_HANDOFF not in result["answer"]
+    start.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handoff_threshold_is_configurable(base_state):
+    chunks = [{"content": "x", "similarity": 0.5}]
+    with patch("app.graph.nodes.generate.settings.handoff_threshold", 0.6):
+        result, start = await _run_generate_full(base_state, chunks)
+
+    assert HUMAN_HANDOFF in result["answer"]
+    start.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_escalation_logs_the_triggering_similarity(base_state, caplog):
+    chunks = [{"content": "x", "similarity": 0.1}]
+    with caplog.at_level(logging.INFO, logger="app.graph.nodes.generate"):
+        await _run_generate_full(base_state, chunks)
+
+    assert any("generate_escalating" in r.message for r in caplog.records)
+    assert any("0.100" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_escalating_reply_suppresses_the_contact_hint(base_state):
+    chunks = [{"content": "x", "similarity": 0.1}]
+    result, _ = await _run_generate_full(base_state, chunks)
+
+    assert "acme.example/contact" not in result["answer"]
+
+
+@pytest.mark.asyncio
+async def test_escalation_is_not_persisted_in_state(base_state):
+    """Computed fresh from this turn's own chunks and returned only as
+    answer/messages -- nothing new is added to AgentState, so a stale flag
+    from a prior turn can't cause a later turn to escalate on its own."""
+    chunks = [{"content": "x", "similarity": 0.1}]
+    result, _ = await _run_generate_full(base_state, chunks)
+
+    assert set(result.keys()) == {"answer", "messages"}

@@ -238,12 +238,14 @@ async def test_compiled_graph_register_variant_per_actor(is_staff):
     db = _mock_db_session(tenant_row)
 
     with (
-        # Low similarity -> triggers the negative-confirmation rule, the one
-        # that carries the contact/escalation line for patients.
+        # Below exact_match_threshold but above handoff_threshold -> triggers
+        # the negative-confirmation rule (contact/escalation line) without
+        # crossing into an automatic escalation (see ADR-009 / #36), which
+        # would suppress the contact hint for patients too.
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[
-            {"content": "x", "similarity": 0.1},
+            {"content": "x", "similarity": 0.5},
         ])),
-        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[{"content": "x", "similarity": 0.1}])),
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[{"content": "x", "similarity": 0.5}])),
         patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),

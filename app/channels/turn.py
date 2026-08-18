@@ -15,6 +15,7 @@ from langchain_core.messages import HumanMessage
 from app.channels.base import ChannelAdapter, Inbound, MediaRef, MediaTooLarge
 from app.channels.silent import SilentAdapter
 from app.config import MAX_MEDIA_BYTES, settings
+from app.messages import HUMAN_HANDOFF
 from app.services.human_control import is_under_human_control, record_message
 from app.services.redaction import redact_document_numbers
 from app.services.staff import resolve_staff
@@ -45,8 +46,8 @@ GRAPH_ERROR = "Lo siento, ocurrió un error. Por favor intente de nuevo."
 EMPTY_ANSWER = "Lo siento, no pude generar una respuesta."
 # Sent for every cause of an escalation (see docs/adr/ADR-009-human-control.md)
 # — the user doesn't need to know whether they asked for a person or the bot
-# ran out of things to say.
-HUMAN_HANDOFF = "En breve lo va a atender una persona. Por favor, espere un momento."
+# ran out of things to say. Shared with generate.py's automatic-escalation
+# path (app/messages.py) rather than defined twice.
 
 
 async def run_turn(adapter: ChannelAdapter, inbound: Inbound, graph) -> None:

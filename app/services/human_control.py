@@ -1,13 +1,74 @@
-"""Whether a thread is currently held by an operator, and recording what
-arrives while it is. See docs/adr/ADR-009-human-control.md."""
+"""Whether a thread is currently held by an operator, moving it into that
+state, and recording what arrives while it is. See
+docs/adr/ADR-009-human-control.md."""
 import logging
+import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from app.channels.base import thread_id_for
 from app.db import AsyncSessionLocal
+from app.graph.thread import parse_thread_part
 
 logger = logging.getLogger(__name__)
+
+
+async def start(tenant_slug: str, thread_id: str) -> None:
+    """Open the escalation that puts a thread under human control -- the
+    same conversation_audit row interrupt_node's reactive suspend writes, and
+    the one is_under_human_control() below reads. Idempotent: a thread that
+    already has an open row (e.g. interrupt_node re-running on a resume, or
+    a redelivered webhook racing this same insert) is left alone.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            existing = (await db.execute(
+                text("""
+                    SELECT 1 FROM conversation_audit
+                     WHERE thread_id = :thread
+                       AND expired_at IS NULL
+                       AND interrupt_started_at IS NOT NULL
+                """),
+                {"thread": thread_id},
+            )).first()
+            if existing:
+                return
+
+            try:
+                await db.execute(
+                    text("""
+                        INSERT INTO conversation_audit
+                            (id, tenant_id, thread_id, user_id, channel,
+                             interrupt_started_at, created_at)
+                        SELECT
+                            :id,
+                            t.id,
+                            :thread,
+                            :user_id,
+                            :channel,
+                            :now,
+                            :now
+                        FROM tenants t WHERE t.slug = :slug
+                    """),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "thread": thread_id,
+                        "user_id": parse_thread_part(thread_id, "user"),
+                        "channel": parse_thread_part(thread_id, "channel"),
+                        "now": datetime.now(timezone.utc),
+                        "slug": tenant_slug,
+                    },
+                )
+                await db.commit()
+            except IntegrityError:
+                # Lost the race to a concurrent insert for the same thread —
+                # benign, the unique partial index guarantees only one open
+                # row exists.
+                await db.rollback()
+    except Exception as exc:
+        logger.warning("human_control_start_failed thread=%s error=%s", thread_id, exc)
 
 
 async def is_under_human_control(tenant_slug: str, channel: str, user_id: str) -> bool:

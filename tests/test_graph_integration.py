@@ -11,6 +11,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.graph.builder import build_graph
+from app.messages import HUMAN_HANDOFF
 
 TENANT_ROW = MagicMock(expertise_area="diagnóstico histológico", contact_url=None)
 
@@ -285,7 +286,7 @@ async def test_human_escalation_routes_through_interrupt_skipping_retrieve_and_g
     with (
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
         patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
-        patch("app.graph.nodes.interrupt.AsyncSessionLocal", MagicMock(return_value=interrupt_db)),
+        patch("app.services.human_control.AsyncSessionLocal", MagicMock(return_value=interrupt_db)),
         patch("app.graph.nodes.interrupt.interrupt", MagicMock(return_value="un operador te va a contactar")),
     ):
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
@@ -319,7 +320,7 @@ async def test_human_escalation_actually_suspends_the_graph():
     with (
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
         patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
-        patch("app.graph.nodes.interrupt.AsyncSessionLocal", MagicMock(return_value=interrupt_db)),
+        patch("app.services.human_control.AsyncSessionLocal", MagicMock(return_value=interrupt_db)),
     ):
         result = await graph.ainvoke(
             state, config={"configurable": {"thread_id": state["thread_id"]}}
@@ -328,3 +329,45 @@ async def test_human_escalation_actually_suspends_the_graph():
     mock_retrieve.assert_not_called()
     assert "__interrupt__" in result
     assert not result.get("answer")
+
+
+@pytest.mark.asyncio
+async def test_low_similarity_pool_escalates_through_the_compiled_graph():
+    """End to end: retrieve() runs the real hybrid-search query, generate()
+    reads its similarity and escalates — the graph completes (no suspend),
+    the reply keeps the bot's own answer and closes with the handover
+    message, and the escalation opens the same audit row the reactive
+    suspend path writes. See docs/adr/ADR-009-human-control.md / #36."""
+    graph = build_graph(checkpointer=None)
+    state = _initial_state("cuanto cuesta un examen que no existe")
+
+    # A single row well below handoff_threshold (0.30) -- len(chunks)=1 is
+    # also <= top_k_results, so rerank_chunks() short-circuits without an
+    # HTTP call, keeping this test to the DB/LLM seams only.
+    rows = [_db_row("SRP009 | Algo no relacionado | $10.00", similarity=0.1)]
+    llm = _mock_chat_llm("No tenemos ese examen en particular.", triage_decision="rag")
+    db = _mock_db_session(fetchall_rows=rows)
+
+    audit_db = AsyncMock()
+    audit_result = MagicMock()
+    audit_result.first.return_value = None  # no open escalation yet
+    audit_db.execute = AsyncMock(return_value=audit_result)
+    audit_db.commit = AsyncMock()
+    audit_db.__aenter__ = AsyncMock(return_value=audit_db)
+    audit_db.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.services.human_control.AsyncSessionLocal", MagicMock(return_value=audit_db)),
+    ):
+        result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
+
+    assert "__interrupt__" not in result  # bot answers this turn, graph does not suspend
+    assert "No tenemos ese examen en particular." in result["answer"]
+    assert HUMAN_HANDOFF in result["answer"]
+    audit_db.commit.assert_awaited_once()  # human_control.start() opened the escalation

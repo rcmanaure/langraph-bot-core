@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     hnsw_ef_search: int = 160
     hnsw_iterative_scan: str = "relaxed_order"
     exact_match_threshold: float = 0.65
+    # Below this, the retrieved pool's MAXIMUM similarity means nothing in
+    # the corpus is close to what was asked -- escalate rather than answer
+    # from an unrelated chunk. Unset/blind default (see ADR-009); every
+    # escalation logs the similarity that triggered it for calibration.
+    handoff_threshold: float = 0.30
     # Hybrid search (dense + keyword, fused via RRF)
     hybrid_candidate_k: int = 30
     rrf_k: int = 60
