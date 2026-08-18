@@ -22,30 +22,31 @@ services:
 
   api:
     build: .
+    env_file: .env
     # Migrations must run before uvicorn starts (see entrypoint.sh, which
     # prod uses) -- a bare uvicorn command here skips them, so a fresh dev
     # DB crashes on boot with UndefinedTableError. Found live: cold dev
     # stack failed on _cleanup_stuck_jobs() querying index_jobs pre-migration.
     command: ["sh", "-c", "alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]
-    environment:
-      - ENVIRONMENT=development
-      - DEBUG=true
-      - LOG_LEVEL=info
-      - DATABASE_URL=postgresql://${DB_USER:-ragbot}:${DB_PASSWORD:-ragbot}@postgres:5432/${DB_NAME:-ragbot}
-      # Testing only -- real env vars here override .env for THIS container
-      # only (pydantic-settings prefers real env over the .env file), so
-      # local pytest runs (which read .env directly, no override) stay on
-      # defaults. Putting these in .env instead broke 3 vision cache tests
-      # that assume caching is on by default -- found live. Revert to true
-      # (or remove) once done actively testing.
-      - VISION_CACHE_ENABLED=false
-      - EMBEDDING_CACHE_ENABLED=false
-      - RETRIEVE_CACHE_ENABLED=false
-      # Phoenix tracing on for this QA session -- endpoint must be the
-      # compose service name (phoenix:4317), "localhost" from inside this
-      # container is itself, not the phoenix container.
-      - OBSERVABILITY_ENABLED=true
-      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+    # environment:
+    #   - ENVIRONMENT=development
+    #   - DEBUG=true
+    #   - LOG_LEVEL=info
+    #   - DATABASE_URL=postgresql://${DB_USER:-ragbot}:${DB_PASSWORD:-ragbot}@postgres:5432/${DB_NAME:-ragbot}
+    #   # Testing only -- real env vars here override .env for THIS container
+    #   # only (pydantic-settings prefers real env over the .env file), so
+    #   # local pytest runs (which read .env directly, no override) stay on
+    #   # defaults. Putting these in .env instead broke 3 vision cache tests
+    #   # that assume caching is on by default -- found live. Revert to true
+    #   # (or remove) once done actively testing.
+    #   - VISION_CACHE_ENABLED=false
+    #   - EMBEDDING_CACHE_ENABLED=false
+    #   - RETRIEVE_CACHE_ENABLED=false
+    #   # Phoenix tracing on for this QA session -- endpoint must be the
+    #   # compose service name (phoenix:4317), "localhost" from inside this
+    #   # container is itself, not the phoenix container.
+    #   - OBSERVABILITY_ENABLED=true
+    #   - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
     ports:
       - "8000:8000"
     volumes:
