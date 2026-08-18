@@ -54,6 +54,19 @@ def _ctx(row=None, rows=None):
     return ctx
 
 
+# ── GET /operator/ui -- the inbox page itself (#40) ─────────────────────────
+
+@pytest.mark.asyncio
+async def test_operator_ui_serves_html_without_auth():
+    """No operator-key gate on the page shell itself -- a normal page
+    navigation can't attach a custom header. Auth happens client-side (the
+    page's own login form) before any API call, same as /admin/ui."""
+    app = make_app(bypass_auth=False)
+    r = await _request(app, "get", "/operator/ui")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+
+
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -130,8 +143,13 @@ async def test_get_thread_concatenates_bot_conversation_and_human_control_log():
         ]
     }))
     app = make_app(graph=graph)
+    escalation_started_at = datetime(2026, 8, 18, 11, 55, tzinfo=timezone.utc)
 
-    with patch("app.routes.operator.human_control.thread_messages", new_callable=AsyncMock) as msgs:
+    with (
+        patch("app.routes.operator.AsyncSessionLocal",
+              return_value=_ctx(row=SimpleNamespace(interrupt_started_at=escalation_started_at))),
+        patch("app.routes.operator.human_control.thread_messages", new_callable=AsyncMock) as msgs,
+    ):
         msgs.return_value = [
             {"sender": "user", "content": "no, gracias", "author": None,
              "created_at": datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc)},
@@ -141,6 +159,7 @@ async def test_get_thread_concatenates_bot_conversation_and_human_control_log():
         r = await _request(app, "get", f"/operator/threads/{THREAD_ID}")
 
     assert r.status_code == 200
+    msgs.assert_awaited_once_with(THREAD_ID, since=escalation_started_at)
     body = r.json()
     senders = [m["sender"] for m in body["messages"]]
     assert senders == ["user", "bot", "user", "operator"]
@@ -152,12 +171,35 @@ async def test_get_thread_concatenates_bot_conversation_and_human_control_log():
 @pytest.mark.asyncio
 async def test_get_thread_with_no_graph_still_returns_human_control_log():
     app = make_app(graph=None)
-    with patch("app.routes.operator.human_control.thread_messages", new_callable=AsyncMock) as msgs:
+    escalation_started_at = datetime(2026, 8, 18, 11, 55, tzinfo=timezone.utc)
+
+    with (
+        patch("app.routes.operator.AsyncSessionLocal",
+              return_value=_ctx(row=SimpleNamespace(interrupt_started_at=escalation_started_at))),
+        patch("app.routes.operator.human_control.thread_messages", new_callable=AsyncMock) as msgs,
+    ):
         msgs.return_value = [{"sender": "user", "content": "hola", "author": None, "created_at": None}]
         r = await _request(app, "get", f"/operator/threads/{THREAD_ID}")
 
     assert r.status_code == 200
     assert r.json()["messages"] == [{"sender": "user", "content": "hola", "author": None, "created_at": None}]
+
+
+@pytest.mark.asyncio
+async def test_get_thread_with_no_open_escalation_omits_human_control_log():
+    """thread_id is reused across escalations -- without an open escalation
+    to scope to, showing the full historical human_control_messages log
+    would mix in an old, already-resolved exchange (#40)."""
+    app = make_app(graph=None)
+    with (
+        patch("app.routes.operator.AsyncSessionLocal", return_value=_ctx(row=None)),
+        patch("app.routes.operator.human_control.thread_messages", new_callable=AsyncMock) as msgs,
+    ):
+        r = await _request(app, "get", f"/operator/threads/{THREAD_ID}")
+
+    assert r.status_code == 200
+    assert r.json()["messages"] == []
+    msgs.assert_not_awaited()
 
 
 # ── GET /operator/pending ───────────────────────────────────────────────────
@@ -170,11 +212,13 @@ async def test_pending_reports_tenant_slug_and_wa_window():
             "thread_id": WA_THREAD_ID, "user_id": "555", "channel": "whatsapp",
             "user_message": "hola", "interrupt_started_at": now,
             "tenant_slug": "acme", "last_user_message_at": now - timedelta(hours=1),
+            "attending": "María",
         }),
         MagicMock(_mapping={
             "thread_id": THREAD_ID, "user_id": "42", "channel": "telegram",
             "user_message": "hola", "interrupt_started_at": now,
             "tenant_slug": "acme", "last_user_message_at": None,
+            "attending": None,
         }),
     ]
     app = make_app()
@@ -187,6 +231,22 @@ async def test_pending_reports_tenant_slug_and_wa_window():
     # ~23h left of the 24h window
     assert 22 * 3600 < body[0]["wa_window_remaining_seconds"] < 23 * 3600
     assert body[1]["wa_window_remaining_seconds"] is None  # non-WhatsApp: no window
+    assert body[0]["attending"] == "María"
+    assert body[1]["attending"] is None  # nobody has replied to this one yet
+
+
+@pytest.mark.asyncio
+async def test_pending_scopes_attending_to_the_current_escalation():
+    """thread_id is reused across escalations -- the query must not surface
+    an operator's name from a prior, already-closed escalation as though
+    they're attending this one (#40, same scoping as #39's expiry fix)."""
+    ctx = _ctx(rows=[])
+    app = make_app()
+    with patch("app.routes.operator.AsyncSessionLocal", return_value=ctx):
+        await _request(app, "get", "/operator/pending")
+
+    sent_sql = str(ctx.__aenter__.return_value.execute.await_args.args[0])
+    assert "hcm.created_at >= ca.interrupt_started_at" in sent_sql
 
 
 # ── POST /operator/threads/{thread_id}/messages ─────────────────────────────

@@ -197,3 +197,19 @@ async def test_thread_messages_returns_rows_in_order():
         {"sender": "user", "content": "hola", "author": None, "created_at": "t1"},
         {"sender": "operator", "content": "buenas", "author": "María", "created_at": "t2"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_thread_messages_scopes_to_since_when_given():
+    """thread_id is reused across escalations -- a currently-open
+    escalation's read must not silently include a prior, already-closed
+    escalation's messages (#40)."""
+    session, ctx = _mock_db(rowcount=0)
+    session.execute.return_value.fetchall.return_value = []
+    escalation_started_at = "2026-08-18T11:55:00+00:00"
+
+    with patch("app.services.human_control.AsyncSessionLocal", return_value=ctx):
+        await thread_messages("tenant:acme:user:42:channel:telegram", since=escalation_started_at)
+
+    params = session.execute.await_args.args[1]
+    assert params["since"] == escalation_started_at

@@ -14,6 +14,17 @@ from app.graph.thread import parse_thread_part
 
 logger = logging.getLogger(__name__)
 
+# Shared by every raw-SQL predicate that needs to tell "an operator message
+# belonging to THIS escalation" from one left over by a prior, already-closed
+# escalation on the same thread_id (thread_id is reused across escalations --
+# see thread_id_for). Interpolated as a literal SQL fragment (a fixed
+# constant, not request data) into app/scheduler.py's expiry predicate,
+# list_pending's "attending" lookup, and thread_messages() below -- one
+# definition instead of three that can silently drift apart (#39, #40).
+OPERATOR_MESSAGE_SINCE_ESCALATION_SQL = (
+    "hcm.sender = 'operator' AND hcm.created_at >= ca.interrupt_started_at"
+)
+
 
 async def start(tenant_slug: str, thread_id: str, chat_id: str = "") -> None:
     """Open the escalation that puts a thread under human control -- the
@@ -160,17 +171,26 @@ async def end(thread_id: str) -> None:
         await db.commit()
 
 
-async def thread_messages(thread_id: str) -> list[dict]:
+async def thread_messages(thread_id: str, since: datetime | None = None) -> list[dict]:
     """The ordered human_control_messages log for one thread -- what a user
-    sent while under control, and what an operator replied. Oldest first."""
+    sent while under control, and what an operator replied. Oldest first.
+
+    `since` scopes to one escalation's messages (pass its interrupt_started_at)
+    -- thread_id is reused across escalations, so an unscoped read of a
+    currently-open escalation would mix in an old, already-resolved
+    exchange (#40; same scoping app/scheduler.py's expiry predicate and
+    list_pending's "attending" lookup already use, via
+    OPERATOR_MESSAGE_SINCE_ESCALATION_SQL). Omit only when there genuinely
+    is no current escalation to scope to."""
     async with AsyncSessionLocal() as db:
         rows = await db.execute(
             text("""
                 SELECT sender, content, author, created_at
                   FROM human_control_messages
                  WHERE thread_id = :thread
+                   AND (:since IS NULL OR created_at >= :since)
                  ORDER BY created_at
             """),
-            {"thread": thread_id},
+            {"thread": thread_id, "since": since},
         )
         return [dict(r._mapping) for r in rows.fetchall()]

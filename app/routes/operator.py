@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -11,12 +13,21 @@ from app.channels.base import Inbound
 from app.channels.factory import build_adapter
 from app.db import AsyncSessionLocal
 from app.services import human_control
+from app.services.human_control import OPERATOR_MESSAGE_SINCE_ESCALATION_SQL
 from app.services.redaction import redact_document_numbers
 from app.services.security import validate_thread_id
 
 _limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/operator", tags=["operator"])
+templates = Jinja2Templates(directory="app/templates")
+
+
+@router.get("/ui", response_class=HTMLResponse, include_in_schema=False)
+async def operator_ui(request: Request):
+    """The inbox page (#40) -- plain HTML/JS, no build step, served the same
+    way admin.html already is (app/routes/admin.py's own /admin/ui)."""
+    return templates.TemplateResponse(request=request, name="operator.html")
 
 # WhatsApp's customer service window -- a send outside it is rejected with a
 # distinguishable reason rather than silently failing to deliver (#37).
@@ -76,7 +87,9 @@ async def resume(
 
 
 @router.get("/pending")
+@_limiter.limit("20/minute")
 async def list_pending(
+    request: Request,
     _: None = Depends(verify_operator_key),
 ):
     """The listing an inbox renders from: every escalated thread across every
@@ -85,13 +98,32 @@ async def list_pending(
     can't be delivered -- other channels get None, since no window applies.
     Excludes a deactivated tenant's threads -- a listed thread an operator
     can't actually reply to (send_message's build_adapter rejects inactive
-    tenants) would be confusing to show at all."""
+    tenants) would be confusing to show at all.
+
+    Also reports who is attending, if anyone -- the author of the most
+    recent operator message sent SINCE this escalation opened (same
+    interrupt_started_at scoping app/scheduler.py's expiry predicate uses,
+    for the same reason: thread_id is reused across escalations, so an
+    unscoped lookup could attribute an old, unrelated reply to this one).
+    Nothing stops two operators from both replying (#40, ADR-009) -- this
+    only makes that visible, it doesn't prevent it.
+
+    Rate-limited like every other /operator/* endpoint that mutates or
+    authenticates -- operator.html's login form now uses this endpoint to
+    verify a typed key (#40), which makes it a brute-force oracle for the
+    shared operator secret if left unlimited."""
     async with AsyncSessionLocal() as db:
         rows = await db.execute(
-            text("""
+            text(f"""
                 SELECT ca.thread_id, ca.user_id, ca.channel, ca.user_message,
                        ca.interrupt_started_at, t.slug AS tenant_slug,
-                       wsw.last_user_message_at
+                       wsw.last_user_message_at,
+                       (SELECT hcm.author
+                          FROM human_control_messages hcm
+                         WHERE hcm.thread_id = ca.thread_id
+                           AND {OPERATOR_MESSAGE_SINCE_ESCALATION_SQL}
+                         ORDER BY hcm.created_at DESC
+                         LIMIT 1) AS attending
                   FROM conversation_audit ca
                   JOIN tenants t ON t.id = ca.tenant_id
                   LEFT JOIN wa_service_windows wsw
@@ -125,7 +157,14 @@ async def get_thread(
     side lives in human_control_messages. Concatenated, not interleaved by
     timestamp: the graph never runs again once a thread is under human
     control (see turn.py), so every checkpointed message necessarily
-    precedes every human_control_messages row for this thread."""
+    precedes every human_control_messages row for this thread.
+
+    The human-control side is scoped to the CURRENT open escalation (its
+    interrupt_started_at) -- thread_id is reused across escalations, so an
+    unscoped read would mix an old, already-resolved exchange into a brand
+    new one (#40; same reason list_pending's "attending" lookup and
+    app/scheduler.py's expiry predicate are scoped). No open escalation ->
+    nothing current to show from that log."""
     if not validate_thread_id(thread_id):
         raise HTTPException(status_code=422, detail="Invalid thread_id format")
 
@@ -141,7 +180,22 @@ async def get_thread(
                 "created_at": None,
             })
 
-    for row in await human_control.thread_messages(thread_id):
+    async with AsyncSessionLocal() as db:
+        escalation = (await db.execute(
+            text("""
+                SELECT interrupt_started_at FROM conversation_audit
+                 WHERE thread_id = :thread
+                   AND expired_at IS NULL
+                   AND interrupt_started_at IS NOT NULL
+            """),
+            {"thread": thread_id},
+        )).first()
+
+    human_control_msgs = (
+        await human_control.thread_messages(thread_id, since=escalation.interrupt_started_at)
+        if escalation else []
+    )
+    for row in human_control_msgs:
         messages.append({
             "sender": row["sender"],
             "content": row["content"],

@@ -9,6 +9,7 @@ from app.channels.factory import build_adapter
 from app.db import AsyncSessionLocal
 from app.messages import HUMAN_CONTROL_EXPIRED
 from app.services import human_control
+from app.services.human_control import OPERATOR_MESSAGE_SINCE_ESCALATION_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ async def expire_old_interrupts() -> None:
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=_INTERRUPT_TTL_MINUTES)
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            text("""
+            text(f"""
                 SELECT ca.thread_id, ca.channel, ca.chat_id, ca.user_id, t.slug AS tenant_slug
                   FROM conversation_audit ca
                   JOIN tenants t ON t.id = ca.tenant_id
@@ -54,8 +55,7 @@ async def expire_old_interrupts() -> None:
                    AND NOT EXISTS (
                        SELECT 1 FROM human_control_messages hcm
                         WHERE hcm.thread_id = ca.thread_id
-                          AND hcm.sender = 'operator'
-                          AND hcm.created_at >= ca.interrupt_started_at
+                          AND {OPERATOR_MESSAGE_SINCE_ESCALATION_SQL}
                    )
             """),
             {"cutoff": cutoff},
