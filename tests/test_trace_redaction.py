@@ -20,6 +20,16 @@ def _run_llm_call(messages: list[BaseMessage]):
     inner = InMemorySpanExporter()
     tracer_provider.add_span_processor(SimpleSpanProcessor(RedactingSpanExporter(inner)))
     instrumentor = LangChainInstrumentor()
+    # LangChainInstrumentor is a process-wide singleton patch. If another
+    # test already left it instrumented (e.g. app.main's module-level
+    # create_app() -> _setup_phoenix() -> real LangChainInstrumentor
+    # .instrument(), which fires in any env with OBSERVABILITY_ENABLED=true
+    # -- true in this dev container, off by default elsewhere), a second
+    # .instrument() call here is a silent no-op that keeps patching the
+    # OLD tracer_provider, so this test's own `inner` exporter never
+    # receives a span. Force a clean slate first; uninstrument() on an
+    # already-clean instrumentor is a safe no-op (just logs a warning).
+    instrumentor.uninstrument()
     instrumentor.instrument(tracer_provider=tracer_provider)
     try:
         FakeListChatModel(responses=["the answer"]).invoke(messages)
@@ -86,6 +96,7 @@ def test_chain_span_output_value_is_redacted():
     inner = InMemorySpanExporter()
     tracer_provider.add_span_processor(SimpleSpanProcessor(RedactingSpanExporter(inner)))
     instrumentor = LangChainInstrumentor()
+    instrumentor.uninstrument()  # see _run_llm_call's comment on why this goes first
     instrumentor.instrument(tracer_provider=tracer_provider)
     try:
         builder = StateGraph(State)

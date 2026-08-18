@@ -5,7 +5,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.config import settings
 from app.services.embedding_cache import CachedEmbeddings, _cache_key
+
+# These tests need settings.embedding_cache_enabled=True to exercise the
+# cache read/write path. Skip rather than force it on with a patch — caches
+# stay off during live testing on purpose (see docker-compose.dev.yml) to
+# keep live runs from picking up stale cached results, and a test that
+# quietly overrides the real setting no longer proves anything about how
+# this environment actually behaves.
+_CACHE_SKIP = pytest.mark.skipif(
+    not settings.embedding_cache_enabled, reason="embedding cache disabled in this environment"
+)
 
 
 def _ctx(session):
@@ -31,6 +42,7 @@ def _session(rows):
     return session
 
 
+@_CACHE_SKIP
 @pytest.mark.asyncio
 async def test_aembed_documents_all_cache_misses_calls_underlying_and_stores():
     underlying = MagicMock()
@@ -49,6 +61,7 @@ async def test_aembed_documents_all_cache_misses_calls_underlying_and_stores():
     session.commit.assert_awaited_once()
 
 
+@_CACHE_SKIP
 @pytest.mark.asyncio
 async def test_aembed_documents_full_cache_hit_skips_underlying_call():
     underlying = MagicMock()
@@ -64,6 +77,7 @@ async def test_aembed_documents_full_cache_hit_skips_underlying_call():
     underlying.aembed_documents.assert_not_awaited()
 
 
+@_CACHE_SKIP
 @pytest.mark.asyncio
 async def test_aembed_documents_partial_hit_only_embeds_the_miss():
     underlying = MagicMock()

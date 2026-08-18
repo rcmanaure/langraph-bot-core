@@ -11,6 +11,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.graph.builder import build_graph
+from app.messages import HUMAN_HANDOFF
 
 TENANT_ROW = MagicMock(expertise_area="diagnóstico histológico", contact_url=None)
 
@@ -108,7 +109,7 @@ async def test_full_rag_flow_retrieves_reranks_and_answers():
         # the API is ever called and hybrid order passes through untouched.
         patch("app.services.rag.settings.top_k_results", 1),
         patch("app.services.rerank.httpx.AsyncClient", return_value=rerank_client),
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):
@@ -169,7 +170,7 @@ async def test_retrieval_and_rerank_spans_are_emitted():
         patch("app.services.rag.settings.top_k_results", 1),
         patch("app.services.rerank.httpx.AsyncClient", return_value=rerank_client),
         patch("app.services.rerank._tracer", test_tracer),
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):
@@ -213,7 +214,7 @@ async def test_rerank_http_failure_falls_back_but_graph_still_completes():
         patch("app.services.rag.settings.rerank_enabled", True),
         patch("app.services.rag.settings.top_k_results", 1),
         patch("app.services.rerank.httpx.AsyncClient", return_value=failing_client),
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):
@@ -238,7 +239,7 @@ async def test_off_topic_skips_retrieve_and_rerank_entirely():
     with (
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
         patch("app.services.rerank.httpx.AsyncClient") as mock_rerank_client,
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
@@ -257,7 +258,7 @@ async def test_greeting_skips_retrieve_and_second_llm_call():
 
     with (
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
     ):
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
@@ -284,12 +285,140 @@ async def test_human_escalation_routes_through_interrupt_skipping_retrieve_and_g
 
     with (
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
-        patch("app.graph.nodes.triage.get_chat_llm", return_value=llm),
-        patch("app.graph.nodes.interrupt.AsyncSessionLocal", MagicMock(return_value=interrupt_db)),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
+        patch("app.services.human_control.AsyncSessionLocal", MagicMock(return_value=interrupt_db)),
         patch("app.graph.nodes.interrupt.interrupt", MagicMock(return_value="un operador te va a contactar")),
     ):
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
 
     mock_retrieve.assert_not_called()
     llm.ainvoke.assert_not_called()  # generate() never runs on the human path
-    assert result["answer"] == "un operador te va a contactar"
+    # The resume value is discarded, never folded into "answer" or the
+    # message history (see ADR-009 / #39) -- delivering a reply to the user
+    # is #37's job (send through the channel), not this node's.
+    assert result["answer"] == ""
+    assert not any(m.content == "un operador te va a contactar" for m in result["messages"])
+
+
+@pytest.mark.asyncio
+async def test_human_escalation_actually_suspends_the_graph():
+    """The mocked-interrupt() test above proves routing; this one proves
+    suspension itself -- interrupt() is real (only the audit DB and
+    checkpointer are test doubles), so the graph genuinely pauses instead of
+    completing, and ainvoke's result carries "__interrupt__". This is the
+    signal app/channels/turn.py reads to send the handoff message instead of
+    the empty-answer fallback. See docs/adr/ADR-009-human-control.md."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    graph = build_graph(checkpointer=InMemorySaver())
+    state = _initial_state("quiero hablar con un humano")
+    llm = _mock_chat_llm("should not be reached", triage_decision="human")
+    interrupt_db = AsyncMock()
+    interrupt_result = MagicMock()
+    interrupt_result.first.return_value = None  # no open interrupt row yet
+    interrupt_db.execute = AsyncMock(return_value=interrupt_result)
+    interrupt_db.commit = AsyncMock()
+    interrupt_db.__aenter__ = AsyncMock(return_value=interrupt_db)
+    interrupt_db.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
+        patch("app.services.human_control.AsyncSessionLocal", MagicMock(return_value=interrupt_db)),
+    ):
+        result = await graph.ainvoke(
+            state, config={"configurable": {"thread_id": state["thread_id"]}}
+        )
+
+    mock_retrieve.assert_not_called()
+    assert "__interrupt__" in result
+    assert not result.get("answer")
+
+
+@pytest.mark.asyncio
+async def test_low_similarity_pool_escalates_through_the_compiled_graph():
+    """End to end: retrieve() runs the real hybrid-search query, generate()
+    reads its similarity and escalates — the graph completes (no suspend),
+    the reply keeps the bot's own answer and closes with the handover
+    message, and the escalation opens the same audit row the reactive
+    suspend path writes. See docs/adr/ADR-009-human-control.md / #36."""
+    graph = build_graph(checkpointer=None)
+    state = _initial_state("cuanto cuesta un examen que no existe")
+
+    # A single row well below handoff_threshold (0.30) -- len(chunks)=1 is
+    # also <= top_k_results, so rerank_chunks() short-circuits without an
+    # HTTP call, keeping this test to the DB/LLM seams only.
+    rows = [_db_row("SRP009 | Algo no relacionado | $10.00", similarity=0.1)]
+    llm = _mock_chat_llm("No tenemos ese examen en particular.", triage_decision="rag")
+    db = _mock_db_session(fetchall_rows=rows)
+
+    audit_db = AsyncMock()
+    audit_result = MagicMock()
+    audit_result.first.return_value = None  # no open escalation yet
+    audit_db.execute = AsyncMock(return_value=audit_result)
+    audit_db.commit = AsyncMock()
+    audit_db.__aenter__ = AsyncMock(return_value=audit_db)
+    audit_db.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.services.human_control.AsyncSessionLocal", MagicMock(return_value=audit_db)),
+    ):
+        result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
+
+    assert "__interrupt__" not in result  # bot answers this turn, graph does not suspend
+    assert "No tenemos ese examen en particular." in result["answer"]
+    assert HUMAN_HANDOFF in result["answer"]
+    audit_db.commit.assert_awaited_once()  # human_control.start() opened the escalation
+
+
+@pytest.mark.asyncio
+async def test_rejection_after_approximation_escalates_across_two_turns():
+    """Turn 1: an unconfirmed match, the bot offers an approximation. Turn 2:
+    a bare "no" -- retrieval re-anchors to the original query (#34) and
+    generate() reads turn 1's awaiting_confirmation off the checkpoint to
+    escalate. A real checkpointer, not mocked state, carries that marker
+    between the two separate ainvoke() calls. See #38."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    graph = build_graph(checkpointer=InMemorySaver())
+    thread_id = "tenant:acme:user:1:channel:telegram"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    rows = [_db_row("SRP009 | Algo relacionado | $50.00", similarity=0.5)]
+    llm = _mock_chat_llm(
+        "Lo más cercano que tenemos es Algo relacionado, ¿es lo que necesita?",
+        triage_decision="rag",
+    )
+    db = _mock_db_session(fetchall_rows=rows)
+
+    audit_db = AsyncMock()
+    audit_result = MagicMock()
+    audit_result.first.return_value = None  # no open escalation yet
+    audit_db.execute = AsyncMock(return_value=audit_result)
+    audit_db.commit = AsyncMock()
+    audit_db.__aenter__ = AsyncMock(return_value=audit_db)
+    audit_db.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.services.human_control.AsyncSessionLocal", MagicMock(return_value=audit_db)),
+    ):
+        turn1 = await graph.ainvoke(_initial_state("cuanto cuesta algo relacionado"), config=config)
+        assert HUMAN_HANDOFF not in turn1["answer"]
+        audit_db.commit.assert_not_awaited()
+
+        turn2 = await graph.ainvoke(_initial_state("no"), config=config)
+
+    assert HUMAN_HANDOFF in turn2["answer"]
+    audit_db.commit.assert_awaited_once()  # only on turn 2, when the rejection escalates

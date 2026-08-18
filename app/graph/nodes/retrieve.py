@@ -35,15 +35,51 @@ _CONFIRMATION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Mirrors _CONFIRMATION_RE for the opposite case: a bare "no" answering the
+# bot's approximation offer ("¿Es lo que necesita?") has no retrievable
+# content either. Left un-anchored it embeds to nothing, returns unrelated
+# chunks, and the bot answers a question nobody asked — see ADR-009.
+_REJECTION_RE = re.compile(
+    r"^\s*(no|no gracias|para nada|qué va|que va|negativo)\s*[.!¡]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def last_human_text(state: AgentState) -> str | None:
+    """The literal text of the last human message, unanchored (contrast
+    _last_human_query above, which walks past bare confirmations/rejections).
+    Callers that need to inspect THIS turn's own message -- not what it's
+    answering -- want this, not _last_human_query. Shared by triage.py and
+    generate.py so both read the same message the same way."""
+    for m in reversed(state["messages"]):
+        if isinstance(m, HumanMessage):
+            return m.content if isinstance(m.content, str) else None
+    return None
+
+
+def is_bare_rejection(text: str) -> bool:
+    """Whether text is a whole-message rejection with no content of its own
+    -- the same pattern _last_human_query anchors on above, exposed so
+    generate.py can decide whether THIS turn's message is a rejection to
+    escalate (see ADR-009 / #38). Anchoring and escalating are separate
+    decisions: this says nothing about whether escalation is warranted,
+    only whether the message is a bare "no"."""
+    return isinstance(text, str) and bool(_REJECTION_RE.match(text))
+
 
 def _last_human_query(state: AgentState) -> str:
+    """The message retrieval should search for. A bare confirmation/rejection
+    carries no content of its own, so walk back past any run of them to the
+    question they're actually answering -- two bare replies in a row (e.g.
+    "no" to one approximation, then "no" again to the next) must still
+    anchor to the original question, not to the first bare reply's literal
+    text, which would reintroduce the same content-free-embedding bug."""
     humans = [m.content for m in state["messages"] if isinstance(m, HumanMessage)]
-    if not humans:
-        return ""
-    last = humans[-1]
-    if len(humans) >= 2 and isinstance(last, str) and _CONFIRMATION_RE.match(last):
-        return humans[-2]
-    return last
+    for content in reversed(humans):
+        if isinstance(content, str) and (_CONFIRMATION_RE.match(content) or _REJECTION_RE.match(content)):
+            continue
+        return content
+    return humans[-1] if humans else ""
 
 
 def cache_key(state: AgentState) -> str:

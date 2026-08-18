@@ -2,6 +2,7 @@ from app.models.base import Base
 from app.models.conversation_audit import ConversationAudit
 from app.models.document_chunk import DocumentChunk
 from app.models.embedding_cache import EmbeddingCache
+from app.models.human_control_message import HumanControlMessage
 from app.models.index_job import IndexJob, IndexJobStatus
 from app.models.staff_member import StaffMember
 from app.models.tenant import Tenant
@@ -19,4 +20,5 @@ __all__ = [
     "EmbeddingCache",
     "VisionCache",
     "StaffMember",
+    "HumanControlMessage",
 ]

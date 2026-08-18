@@ -11,11 +11,17 @@ class Settings(BaseSettings):
     db_max_overflow: int = 5
     db_checkpoint_pool_size: int = 5
 
-    # Chat LLM — routed through OpenRouter
+    # Chat LLM — routed through OpenRouter. Split by task rather than one
+    # dual-purpose model: triage is cheap structured classification, generate
+    # needs Spanish fluency/tone (see ADR-008). openai_model also backs
+    # retrieve.py's query-expansion rewrite and update_profile.py's
+    # extraction — both similarly cheap/structured, out of scope for the
+    # ADR-008 split, left on the general-purpose model for now.
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openai_model: str = "xiaomi/mimo-v2.5"
-    openai_fallback_model: str = "deepseek/deepseek-v4-flash"
+    openai_model: str = "mistralai/mistral-small-3.2-24b-instruct"
+    openai_fallback_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
+    triage_model: str = "amazon/nova-micro-v1"
 
     # Embeddings — same key/base as chat; override only if using a different provider
     embedding_base_url: str = ""
@@ -32,6 +38,11 @@ class Settings(BaseSettings):
     hnsw_ef_search: int = 160
     hnsw_iterative_scan: str = "relaxed_order"
     exact_match_threshold: float = 0.65
+    # Below this, the retrieved pool's MAXIMUM similarity means nothing in
+    # the corpus is close to what was asked -- escalate rather than answer
+    # from an unrelated chunk. Unset/blind default (see ADR-009); every
+    # escalation logs the similarity that triggered it for calibration.
+    handoff_threshold: float = 0.30
     # Hybrid search (dense + keyword, fused via RRF)
     hybrid_candidate_k: int = 30
     rrf_k: int = 60
@@ -82,7 +93,8 @@ class Settings(BaseSettings):
     # services/vision.py's own opt-in gate) -- deliberately not defaulted to
     # a real model, so a fresh deployment with no vision budget configured
     # doesn't silently start making (billed) vision calls. Recommended once
-    # configured: see docs/model-upgrade-baseline.md.
+    # configured: a vision-specialized model, not the chat model (see
+    # ADR-008 and docs/model-upgrade-baseline.md).
     openai_vision_model: str = ""
     web_search_url: str = ""
 

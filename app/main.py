@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI):
 
     async with build_runtime() as runtime:
         app.state.graph = runtime.graph
-        start_scheduler()
+        start_scheduler(runtime.graph)
         logger.info("langgraph_ready")
         yield
         stop_scheduler()

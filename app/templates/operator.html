@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>langraph-bot — Inbox</title>
+<style>
+:root {
+  --bg:      #08090a;
+  --surface: #191a1b;
+  --surface-2: #212224;
+  --fg:      #f7f8f8;
+  --fg-2:    #d0d6e0;
+  --muted:   #8a8f98;
+  --border:  rgba(255, 255, 255, 0.08);
+  --accent:       #5e6ad2;
+  --accent-hover: #828fff;
+  --success: #27a644;
+  --warn:    #eab308;
+  --danger:  #dc2626;
+  --font: "Inter", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg-2); font-family: var(--font); font-size: 14px; line-height: 1.45; }
+.hidden { display: none !important; }
+button { font-family: inherit; cursor: pointer; }
+input, textarea { font-family: inherit; font-size: inherit; }
+
+/* ── Login ─────────────────────────────────────────────────────────── */
+.login-screen { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.login-card { width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 32px; text-align: center; }
+.login-card h1 { font-size: 18px; color: var(--fg); margin-bottom: 4px; }
+.login-card .sub { color: var(--muted); margin-bottom: 20px; font-size: 13px; }
+.login-field { text-align: left; margin-bottom: 12px; }
+.login-field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.login-field input { width: 100%; padding: 9px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); }
+.login-error { display: none; color: var(--danger); font-size: 12px; margin-bottom: 12px; text-align: left; }
+.login-error.show { display: block; }
+.btn { padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--fg); font-size: 13px; }
+.btn:hover { border-color: var(--accent); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; width: 100%; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-danger { color: var(--danger); }
+.btn:disabled { opacity: .5; cursor: default; }
+
+/* ── App shell ─────────────────────────────────────────────────────── */
+.app-shell { height: 100%; display: grid; grid-template-columns: 360px 1fr; }
+.list-pane { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.list-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.list-header h1 { font-size: 15px; color: var(--fg); }
+.list-header .logout { font-size: 12px; color: var(--muted); background: none; border: none; text-decoration: underline; }
+.thread-list { overflow-y: auto; flex: 1; }
+.thread-row { display: block; width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--border); padding: 12px 16px; color: var(--fg-2); }
+.thread-row:hover { background: var(--surface); }
+.thread-row.active { background: var(--surface-2); }
+.thread-row .row-top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.thread-row .row-preview { font-size: 13px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-row .row-meta { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
+.tag { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.tag.attending { color: var(--warn); border-color: var(--warn); }
+.tag.window-low { color: var(--danger); border-color: var(--danger); }
+.empty-note { padding: 24px 16px; color: var(--muted); font-size: 13px; }
+
+.detail-pane { display: flex; flex-direction: column; min-height: 0; }
+.detail-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.detail-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.detail-header .thread-title { font-size: 13px; color: var(--fg); }
+.detail-header .thread-sub { font-size: 12px; color: var(--muted); }
+.messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.msg { max-width: 70%; padding: 8px 12px; border-radius: 10px; font-size: 13px; }
+.msg .msg-meta { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+.msg-user, .msg-human { align-self: flex-start; background: var(--surface); }
+.msg-bot { align-self: flex-start; background: var(--surface-2); }
+.msg-operator { align-self: flex-end; background: var(--accent); color: #fff; }
+.msg-operator .msg-meta { color: rgba(255,255,255,.75); }
+.reply-area { border-top: 1px solid var(--border); padding: 12px 16px; }
+.reply-error { display: none; color: var(--danger); font-size: 12px; margin-bottom: 8px; }
+.reply-error.show { display: block; }
+.reply-row { display: flex; gap: 8px; }
+.reply-row input[type=text] { flex: 1; padding: 9px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); }
+.author-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+.author-row label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.author-row input { padding: 6px 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--fg); width: 160px; }
+</style>
+</head>
+<body>
+
+<div id="login-screen" class="login-screen">
+  <div class="login-card">
+    <h1>langraph-bot inbox</h1>
+    <p class="sub">Ingresá la clave de operador para continuar.</p>
+    <form id="login-form">
+      <div class="login-field">
+        <label for="login-key">Clave de operador</label>
+        <input type="password" id="login-key" placeholder="••••••••••••" autocomplete="current-password" autofocus>
+      </div>
+      <div class="login-error" id="login-error">Clave inválida o vacía.</div>
+      <button type="submit" class="btn btn-primary" id="login-submit">Entrar</button>
+    </form>
+  </div>
+</div>
+
+<div id="app-shell" class="app-shell hidden">
+  <div class="list-pane">
+    <div class="list-header">
+      <h1>Conversaciones esperando</h1>
+      <button class="logout" id="logout-btn">Salir</button>
+    </div>
+    <div class="thread-list" id="thread-list"></div>
+  </div>
+  <div class="detail-pane" id="detail-pane">
+    <div class="detail-empty">Elegí una conversación de la lista.</div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ── Auth ─────────────────────────────────────────────────────────── */
+var OPERATOR_KEY_STORAGE = 'lgb_operator_key';
+var AUTHOR_STORAGE = 'lgb_operator_author';
+function operatorKey() { return localStorage.getItem(OPERATOR_KEY_STORAGE) || ''; }
+
+async function api(path, opts) {
+  opts = opts || {};
+  var headers = Object.assign({}, opts.headers || {}, { 'X-Operator-Key': operatorKey() });
+  if (opts.json !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    opts = Object.assign({}, opts, { body: JSON.stringify(opts.json) });
+  }
+  var res = await fetch(path, Object.assign({}, opts, { headers: headers }));
+  var data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (!res.ok) {
+    var err = new Error((data && (data.detail && data.detail.error ? data.detail.error : data.detail)) || ('Request failed (' + res.status + ')'));
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+/* ── State ────────────────────────────────────────────────────────── */
+var state = {
+  threads: [],
+  selectedThreadId: null,
+  messages: [],
+  loadingDetail: false,
+  replyError: '',
+};
+var pollTimer = null;
+var POLL_MS = 8000;
+
+/* ── DOM helpers -- text content only, never markup, for anything that
+   came from a user, an operator's typed name, or a tenant record. This is
+   the one hard constraint on this page (#40). ───────────────────────── */
+function el(tag, opts) {
+  var node = document.createElement(tag);
+  opts = opts || {};
+  if (opts.className) node.className = opts.className;
+  if (opts.text !== undefined) node.textContent = opts.text;
+  if (opts.attrs) for (var k in opts.attrs) node.setAttribute(k, opts.attrs[k]);
+  if (opts.onClick) node.addEventListener('click', opts.onClick);
+  return node;
+}
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
+/* ── Formatting ───────────────────────────────────────────────────── */
+function fmtRelative(iso) {
+  if (!iso) return '';
+  var diffMin = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (diffMin < 1) return 'recién';
+  if (diffMin < 60) return diffMin + ' min esperando';
+  var h = Math.floor(diffMin / 60), m = diffMin % 60;
+  return h + 'h ' + m + 'min esperando';
+}
+function fmtWindow(seconds) {
+  if (seconds === null || seconds === undefined) return null;
+  if (seconds <= 0) return 'ventana WhatsApp vencida';
+  var h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
+  return h + 'h ' + m + 'min de ventana WhatsApp';
+}
+function fmtClock(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  return d.toLocaleString('es', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+var SEND_ERRORS = {
+  outside_service_window: 'Fuera de la ventana de 24h de WhatsApp -- el mensaje no se puede entregar.',
+  chat_id_unknown: 'No se puede identificar el chat de este hilo (escalado antes de esta función). No se puede enviar.',
+};
+
+/* ── Rendering: thread list ───────────────────────────────────────── */
+function renderList() {
+  var list = document.getElementById('thread-list');
+  clear(list);
+
+  if (!state.threads.length) {
+    list.appendChild(el('div', { className: 'empty-note', text: 'No hay conversaciones esperando.' }));
+    return;
+  }
+
+  state.threads.forEach(function (t) {
+    var row = el('button', {
+      className: 'thread-row' + (t.thread_id === state.selectedThreadId ? ' active' : ''),
+      onClick: function () { selectThread(t.thread_id); },
+    });
+
+    var top = el('div', { className: 'row-top' });
+    top.appendChild(el('span', { text: t.tenant_slug + ' · ' + t.channel }));
+    top.appendChild(el('span', { text: fmtRelative(t.interrupt_started_at) }));
+    row.appendChild(top);
+
+    row.appendChild(el('div', { className: 'row-preview', text: t.user_message || '(sin texto)' }));
+
+    var meta = el('div', { className: 'row-meta' });
+    if (t.attending) {
+      meta.appendChild(el('span', { className: 'tag attending', text: 'Atendiendo: ' + t.attending }));
+    }
+    var win = fmtWindow(t.wa_window_remaining_seconds);
+    if (win) {
+      var low = t.wa_window_remaining_seconds !== null && t.wa_window_remaining_seconds < 3600;
+      meta.appendChild(el('span', { className: 'tag' + (low ? ' window-low' : ''), text: win }));
+    }
+    row.appendChild(meta);
+
+    list.appendChild(row);
+  });
+}
+
+/* ── Rendering: conversation detail ───────────────────────────────── */
+function senderClass(sender) {
+  if (sender === 'operator') return 'msg-operator';
+  if (sender === 'bot') return 'msg-bot';
+  return 'msg-user';
+}
+function senderLabel(m) {
+  if (m.sender === 'operator') return m.author || 'Operador';
+  if (m.sender === 'bot') return 'Bot';
+  return 'Usuario';
+}
+
+function renderDetail() {
+  var pane = document.getElementById('detail-pane');
+  clear(pane);
+
+  if (!state.selectedThreadId) {
+    pane.appendChild(el('div', { className: 'detail-empty', text: 'Elegí una conversación de la lista.' }));
+    return;
+  }
+
+  var thread = state.threads.find(function (t) { return t.thread_id === state.selectedThreadId; });
+
+  var header = el('div', { className: 'detail-header' });
+  var titleWrap = el('div');
+  titleWrap.appendChild(el('div', { className: 'thread-title', text: state.selectedThreadId }));
+  if (thread) titleWrap.appendChild(el('div', { className: 'thread-sub', text: thread.tenant_slug + ' · ' + thread.channel }));
+  header.appendChild(titleWrap);
+  header.appendChild(el('button', {
+    className: 'btn btn-danger', text: 'Terminar control humano',
+    onClick: endControl,
+  }));
+  pane.appendChild(header);
+
+  var msgs = el('div', { className: 'messages', attrs: { id: 'messages-scroll' } });
+  if (state.loadingDetail) {
+    msgs.appendChild(el('div', { className: 'empty-note', text: 'Cargando…' }));
+  } else {
+    state.messages.forEach(function (m) {
+      var bubble = el('div', { className: 'msg ' + senderClass(m.sender) });
+      var label = senderLabel(m) + (m.created_at ? ' · ' + fmtClock(m.created_at) : '');
+      bubble.appendChild(el('div', { className: 'msg-meta', text: label }));
+      bubble.appendChild(el('div', { className: 'msg-body', text: m.content }));
+      msgs.appendChild(bubble);
+    });
+  }
+  pane.appendChild(msgs);
+
+  var replyArea = el('div', { className: 'reply-area' });
+  var errBox = el('div', { className: 'reply-error' + (state.replyError ? ' show' : ''), text: state.replyError, attrs: { id: 'reply-error' } });
+  replyArea.appendChild(errBox);
+
+  var authorRow = el('div', { className: 'author-row' });
+  authorRow.appendChild(el('label', { text: 'Tu nombre' }));
+  var authorInput = el('input', { attrs: { type: 'text', id: 'author-input', placeholder: 'María' } });
+  authorInput.value = localStorage.getItem(AUTHOR_STORAGE) || '';
+  authorRow.appendChild(authorInput);
+  replyArea.appendChild(authorRow);
+
+  var form = el('form', { attrs: { id: 'reply-form' } });
+  var replyRow = el('div', { className: 'reply-row' });
+  var textInput = el('input', { attrs: { type: 'text', id: 'reply-text', placeholder: 'Escribí una respuesta…', autocomplete: 'off' } });
+  replyRow.appendChild(textInput);
+  replyRow.appendChild(el('button', { className: 'btn btn-primary', text: 'Enviar', attrs: { type: 'submit' } }));
+  form.appendChild(replyRow);
+  form.addEventListener('submit', function (e) { e.preventDefault(); sendReply(); });
+  replyArea.appendChild(form);
+
+  pane.appendChild(replyArea);
+
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function render() {
+  renderList();
+  renderDetail();
+}
+
+/* ── Actions ──────────────────────────────────────────────────────── */
+async function refreshList() {
+  try {
+    var threads = await api('/operator/pending');
+    state.threads = threads;
+    renderList();
+  } catch (e) {
+    if (e.status === 401) logout();
+  }
+}
+
+async function selectThread(threadId) {
+  state.selectedThreadId = threadId;
+  state.loadingDetail = true;
+  state.replyError = '';
+  render();
+  var data = null, failed = false;
+  try {
+    data = await api('/operator/threads/' + encodeURIComponent(threadId));
+  } catch (e) {
+    failed = true;
+  }
+  // The operator may have clicked a different thread while this request was
+  // in flight -- an out-of-order response must not overwrite what's now
+  // selected with a stale conversation.
+  if (state.selectedThreadId !== threadId) return;
+  state.messages = failed ? [] : data.messages;
+  state.loadingDetail = false;
+  render();
+}
+
+async function sendReply() {
+  var textInput = document.getElementById('reply-text');
+  var authorInput = document.getElementById('author-input');
+  var text = textInput.value.trim();
+  var author = authorInput.value.trim();
+  if (!text || !author) {
+    state.replyError = 'Escribí tu nombre y un mensaje antes de enviar.';
+    renderDetail();
+    return;
+  }
+  localStorage.setItem(AUTHOR_STORAGE, author);
+
+  try {
+    await api('/operator/threads/' + encodeURIComponent(state.selectedThreadId) + '/messages', {
+      method: 'POST',
+      json: { text: text, author: author },
+    });
+    state.replyError = '';
+    await selectThread(state.selectedThreadId);
+    await refreshList();
+  } catch (e) {
+    state.replyError = SEND_ERRORS[e.message] || e.message || 'No se pudo enviar el mensaje.';
+    renderDetail();
+  }
+}
+
+async function endControl() {
+  if (!state.selectedThreadId) return;
+  try {
+    await api('/operator/resume/' + encodeURIComponent(state.selectedThreadId), { method: 'POST' });
+    state.selectedThreadId = null;
+    state.messages = [];
+    await refreshList();
+    render();
+  } catch (e) {
+    state.replyError = e.message || 'No se pudo terminar el control humano.';
+    renderDetail();
+  }
+}
+
+function logout() {
+  localStorage.removeItem(OPERATOR_KEY_STORAGE);
+  if (pollTimer) clearInterval(pollTimer);
+  document.getElementById('app-shell').classList.add('hidden');
+  document.getElementById('login-screen').classList.remove('hidden');
+}
+
+async function verifyKey(key) {
+  var res = await fetch('/operator/pending', { headers: { 'X-Operator-Key': key } });
+  return res.ok;
+}
+
+function startApp() {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('app-shell').classList.remove('hidden');
+  refreshList();
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(refreshList, POLL_MS);
+}
+
+document.getElementById('login-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  var input = document.getElementById('login-key');
+  var errBox = document.getElementById('login-error');
+  var btn = document.getElementById('login-submit');
+  var val = input.value.trim();
+  if (!val) { errBox.classList.add('show'); return; }
+  errBox.classList.remove('show');
+  btn.disabled = true;
+  try {
+    var ok = await verifyKey(val);
+    if (!ok) throw new Error('bad key');
+    localStorage.setItem(OPERATOR_KEY_STORAGE, val);
+    input.value = '';
+    startApp();
+  } catch (e) {
+    errBox.classList.add('show');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('logout-btn').addEventListener('click', logout);
+
+/* ── Boot ─────────────────────────────────────────────────────────── */
+(function boot() {
+  if (operatorKey()) {
+    startApp();
+  }
+})();
+</script>
+</body>
+</html>

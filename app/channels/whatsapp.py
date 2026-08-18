@@ -28,7 +28,7 @@ _WA = "https://graph.facebook.com/v23.0"
 _SEEN = SeenKeys()
 
 
-async def _send(phone_number_id: str, token: str, to: str, body: str) -> None:
+async def _send(phone_number_id: str, token: str, to: str, body: str) -> bool:
     async with httpx.AsyncClient(timeout=15) as c:
         r = await c.post(
             f"{_WA}/{phone_number_id}/messages",
@@ -38,6 +38,8 @@ async def _send(phone_number_id: str, token: str, to: str, body: str) -> None:
         )
         if r.status_code != 200:
             logger.warning("wa_send_failed to=%s status=%d body=%s", to, r.status_code, r.text[:80])
+            return False
+        return True
 
 
 async def _get_media_info(media_id: str, token: str) -> dict:
@@ -200,9 +202,15 @@ class WhatsAppAdapter:
             raise MediaTooLarge()
         return await _fetch_media_bytes(info["url"], self._token)
 
-    async def send(self, inbound: Inbound, text: str) -> None:
-        if self._token and self._phone_id:
-            await _send(self._phone_id, self._token, inbound.chat_id, text)
+    async def send(self, inbound: Inbound, text: str) -> bool:
+        if not (self._token and self._phone_id):
+            # Found in /code-review: this used to be a fully silent no-op --
+            # a caller checking the return value (see operator.py's
+            # send_message) needs to learn credentials were missing, not
+            # just infer it from nothing having happened.
+            logger.warning("wa_send_skipped_no_credentials to=%s", inbound.chat_id)
+            return False
+        return await _send(self._phone_id, self._token, inbound.chat_id, text)
 
 
 async def _update_service_window(tenant_slug: str, user_id: str) -> None:

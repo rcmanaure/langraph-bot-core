@@ -77,7 +77,7 @@ def _wa_to_tg_html(text: str) -> str:
     return text
 
 
-async def _send(token: str, chat_id: int | str, text: str) -> None:
+async def _send(token: str, chat_id: int | str, text: str) -> bool:
     async with httpx.AsyncClient(timeout=10) as c:
         r = await c.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
@@ -85,6 +85,8 @@ async def _send(token: str, chat_id: int | str, text: str) -> None:
         )
         if r.status_code != 200:
             logger.warning("tg_send_failed chat=%s status=%d body=%s", chat_id, r.status_code, r.text[:120])
+            return False
+        return True
 
 
 async def _download_file(token: str, file_id: str) -> bytes:
@@ -194,8 +196,8 @@ class TelegramAdapter:
     async def fetch_media(self, ref: MediaRef) -> bytes:
         return await _download_file(self._token, ref.id)
 
-    async def send(self, inbound: Inbound, text: str) -> None:
-        await _send(self._token, inbound.chat_id, text)
+    async def send(self, inbound: Inbound, text: str) -> bool:
+        return await _send(self._token, inbound.chat_id, text)
 
 
 # Telegram albums (multi-photo messages) arrive as separate webhook updates

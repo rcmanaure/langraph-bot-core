@@ -386,7 +386,7 @@ async def test_laboratorio_clinico_is_off_topic_triage():
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="off_topic"))
     mock_llm.with_structured_output.return_value = mock_structured
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(state)
 
     assert result["triage_decision"] == "off_topic"
@@ -403,7 +403,7 @@ async def test_serologia_is_off_topic():
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="off_topic"))
     mock_llm.with_structured_output.return_value = mock_structured
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(state)
 
     assert result["triage_decision"] == "off_topic"
@@ -436,7 +436,7 @@ async def test_medical_organ_queries_route_to_rag(query):
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="rag"))
     mock_llm.with_structured_output.return_value = mock_structured
 
-    with patch("app.graph.nodes.triage.get_chat_llm", return_value=mock_llm):
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(state)
 
     assert result["triage_decision"] == "rag", \

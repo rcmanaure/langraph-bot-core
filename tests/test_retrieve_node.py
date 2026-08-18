@@ -100,6 +100,91 @@ async def test_retrieve_uses_previous_question_on_bare_confirmation():
 
 
 @pytest.mark.asyncio
+async def test_retrieve_uses_previous_question_on_bare_rejection():
+    """A bare 'no' answering the bot's approximation offer has no retrievable
+    content either — retrieve() must anchor back to the previous question,
+    same as a bare confirmation does."""
+    state = _state(messages=[
+        HumanMessage(content="precio de biopsia de mama"),
+        HumanMessage(content="no"),
+    ])
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
+        patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
+    ):
+        await retrieve(state)
+
+    assert mock_retrieve.await_args[0][1] == "precio de biopsia de mama"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_does_not_anchor_a_negative_word_inside_a_real_question():
+    """A message merely containing a negative word, but carrying a question
+    of its own, is unaffected — only a whole-message negative anchors."""
+    state = _state(messages=[
+        HumanMessage(content="precio de biopsia de mama"),
+        HumanMessage(content="no, cuanto cuesta la de pulmon"),
+    ])
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
+        patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
+    ):
+        await retrieve(state)
+
+    assert mock_retrieve.await_args[0][1] == "no, cuanto cuesta la de pulmon"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_two_bare_rejections_in_a_row_anchor_to_the_original_question():
+    """Regression: found in /code-review. A second bare 'no' answering a
+    second approximation must anchor to the ORIGINAL question, not to the
+    literal text of the first bare 'no' -- that would reintroduce the exact
+    content-free-embedding bug these regexes exist to fix."""
+    state = _state(messages=[
+        HumanMessage(content="precio de biopsia de mama"),
+        HumanMessage(content="no"),
+        HumanMessage(content="no"),
+    ])
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
+        patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
+    ):
+        await retrieve(state)
+
+    assert mock_retrieve.await_args[0][1] == "precio de biopsia de mama"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_lone_rejection_has_nothing_to_anchor_to():
+    """A bare 'no' as the conversation's only human message is left alone —
+    there is no previous question to fall back to."""
+    state = _state(messages=[HumanMessage(content="no")])
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
+        patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
+    ):
+        await retrieve(state)
+
+    assert mock_retrieve.await_args[0][1] == "no"
+
+
+@pytest.mark.asyncio
 async def test_retrieve_rewrites_query_when_specialization_set():
     """specialization_context present -> LLM rewrite runs, its output is
     CONCATENATED (not swapped) onto the raw query before hybrid search."""

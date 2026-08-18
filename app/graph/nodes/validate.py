@@ -23,6 +23,10 @@ async def validate(state: AgentState) -> dict:
     except ValueError:
         # Injection detected — short-circuit graph, never reach LLM
         msg = AIMessage(content=_BLOCKED_MSG)
-        return {"blocked": True, "answer": _BLOCKED_MSG, "messages": [msg]}
+        # Explicit False, not omitted -- this short-circuits straight to
+        # respond, skipping generate() entirely, so nothing else resets a
+        # stale True left by last turn's approximation offer (see
+        # AgentState.awaiting_confirmation).
+        return {"blocked": True, "answer": _BLOCKED_MSG, "messages": [msg], "awaiting_confirmation": False}
 
     return {}

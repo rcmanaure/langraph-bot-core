@@ -102,8 +102,10 @@ class ChannelAdapter(Protocol):
         """Download the bytes behind a MediaRef."""
         ...
 
-    async def send(self, inbound: "Inbound", text: str) -> None:
-        """Deliver a reply to the originating user."""
+    async def send(self, inbound: "Inbound", text: str) -> bool:
+        """Deliver a reply to the originating user. Returns whether the
+        channel accepted it -- best-effort: True only means this layer saw
+        nothing wrong, never a delivery receipt."""
         ...
 
 
