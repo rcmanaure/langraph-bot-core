@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — langraph-bot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --ink: #1e2430;
+  --muted: #5b6472;
+  --faint: #8790a0;
+  --accent: #3b5bdb;
+  --accent-ink: #2843b3;
+  --border: #e1e4ea;
+  --mono-bg: #eef0f4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151c;
+    --surface: #171b24;
+    --ink: #e7eaef;
+    --muted: #9aa3b2;
+    --faint: #6b7383;
+    --accent: #8fa2ff;
+    --accent-ink: #aebaff;
+    --border: #262b36;
+    --mono-bg: #1c212c;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.65;
+  margin: 0;
+  padding: 4rem 1.5rem 6rem;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page { max-width: 680px; margin: 0 auto; }
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  margin-bottom: 1.1rem;
+}
+
+.eyebrow::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+h1 {
+  font-family: "Source Serif 4", Georgia, serif;
+  font-weight: 700;
+  font-size: clamp(2.1rem, 4.5vw, 2.7rem);
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  margin: 0 0 0.6rem;
+}
+
+.dek { color: var(--muted); font-size: 1.02rem; max-width: 46ch; margin: 0 0 2.2rem; }
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.4rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: var(--faint);
+  padding: 0.9rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2.6rem;
+}
+
+.meta span b { color: var(--muted); font-weight: 500; }
+
+section { margin-bottom: 2.4rem; }
+
+h2 {
+  font-family: "Source Serif 4", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.32rem;
+  letter-spacing: -0.005em;
+  margin: 0 0 0.85rem;
+  text-wrap: balance;
+}
+
+p { margin: 0 0 0.9rem; max-width: 65ch; color: var(--ink); }
+p.small { color: var(--muted); font-size: 0.94rem; }
+
+ul { margin: 0 0 0.9rem; padding-left: 1.2rem; max-width: 65ch; }
+li { margin-bottom: 0.55rem; }
+li b { font-weight: 600; }
+
+.datatable {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 1.1rem 0 1.4rem;
+  background: var(--surface);
+}
+
+.datarow {
+  display: grid;
+  grid-template-columns: minmax(140px, 34%) 1fr;
+  gap: 0.5rem 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.92rem;
+}
+.datarow:last-child { border-bottom: none; }
+
+.datarow dt {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: var(--accent-ink);
+  background: var(--mono-bg);
+  padding: 0.15rem 0.5rem;
+  border-radius: 5px;
+  align-self: start;
+  white-space: nowrap;
+}
+.datarow dd { margin: 0; color: var(--muted); }
+
+.contact {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.3rem 1.4rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.contact a {
+  color: var(--accent-ink);
+  text-decoration: none;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.95rem;
+  border-bottom: 1px solid transparent;
+}
+.contact a:hover, .contact a:focus-visible { border-bottom-color: var(--accent-ink); }
+.contact a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
+footer {
+  margin-top: 3.2rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--border);
+  color: var(--faint);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 480px) { .datarow { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <p class="eyebrow">langraph-bot &middot; legal</p>
+  <h1>Privacy Policy</h1>
+  <p class="dek">What langraph-bot collects when you message it on Telegram or WhatsApp, why, and how to reach us about it.</p>
+
+  <div class="meta">
+    <span><b>Effective</b> 18 Aug 2026</span>
+    <span><b>Applies to</b> Telegram &amp; WhatsApp channels</span>
+    <span><b>Contact</b> rcmanaure@gmail.com</span>
+  </div>
+
+  <section>
+    <h2>What we collect</h2>
+    <p>langraph-bot is a conversational assistant reachable through Telegram and WhatsApp. When you message it, we process only what the conversation itself requires:</p>
+    <div class="datatable">
+      <dl style="margin:0;">
+        <div class="datarow">
+          <dt>identity</dt>
+          <dd>Your Telegram or WhatsApp user ID and phone number — used to route your messages and keep replies in the right conversation.</dd>
+        </div>
+        <div class="datarow">
+          <dt>messages</dt>
+          <dd>The text, images, audio, or documents you send, plus the bot's replies — used to generate and improve responses.</dd>
+        </div>
+        <div class="datarow">
+          <dt>metadata</dt>
+          <dd>Timestamps and message status (delivered, read) — used for reliability and abuse prevention only.</dd>
+        </div>
+      </dl>
+    </div>
+    <p class="small">We do not request or store payment details, government IDs, or account passwords through the bot.</p>
+  </section>
+
+  <section>
+    <h2>How we use it</h2>
+    <ul>
+      <li><b>Answering you.</b> Message content is sent to the underlying language model to produce a reply, and may be matched against a knowledge base relevant to the account you're messaging.</li>
+      <li><b>Keeping the conversation working.</b> Recent messages are retained short-term so the bot has context for follow-up questions.</li>
+      <li><b>Reliability.</b> Delivery metadata helps us notice and fix failures.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>What we don't do</h2>
+    <ul>
+      <li>We don't sell your data or messages to third parties.</li>
+      <li>We don't use your conversations for advertising.</li>
+      <li>We don't share your identity across unrelated accounts without your action.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Retention &amp; deletion</h2>
+    <p>Conversation history is kept only as long as needed to provide the service. To request deletion of your data, contact us using the details below and reference the phone number or Telegram handle you messaged from.</p>
+  </section>
+
+  <section>
+    <h2>Contact</h2>
+    <div class="contact">
+      <span>Questions about this policy or your data</span>
+      <a href="mailto:rcmanaure@gmail.com">rcmanaure@gmail.com</a>
+    </div>
+  </section>
+
+  <footer>
+    This policy covers the langraph-bot messaging assistant only, published to satisfy WhatsApp/Meta app-review requirements for the underlying integration.
+  </footer>
+</div>
+</body>
+</html>

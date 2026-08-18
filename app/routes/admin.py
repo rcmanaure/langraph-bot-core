@@ -613,6 +613,11 @@ async def get_tenant_billing(tenant_slug: str, _: None = Depends(verify_operator
     }
 
 
+@public_router.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
+async def privacy_policy(request: Request):
+    return templates.TemplateResponse(request=request, name="privacy.html")
+
+
 @public_router.get("/pricing")
 async def get_pricing():
     """Get pricing and plan details (no auth required)."""
