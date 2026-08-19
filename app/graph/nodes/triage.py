@@ -16,16 +16,32 @@ logger = logging.getLogger(__name__)
 
 _TRIAGE_PROMPT = """\
 Classify the user's latest message into ONE category:
-- "greeting": ONLY a greeting, thanks, farewell, or social pleasantry with NO question about products/services/prices at all
-- "rag": ANY question about a product, service, price, exam, procedure, study, biopsy, analysis, cost, or anything the business might offer — even if vague
-- "catalog": explicitly wants a FULL list/catalog/ALL products or services
+- "greeting": ONLY a greeting, thanks, farewell, or social pleasantry with NO question at all
+- "rag": the default for ANYTHING a real customer of THIS business might plausibly ask — not
+  just prices/exams/procedures, but ALSO practical/logistical questions about the business
+  itself: location, address, how to get there, hours, phone/contact, payment methods,
+  insurance/convenios, delivery of results, appointments, parking, or anything else about how
+  to interact with this business. If the message is about the business in ANY way and isn't
+  clearly one of the other categories below, it is "rag" — the examples below are
+  illustrations, not an exhaustive list of what counts.
+- "catalog": explicitly asks to see the FULL list/catalog/menu of ALL products or services —
+  not a specific question about one aspect of the business (that is "rag", even if that aspect
+  isn't explicitly listed as an example anywhere in this prompt).
 - "human": explicitly asks to speak with a human, operator, or agent
-- "off_topic": ONLY if completely unrelated (politics, weather, sports, jokes, coding questions)
+- "off_topic": the business genuinely has nothing to do with this message — general knowledge,
+  entertainment, other businesses, or topics with no plausible connection to this business at
+  all (politics, weather, sports, jokes, coding questions). This is the rare exception, not a
+  fallback for "I'm not sure which specific category this practical question fits."
 
 IMPORTANT: Medical terms, body parts, lab tests, procedures, and prices are ALWAYS "rag" —
-never "greeting", even if the message opens with "hola" first.
+never "greeting", even if the message opens with "hola" first. A question about the business's
+location, hours, contact info, payment methods, or any other practical/logistical topic is
+ALSO "rag" — these are real questions about the business, never "off_topic", and asking about
+ONE of them is not the same as asking for the FULL catalog.
 Examples of "greeting": "hola", "buenas", "gracias", "buen día", "hasta luego"
-Examples of "rag": "biopsia de pulmon", "cuanto cuesta", "riñon", "análisis de sangre", "histología"
+Examples of "rag": "biopsia de pulmon", "cuanto cuesta", "riñon", "análisis de sangre", "histología",
+"donde estan ubicados", "cual es la direccion", "que horario tienen", "como los contacto",
+"que metodos de pago aceptan", "hacen envio de resultados", "tienen convenio con seguros"
 Examples of "off_topic": "quien ganó el partido", "como programo en python", "chiste"
 
 When in doubt between rag/off_topic → "rag". Default is "rag".
@@ -50,6 +66,27 @@ _GREETING_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Found live (#42): once the LLM misclassifies a location question as
+# off_topic ONE time, that (wrong) exchange sits in the conversation history
+# forever, and the model then pattern-matches its own prior refusal on every
+# later location question in the same thread -- reproduced 8/8 off_topic
+# with the real poisoned history, vs 8/8 rag with a fresh/short one. No
+# amount of prompt tuning fixes a classifier conditioning on its own past
+# mistakes, so this -- like _GREETING_RE above -- routes a known-safe
+# category deterministically instead of asking the LLM at all. Substring
+# match (not whole-message anchored like greeting): "hola, donde quedan" or
+# "y donde se encuentran ubicados" must still hit this before either the
+# greeting regex or the LLM sees them.
+_LOCATION_RE = re.compile(
+    r"d[oó]nde\s+(es|qued[ao]n?|est[aá]n?(?:\s+ubicados?)?|se\s+encuentran|"
+    r"puedo\s+encontrarlos?)|"
+    r"direcci[oó]n|"
+    r"c[oó]mo\s+(llego|llegar|puedo\s+llegar)|"
+    r"ubicaci[oó]n|"
+    r"en\s+qu[eé]\s+(parte|zona|sector|lugar)",
+    re.IGNORECASE,
+)
+
 
 async def triage(state: AgentState) -> dict:
     last_human = last_human_text(state)
@@ -70,6 +107,10 @@ async def triage(state: AgentState) -> dict:
     if _GREETING_RE.match(last_human):
         logger.info("triage_regex_greeting_shortcut")
         return {"triage_decision": "greeting"}
+
+    if _LOCATION_RE.search(last_human):
+        logger.info("triage_regex_location_shortcut")
+        return {"triage_decision": "rag"}
 
     trimmed = trim_messages(
         state["messages"],

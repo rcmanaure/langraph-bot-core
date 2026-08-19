@@ -237,6 +237,13 @@ async def _reply(adapter: ChannelAdapter, inbound: Inbound, text: str, graph) ->
                 "chat_id": inbound.chat_id,
             },
             config={"configurable": {"thread_id": inbound.thread_id}},
+            # A chat turn is short-lived and turn.py already never lets an
+            # exception escape (falls back to GRAPH_ERROR) -- mid-turn resume
+            # granularity from per-node checkpoints isn't used, so persist
+            # once at the end instead of after each of the graph's 8 nodes.
+            # interrupt_node still persists correctly under "exit" (LangGraph
+            # writes the checkpoint on GraphInterrupt regardless of mode).
+            durability="exit",
         )
         if result.get("__interrupt__"):
             # The graph suspended (interrupt_node) rather than finishing —

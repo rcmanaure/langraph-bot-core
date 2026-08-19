@@ -427,3 +427,66 @@ async def test_rejection_after_approximation_escalates_across_two_turns():
 
     assert HUMAN_HANDOFF in turn2["answer"]
     audit_db.commit.assert_awaited_once()  # only on turn 2, when the rejection escalates
+
+
+@pytest.mark.asyncio
+async def test_run_turn_interrupt_survives_durability_exit():
+    """turn.py calls graph.ainvoke(..., durability="exit") -- checkpoints only
+    persist when the graph exits, not after every node. interrupt_node exits
+    the graph via a raised GraphInterrupt rather than returning normally, so
+    this proves that path still persists under "exit": the real call site
+    (run_turn) reaches the user with HUMAN_HANDOFF, and the checkpoint the
+    operator's /operator/resume endpoint needs is actually on disk (in this
+    test, in the InMemorySaver) afterwards, not silently dropped."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.channels.base import Inbound
+    from app.channels.turn import run_turn
+    from app.messages import HUMAN_HANDOFF as HANDOFF
+
+    class RecordingAdapter:
+        channel = "fake"
+
+        def __init__(self):
+            self.sent: list[str] = []
+
+        async def acknowledge(self, inbound):
+            pass
+
+        async def send(self, inbound, text):
+            self.sent.append(text)
+            return True
+
+    inbound = Inbound(
+        tenant_slug="acme", channel="fake", user_id="1",
+        chat_id="100", message_id="7", text="quiero hablar con un humano",
+    )
+    thread_id = inbound.thread_id
+    checkpointer = InMemorySaver()
+    graph = build_graph(checkpointer=checkpointer)
+    adapter = RecordingAdapter()
+    llm = _mock_chat_llm("should not be reached", triage_decision="human")
+
+    audit_db = AsyncMock()
+    audit_result = MagicMock()
+    audit_result.first.return_value = None
+    audit_db.execute = AsyncMock(return_value=audit_result)
+    audit_db.commit = AsyncMock()
+    audit_db.__aenter__ = AsyncMock(return_value=audit_db)
+    audit_db.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
+        patch("app.services.human_control.AsyncSessionLocal", MagicMock(return_value=audit_db)),
+        patch("app.channels.turn.is_under_human_control", AsyncMock(return_value=False)),
+        patch("app.channels.turn.resolve_staff", AsyncMock(return_value=False)),
+    ):
+        await run_turn(adapter, inbound, graph)
+
+    mock_retrieve.assert_not_called()  # human path never reaches retrieve
+    assert adapter.sent == [HANDOFF]
+
+    config = {"configurable": {"thread_id": thread_id}}
+    state = await graph.aget_state(config)
+    assert state.next == ("interrupt_node",)  # paused there, and it's on disk under "exit"

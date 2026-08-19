@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -13,6 +14,15 @@ logger = logging.getLogger(__name__)
 
 _MAX_TOPICS = 10
 _SCHEMA_VERSION = "1.0.0"
+
+# get_chat_llm() shares its model with generate(), called moments earlier in
+# the same turn -- back-to-back calls to the same model routinely trip
+# OpenRouter's shared (non-BYOK) rate limit on the upstream provider (found
+# live, 10/10 reproduced -- see conversation). One short retry is enough:
+# this is a same-turn burst against a per-second limit, not sustained
+# throttling, so a longer backoff or more attempts would just add latency to
+# a call whose failure is already harmless (see the except block below).
+_RATE_LIMIT_RETRY_DELAY = 1.5
 
 _EXTRACT_PROMPT = """\
 Given the user's latest message and the assistant's reply, extract:
@@ -49,9 +59,15 @@ async def update_profile(state: AgentState, runtime: Runtime | None = None) -> d
 
         llm = get_chat_llm()
         payload = f"{_EXTRACT_PROMPT}\n\nUser: {query}\nAssistant: {state.get('answer', '')}"
-        extraction: ProfileExtraction = await llm.with_structured_output(
-            ProfileExtraction
-        ).ainvoke(payload)
+        structured = llm.with_structured_output(ProfileExtraction)
+        try:
+            extraction: ProfileExtraction = await structured.ainvoke(payload)
+        except Exception as exc:
+            if getattr(exc, "status_code", None) != 429:
+                raise
+            logger.warning("update_profile_rate_limited retrying_in=%.1fs", _RATE_LIMIT_RETRY_DELAY)
+            await asyncio.sleep(_RATE_LIMIT_RETRY_DELAY)
+            extraction = await structured.ainvoke(payload)
 
         topics = list(profile.get("topics_of_interest") or [])
         if extraction.new_topic and extraction.new_topic not in topics:
