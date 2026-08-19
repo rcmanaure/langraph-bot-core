@@ -38,7 +38,8 @@ never "greeting", even if the message opens with "hola" first. A question about 
 location, hours, contact info, payment methods, or any other practical/logistical topic is
 ALSO "rag" — these are real questions about the business, never "off_topic", and asking about
 ONE of them is not the same as asking for the FULL catalog.
-Examples of "greeting": "hola", "buenas", "gracias", "buen día", "hasta luego"
+Examples of "greeting": "hola", "buenas", "gracias", "buen día", "hasta luego", "qué tal",
+"quihubo", "épale", "aló", "qué más" (LATAM informal openers, not just "hola")
 Examples of "rag": "biopsia de pulmon", "cuanto cuesta", "riñon", "análisis de sangre", "histología",
 "donde estan ubicados", "cual es la direccion", "que horario tienen", "como los contacto",
 "que metodos de pago aceptan", "hacen envio de resultados", "tienen convenio con seguros"
@@ -48,23 +49,36 @@ When in doubt between rag/off_topic → "rag". Default is "rag".
 Reply ONLY with JSON: {"decision": "<category>"}
 """
 
-# Whole-message-only match — a pure greeting/farewell/thanks with nothing
-# else. Mirrors the prompt's own "IMPORTANT" rule: any extra content (a
-# question, a medical term) must still reach the LLM as "rag", so this never
-# matches a partial prefix like "hola, cuanto cuesta" — the trailing
-# `[.!¡?¿,]*\s*$` anchor requires nothing follows the greeting phrase itself.
-# Short-circuits the common high-frequency, near-zero-ambiguity case (bare
-# "hola"/"gracias"/"chao") without paying for an LLM call on every message.
-_GREETING_RE = re.compile(
-    r"^\s*"
-    r"(?:hola+|holis|buen[oa]s?(?:\s+(?:d[ií]as?|tardes|noches))?|"
+# Shared by both regexes below. Widened 2026-08-19 to cover common LATAM
+# openers beyond hola/buenas (qué tal, quihubo/quiubo, épale, aló, qué
+# onda, qué más -- México/Colombia/Venezuela/general usage; see
+# GREETING_PREFIX_RE in retrieve.py for the same widening and rationale).
+# buen[oa]s? -> buen(?:[oa]s?)? so a bare "buen día" (no trailing s) matches.
+_GREETING_PHRASE = (
+    r"(?:hola+|holis|saludos?|qu[eé]\s+tal|qu[eé]\s+h[uú]bo|quih[uú]bo|quiub[oa]?|"
+    r"qu[eé]\s+m[aá]s|qu[eé]\s+onda|[eé]pale|epa|al[oó]|"
+    r"buen(?:[oa]s?)?(?:\s+(?:d[ií]as?|tardes|noches))?|"
     r"gracias|muchas\s+gracias|mil\s+gracias|de\s+nada|"
     r"hasta\s+luego|nos\s+vemos|chao|adi[oó]s|"
     r"mucho\s+gusto|un\s+gusto|"
     r"hi+|hey+|hello+|thanks|thank\s+you|bye)"
-    r"\s*[.!¡?¿,]*\s*$",
-    re.IGNORECASE,
 )
+
+# Whole-message-only match — a pure greeting/farewell/thanks with nothing
+# else. Mirrors the prompt's own "IMPORTANT" rule: any extra content (a
+# question, a medical term) must still reach the LLM as "rag", so this never
+# matches a partial prefix like "hola, cuanto cuesta" — the trailing
+# `\s*[.!¡?¿,]*\s*$` anchor requires nothing follows the greeting phrase itself.
+# Short-circuits the common high-frequency, near-zero-ambiguity case (bare
+# "hola"/"gracias"/"chao") without paying for an LLM call on every message.
+_GREETING_RE = re.compile(rf"^\s*{_GREETING_PHRASE}\s*[.!¡?¿,]*\s*$", re.IGNORECASE)
+
+# Chained variant of the same phrase set ("hola buenas", "hola, gracias") —
+# one or more greeting phrases back to back, still nothing else. Used below
+# to tell an honestly-pure multi-word greeting apart from a real mixed
+# message ("hola cuanto cuesta X") when validating the LLM's own "greeting"
+# verdict, since _GREETING_RE's single-phrase anchor doesn't cover it.
+_GREETING_CHAIN_RE = re.compile(rf"^\s*(?:{_GREETING_PHRASE}\s*[.!¡?¿,]*\s*)+$", re.IGNORECASE)
 
 # Found live (#42): once the LLM misclassifies a location question as
 # off_topic ONE time, that (wrong) exchange sits in the conversation history
@@ -141,19 +155,37 @@ async def triage(state: AgentState) -> dict:
     # call entirely, a documented langchain_core behavior distinct from a
     # parse/validation failure (see langchain-ai/langchain#36349).
     if isinstance(structured_result, TriageDecision):
-        return {"triage_decision": structured_result.decision}
-    logger.warning("triage_structured_failed=%s falling back to json parse", structured_result)
+        decision = structured_result.decision
+    else:
+        logger.warning("triage_structured_failed=%s falling back to json parse", structured_result)
+        decision = None
+        if not isinstance(raw_response, BaseException):
+            try:
+                content = raw_response.content.strip()
+                content = re.sub(r"^```[a-zA-Z]*\s*", "", content)
+                content = re.sub(r"\s*```$", "", content).strip()
+                parsed = json.loads(content)["decision"]
+                td = TriageDecision(decision=parsed)  # validate enum
+                decision = td.decision
+            except Exception:
+                pass
+        if decision is None:
+            logger.warning("triage_json_fallback_failed defaulting to rag")
+            decision = "rag"
 
-    if not isinstance(raw_response, BaseException):
-        try:
-            content = raw_response.content.strip()
-            content = re.sub(r"^```[a-zA-Z]*\s*", "", content)
-            content = re.sub(r"\s*```$", "", content).strip()
-            decision = json.loads(content)["decision"]
-            td = TriageDecision(decision=decision)  # validate enum
-            return {"triage_decision": td.decision}
-        except Exception:
-            pass
+    # Found live (2026-08-19): nova-micro misclassified a real mixed message
+    # ("hola cuanto cuesta el examen de utero?") as pure "greeting" in ~20%
+    # of a 10-sample check, despite the prompt's explicit "medical terms
+    # ALWAYS rag, never greeting, even if the message opens with hola" rule
+    # -- silently dropping the user's actual question, since generate()'s
+    # greeting branch never looks at retrieved content. Same "LLM ignores
+    # its own instruction on the easy pattern" failure as LOCATION_RE's
+    # off_topic case above -- deterministic override, not more prompt tuning.
+    # Gated on _GREETING_CHAIN_RE (not just any "greeting" verdict) so an
+    # honest multi-word greeting like "hola buenas" stays "greeting" instead
+    # of being punished for not fitting the single-phrase _GREETING_RE.
+    if decision == "greeting" and not _GREETING_CHAIN_RE.match(last_human):
+        logger.info("triage_greeting_override_mixed_message")
+        decision = "rag"
 
-    logger.warning("triage_json_fallback_failed defaulting to rag")
-    return {"triage_decision": "rag"}
+    return {"triage_decision": decision}

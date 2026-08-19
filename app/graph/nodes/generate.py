@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import AsyncSessionLocal
-from app.graph.nodes.retrieve import LOCATION_RE, is_bare_rejection, last_human_text
+from app.graph.nodes.retrieve import GREETING_PREFIX_RE, LOCATION_RE, is_bare_rejection, last_human_text
 from app.messages import HUMAN_HANDOFF
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.services import human_control
@@ -69,7 +69,7 @@ _RESULTS_NOTE_RULE = (
 )
 
 _RAG_SYSTEM = """\
-Es un asistente de {expertise}. Su tono es {tone_description}.{specialization_block}
+Es un asistente de {expertise}. Su tono es {tone_description}.{specialization_block}{greeting_note}
 Para precios y disponibilidad use ÚNICAMENTE el contexto proporcionado — NUNCA invente un producto
 o precio que no esté ahí. Si arriba se le dio contexto de especialización, puede usar ese
 conocimiento de dominio para interpretar jerga, sinónimos o abreviaturas del usuario, pero la
@@ -90,7 +90,7 @@ Contexto:
 """
 
 _CATALOG_SYSTEM = """\
-Es un asistente de {expertise}.
+Es un asistente de {expertise}.{greeting_note}
 Liste TODOS los ítems del catálogo a continuación, organizados por sección.
 No omita ningún ítem. Use los nombres y precios exactos del catálogo.{contact_hint}
 """ + _RESULTS_NOTE_RULE + """
@@ -110,6 +110,20 @@ _GREETING_MSG = (
 )
 
 _FALLBACK = "Lo siento, no pude procesar su consulta en este momento. Por favor intente de nuevo."
+
+# Mixed message ("Hola, cuanto cuesta X") normally reaches "rag"/"catalog"
+# (GREETING_PREFIX_RE is defined in retrieve.py -- triage.py uses the same
+# signal to keep a mixed message OUT of "greeting"), answered normally but
+# with no acknowledgement of the greeting at all. Deliberately does NOT pull
+# in the full canned _GREETING_MSG/greeting_message here -- repeating the
+# fixed address/phone/maps block on every priced question would read as MORE
+# robotic, not less (see conversation). Instead the model opens with its own
+# short natural acknowledgement.
+_GREETING_ACK_NOTE = (
+    "\nEl usuario abrió su mensaje con un saludo. Antes de responder, abra su respuesta con un "
+    "saludo breve y natural (una frase corta, sin repetir información de contacto, horario ni "
+    "ubicación) y luego responda la consulta."
+)
 
 
 # The match decision — exact vs. approximate — used to be computed here and
@@ -314,6 +328,11 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
             tenant_ctx["contact_hint"] = ""
 
     context = "Sin contexto disponible." if not chunks else "\n\n---\n\n".join(c["content"] for c in chunks)
+    greeting_note = (
+        _GREETING_ACK_NOTE
+        if not is_staff and GREETING_PREFIX_RE.match(last_human_text(state) or "")
+        else ""
+    )
     template = _CATALOG_SYSTEM if is_catalog else _RAG_SYSTEM
     if is_catalog:
         hint_template = _CATALOG_FORMAT_HINT_STAFF if is_staff else _CATALOG_FORMAT_HINT
@@ -337,7 +356,7 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
     system = template.format(
         context=context, format_hint=format_hint, match_instruction=match_instruction,
         negative_confirmation_rule=negative_confirmation_rule,
-        specialization_block=specialization_block, **tenant_ctx,
+        specialization_block=specialization_block, greeting_note=greeting_note, **tenant_ctx,
     )
 
     trimmed = trim_messages(

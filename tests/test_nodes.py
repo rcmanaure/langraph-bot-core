@@ -171,8 +171,12 @@ async def test_triage_no_human_message_defaults_rag(base_state):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "greeting",
-    ["hola", "Hola!", "buenas", "buenos días", "buenas tardes", "gracias",
-     "muchas gracias", "hasta luego", "chao", "adiós", "de nada"],
+    ["hola", "Hola!", "buenas", "buenos días", "buen día", "buenas tardes", "gracias",
+     "muchas gracias", "hasta luego", "chao", "adiós", "de nada",
+     # LATAM informal openers (México/Colombia/Venezuela/general), added
+     # 2026-08-19 after "saludos" alone was found missing from the word list.
+     "saludos", "qué tal", "que tal", "quihubo", "quiubo", "qué hubo",
+     "épale", "epa", "aló", "alo", "qué onda", "qué más"],
 )
 async def test_triage_regex_shortcut_pure_greeting_skips_llm(base_state, greeting):
     base_state["messages"] = [HumanMessage(content=greeting)]
@@ -199,6 +203,48 @@ async def test_triage_regex_shortcut_does_not_match_greeting_plus_question(base_
 
     mock_get_llm.assert_called_once()
     assert result == {"triage_decision": "rag"}
+
+
+# Found live (2026-08-19): a real "hola cuanto cuesta el examen de utero?"
+# misclassified as pure "greeting" by the triage LLM in ~20% of a 10-sample
+# check, despite the prompt's own "medical terms ALWAYS rag, never greeting"
+# rule -- silently dropping the user's actual question (generate()'s
+# greeting branch never looks at retrieved content at all). Deterministic
+# override, not more prompt tuning -- same rationale as LOCATION_RE's
+# off_topic override above.
+@pytest.mark.asyncio
+async def test_triage_overrides_llm_greeting_verdict_on_mixed_message(base_state):
+    base_state["messages"] = [HumanMessage(content="hola cuanto cuesta el examen de utero?")]
+    mock_llm = MagicMock()
+    mock_structured = AsyncMock()
+    from app.schemas.triage import TriageDecision
+    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="greeting"))
+    mock_llm.with_structured_output.return_value = mock_structured
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
+        result = await triage(base_state)
+
+    assert result == {"triage_decision": "rag"}
+
+
+@pytest.mark.asyncio
+async def test_triage_does_not_override_a_genuine_chained_greeting(base_state):
+    # "hola buenas" is two greeting words back to back, still nothing
+    # else -- the override must not punish it for missing _GREETING_RE's
+    # single-phrase anchor.
+    base_state["messages"] = [HumanMessage(content="hola buenas")]
+    mock_llm = MagicMock()
+    mock_structured = AsyncMock()
+    from app.schemas.triage import TriageDecision
+    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="greeting"))
+    mock_llm.with_structured_output.return_value = mock_structured
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
+        result = await triage(base_state)
+
+    assert result == {"triage_decision": "greeting"}
 
 
 @pytest.mark.asyncio

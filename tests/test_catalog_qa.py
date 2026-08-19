@@ -376,6 +376,56 @@ async def test_greeting_no_llm_called():
 
 
 @pytest.mark.asyncio
+async def test_mixed_greeting_and_question_gets_greeting_ack_note():
+    """"Hola, cuanto cuesta X" is classified "rag" (not "greeting", see
+    triage.py), so it never reaches the canned _GREETING_MSG — but the model
+    should still open naturally instead of ignoring the "hola" outright."""
+    state = _make_state(LUNG_CHUNKS, user_text="hola, cuanto cuesta una biopsia de pulmon")
+    llm = _mock_llm("SRP009 $90")
+
+    with patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value=TENANT_CTX)), \
+         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm):
+        await generate(state)
+
+    ctx = _captured_system(llm)
+    assert "El usuario abrió su mensaje con un saludo" in ctx
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "opener",
+    # "saludos" found missing live 2026-08-19 -- "saludos. cuanto cuesta el
+    # examen de hueso" got the price with no opener at all. Widened same day
+    # to common LATAM informal openers (México/Colombia/Venezuela/general).
+    ["saludos", "que tal", "quihubo", "quiubo", "epale", "alo", "que onda", "que mas", "buen dia"],
+)
+async def test_latam_greeting_prefix_gets_greeting_ack_note(opener):
+    state = _make_state(LUNG_CHUNKS, user_text=f"{opener}, cuanto cuesta una biopsia de pulmon")
+    llm = _mock_llm("SRP009 $90")
+
+    with patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value=TENANT_CTX)), \
+         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm):
+        await generate(state)
+
+    ctx = _captured_system(llm)
+    assert "El usuario abrió su mensaje con un saludo" in ctx
+
+
+@pytest.mark.asyncio
+async def test_bare_question_gets_no_greeting_ack_note():
+    """A question with no greeting prefix must not get the ack instruction."""
+    state = _make_state(LUNG_CHUNKS, user_text="cuanto cuesta una biopsia de pulmon")
+    llm = _mock_llm("SRP009 $90")
+
+    with patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value=TENANT_CTX)), \
+         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm):
+        await generate(state)
+
+    ctx = _captured_system(llm)
+    assert "abrió su mensaje con un saludo" not in ctx
+
+
+@pytest.mark.asyncio
 async def test_laboratorio_clinico_is_off_topic_triage():
     """Hemograma/química sanguínea → triage debe clasificar off_topic (no lo realizamos)."""
     state = _make_state([], user_text="cuánto cuesta un hemograma completo")

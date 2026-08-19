@@ -117,6 +117,7 @@ async def test_generate_uses_context():
         negative_confirmation_rule=_NEGATIVE_CONFIRMATION_RULE.format(contact_hint=""),
         tone_description=DEFAULT_TONE_DESCRIPTION,
         specialization_block="",
+        greeting_note="",
     )
     llm = _eval_llm()
     response = await llm.ainvoke([
@@ -149,6 +150,7 @@ async def test_generate_admits_missing_context():
         negative_confirmation_rule=_NEGATIVE_CONFIRMATION_RULE.format(contact_hint=""),
         tone_description=DEFAULT_TONE_DESCRIPTION,
         specialization_block="",
+        greeting_note="",
     )
     llm = _eval_llm()
     response = await llm.ainvoke([
