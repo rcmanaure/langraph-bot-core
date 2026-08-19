@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import AsyncSessionLocal
-from app.graph.nodes.retrieve import is_bare_rejection, last_human_text
+from app.graph.nodes.retrieve import LOCATION_RE, is_bare_rejection, last_human_text
 from app.messages import HUMAN_HANDOFF
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.services import human_control
@@ -147,6 +147,28 @@ _NEGATIVE_CONFIRMATION_LEAD = (
 _NEGATIVE_CONFIRMATION_RULE = _NEGATIVE_CONFIRMATION_LEAD + " y eleve al contacto: {contact_hint}"
 
 _NEGATIVE_CONFIRMATION_RULE_STAFF = _NEGATIVE_CONFIRMATION_LEAD + "."
+
+# Found live: _MATCH_UNCONFIRMED_INSTRUCTION is written for a price/item
+# approximation ("no dé el precio como seguro, pregunte si es lo que
+# necesita") -- retrieve.py's location boost (see LOCATION_RE) guarantees
+# the tenant's address/contact chunk reaches this prompt, but that chunk's
+# own retrieval similarity is naturally low (it's scored against a generic
+# probe, not the user's exact words), so _has_confirmed_match() often reads
+# "unconfirmed" even when the address itself is exact, fixed, tenant-owned
+# data with no approximation to hedge. Reproduced live: 11/12 regenerations
+# against the same real context answered with the exact address, 1/12
+# hedged into a vague restatement (once even switching to English) because
+# the model followed the price-approximation framing literally. An address
+# either IS or ISN'T in the context -- there's no "closest match" the way
+# there is for "biopsia de pulmón" vs. a similarly-named item, so this
+# exemption only fires for a location-intent message, never for an actual
+# price/item lookup where the hedge is the correct behavior.
+_LOCATION_CONFIDENCE_NOTE = (
+    "\nExcepción — datos de contacto/ubicación: si el contexto incluye la dirección, teléfono o "
+    "forma de contacto del negocio, indíquelos de forma directa y seguros — NO son una aproximación "
+    "de un ítem, son datos fijos del negocio, así que la instrucción de arriba sobre no confirmar "
+    "precios/preguntar \"¿Es lo que necesita?\" no aplica a ellos."
+)
 
 
 def _has_confirmed_match(chunks: list[dict]) -> bool:
@@ -291,6 +313,8 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         hint_template = _FORMAT_HINT_STAFF if is_staff else _FORMAT_HINT
     format_hint = hint_template.format(tone_description=tenant_ctx["tone_description"])
     match_instruction = _MATCH_CONFIRMED_INSTRUCTION if confirmed else _MATCH_UNCONFIRMED_INSTRUCTION
+    if not confirmed and LOCATION_RE.search(last_human_text(state) or ""):
+        match_instruction += _LOCATION_CONFIDENCE_NOTE
     negative_confirmation_rule = (
         _NEGATIVE_CONFIRMATION_RULE_STAFF if is_staff
         else _NEGATIVE_CONFIRMATION_RULE.format(contact_hint=tenant_ctx["contact_hint"])

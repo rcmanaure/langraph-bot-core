@@ -6,7 +6,7 @@ import re
 from langchain_core.messages import SystemMessage, trim_messages
 
 from app.config import settings
-from app.graph.nodes.retrieve import is_bare_rejection, last_human_text
+from app.graph.nodes.retrieve import LOCATION_RE, is_bare_rejection, last_human_text
 from app.schemas.triage import TriageDecision
 from app.services.llm import get_triage_llm
 from app.services.rag import token_counter
@@ -77,15 +77,12 @@ _GREETING_RE = re.compile(
 # match (not whole-message anchored like greeting): "hola, donde quedan" or
 # "y donde se encuentran ubicados" must still hit this before either the
 # greeting regex or the LLM sees them.
-_LOCATION_RE = re.compile(
-    r"d[oó]nde\s+(es|qued[ao]n?|est[aá]n?(?:\s+ubicados?)?|se\s+encuentran|"
-    r"puedo\s+encontrarlos?)|"
-    r"direcci[oó]n|"
-    r"c[oó]mo\s+(llego|llegar|puedo\s+llegar)|"
-    r"ubicaci[oó]n|"
-    r"en\s+qu[eé]\s+(parte|zona|sector|lugar)",
-    re.IGNORECASE,
-)
+#
+# Defined in retrieve.py, not here -- retrieve() reuses the same signal to
+# guarantee the tenant's address chunk survives retrieval for a location
+# question (see LOCATION_RE's docstring there), and retrieve.py is already
+# the module triage.py imports from (is_bare_rejection/last_human_text
+# below), so defining it there instead of here avoids a circular import.
 
 
 async def triage(state: AgentState) -> dict:
@@ -108,7 +105,7 @@ async def triage(state: AgentState) -> dict:
         logger.info("triage_regex_greeting_shortcut")
         return {"triage_decision": "greeting"}
 
-    if _LOCATION_RE.search(last_human):
+    if LOCATION_RE.search(last_human):
         logger.info("triage_regex_location_shortcut")
         return {"triage_decision": "rag"}
 
