@@ -72,12 +72,19 @@ async def lifespan(app: FastAPI):
 
     await _cleanup_stuck_jobs()
 
+    from app.channels.turn import wait_for_pending_turns
+
     async with build_runtime() as runtime:
         app.state.graph = runtime.graph
         start_scheduler(runtime.graph)
         logger.info("langgraph_ready")
         yield
         stop_scheduler()
+        # Found live: a restart mid-turn silently dropped a real WhatsApp
+        # reply -- see turn.py's _PENDING_TURNS docstring. Must run inside
+        # this `async with` block, before build_runtime()'s own teardown
+        # closes the DB/checkpointer pool a pending turn still needs.
+        await wait_for_pending_turns()
 
     logger.info("shutdown_complete")
 

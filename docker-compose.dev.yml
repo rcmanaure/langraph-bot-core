@@ -28,6 +28,13 @@ services:
     # DB crashes on boot with UndefinedTableError. Found live: cold dev
     # stack failed on _cleanup_stuck_jobs() querying index_jobs pre-migration.
     command: ["sh", "-c", "alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    # Default (10s) is shorter than a real turn can take (up to
+    # _GRAPH_TIMEOUT_SECONDS=45s in app/channels/turn.py) -- Docker SIGKILLs
+    # the whole container once this expires regardless of what the app's own
+    # shutdown handler is doing, so wait_for_pending_turns() needs real room
+    # to actually wait. Found live: a restart mid-turn silently dropped a
+    # real WhatsApp reply with zero trace before this existed.
+    stop_grace_period: 60s
     # environment:
     #   - ENVIRONMENT=development
     #   - DEBUG=true
