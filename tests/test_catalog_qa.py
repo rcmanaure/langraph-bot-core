@@ -92,6 +92,24 @@ def _make_state(chunks, triage_decision="rag", user_text="consulta"):
     }
 
 
+def _mock_triage_llm(decision: str):
+    """triage() makes one call — with_structured_output(..., include_raw=True)
+    — whose runnable returns the {"raw", "parsed", "parsing_error"} envelope."""
+    from app.schemas.triage import TriageDecision
+
+    runnable = AsyncMock()
+    runnable.ainvoke = AsyncMock(
+        return_value={
+            "raw": AIMessage(content=""),
+            "parsed": TriageDecision(decision=decision),
+            "parsing_error": None,
+        }
+    )
+    llm = MagicMock()
+    llm.with_structured_output.return_value = runnable
+    return llm
+
+
 def _mock_llm(response_text: str):
     """LLM that returns a fixed answer and captures call_args."""
     llm = MagicMock()
@@ -429,13 +447,8 @@ async def test_bare_question_gets_no_greeting_ack_note():
 async def test_laboratorio_clinico_is_off_topic_triage():
     """Hemograma/química sanguínea → triage debe clasificar off_topic (no lo realizamos)."""
     state = _make_state([], user_text="cuánto cuesta un hemograma completo")
-    from app.schemas.triage import TriageDecision
 
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="off_topic"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+    mock_llm = _mock_triage_llm("off_topic")
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(state)
@@ -447,13 +460,8 @@ async def test_laboratorio_clinico_is_off_topic_triage():
 async def test_serologia_is_off_topic():
     """Serología no es histopatología → off_topic."""
     state = _make_state([], user_text="prueba de VIH, serología")
-    from app.schemas.triage import TriageDecision
 
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="off_topic"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+    mock_llm = _mock_triage_llm("off_topic")
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(state)
@@ -481,13 +489,8 @@ async def test_serologia_is_off_topic():
 async def test_medical_organ_queries_route_to_rag(query):
     """Cualquier consulta de órgano/procedimiento → triage='rag', nunca off_topic."""
     state = _make_state([], user_text=query)
-    from app.schemas.triage import TriageDecision
 
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="rag"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+    mock_llm = _mock_triage_llm("rag")
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(state)

@@ -61,7 +61,16 @@ def _mock_chat_llm(reply_text: str, triage_decision: str = "rag"):
     llm = MagicMock()
     llm.model_name = "test-model"
     structured = AsyncMock()
-    structured.ainvoke = AsyncMock(return_value=TriageDecision(decision=triage_decision))
+    structured.ainvoke = AsyncMock(
+        # triage() calls with_structured_output(..., include_raw=True), whose
+        # runnable returns the {"raw", "parsed", "parsing_error"} envelope
+        # from a single model call.
+        return_value={
+            "raw": AIMessage(content=""),
+            "parsed": TriageDecision(decision=triage_decision),
+            "parsing_error": None,
+        }
+    )
     llm.with_structured_output.return_value = structured
     llm.ainvoke = AsyncMock(return_value=AIMessage(content=reply_text))
     return llm
@@ -265,10 +274,10 @@ async def test_greeting_skips_retrieve_and_second_llm_call():
 
     mock_retrieve.assert_not_called()
     # generate() must use the canned greeting, never calling the chat LLM for
-    # a reply -- the one ainvoke() call on this shared mock is triage's own
-    # parallel raw-fallback attempt (see triage.py's asyncio.gather), not a
-    # second call from generate().
-    llm.ainvoke.assert_called_once()
+    # a reply. Zero, not one: triage() now gets its raw-fallback text from the
+    # same include_raw=True structured call instead of a second concurrent
+    # llm.ainvoke(), so nothing on this path touches .ainvoke at all.
+    llm.ainvoke.assert_not_called()
     assert "gracias por comunicarte" in result["answer"].lower()
 
 
@@ -294,10 +303,10 @@ async def test_human_escalation_routes_through_interrupt_skipping_retrieve_and_g
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
 
     mock_retrieve.assert_not_called()
-    # generate() never runs on the human path -- the one ainvoke() call on
-    # this shared mock is triage's own parallel raw-fallback attempt (see
-    # triage.py's asyncio.gather), not a call from generate().
-    llm.ainvoke.assert_called_once()
+    # generate() never runs on the human path. Zero, not one: triage() now
+    # gets its raw-fallback text from the same include_raw=True structured
+    # call instead of a second concurrent llm.ainvoke().
+    llm.ainvoke.assert_not_called()
     # The resume value is discarded, never folded into "answer" or the
     # message history (see ADR-009 / #39) -- delivering a reply to the user
     # is #37's job (send through the channel), not this node's.

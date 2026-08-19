@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import re
@@ -135,31 +134,37 @@ async def triage(state: AgentState) -> dict:
     llm = get_triage_llm()
     payload = [SystemMessage(content=_TRIAGE_PROMPT)] + trimmed
 
-    # Structured (function-calling) and raw+JSON-parse both fired at once,
-    # not sequentially -- triage_model (amazon/nova-micro-v1) runs 7-10s per
-    # call (live-measured, see docs/model-upgrade-baseline.md), so a
-    # sequential retry doubled worst-case latency to ~20s. Running both
-    # concurrently caps it at ~10s (the slower of the two) with the same
-    # two-tier accuracy this already had -- structured preferred, JSON parse
-    # as fallback, "rag" as last resort. Costs one extra OpenRouter call on
-    # every turn instead of only on structured failures; nova-micro is cheap
-    # enough ($0.035/$0.14 per 1M tokens) that this isn't a real cost trade.
-    structured_result, raw_response = await asyncio.gather(
-        llm.with_structured_output(TriageDecision).ainvoke(payload),
-        llm.ainvoke(payload),
-        return_exceptions=True,
-    )
+    # ONE model call, both tiers. This used to fire the structured
+    # (function-calling) call and a plain raw call concurrently via
+    # asyncio.gather, purely so the JSON-parse fallback would have the
+    # model's own text in hand without paying a second round trip
+    # sequentially -- but that doubled the call count and the prompt tokens
+    # on every non-shortcut turn. include_raw=True returns
+    # {"raw": AIMessage, "parsed": ..., "parsing_error": ...} from a single
+    # call, which is exactly the two-tier input the code below already
+    # wanted: structured preferred, JSON parse of the raw text as fallback,
+    # "rag" as last resort.
+    try:
+        result = await llm.with_structured_output(TriageDecision, include_raw=True).ainvoke(payload)
+    except Exception as exc:
+        logger.warning("triage_call_failed=%s defaulting to rag", exc)
+        return {"triage_decision": "rag"}
 
-    # isinstance(TriageDecision), not "not an exception" -- with_structured_
-    # output() returns None (no exception) when the model skips the tool
-    # call entirely, a documented langchain_core behavior distinct from a
-    # parse/validation failure (see langchain-ai/langchain#36349).
+    structured_result = result.get("parsed")
+    raw_response = result.get("raw")
+
+    # isinstance(TriageDecision), not "is not None" -- with_structured_
+    # output() yields parsed=None (no exception) when the model skips the
+    # tool call entirely, a documented langchain_core behavior distinct from
+    # a parse/validation failure (see langchain-ai/langchain#36349). In that
+    # case raw.content still holds the model's text, which the prompt asked
+    # to be bare JSON -- hence the fallback below.
     if isinstance(structured_result, TriageDecision):
         decision = structured_result.decision
     else:
-        logger.warning("triage_structured_failed=%s falling back to json parse", structured_result)
+        logger.warning("triage_structured_failed=%s falling back to json parse", result.get("parsing_error"))
         decision = None
-        if not isinstance(raw_response, BaseException):
+        if raw_response is not None:
             try:
                 content = raw_response.content.strip()
                 content = re.sub(r"^```[a-zA-Z]*\s*", "", content)
