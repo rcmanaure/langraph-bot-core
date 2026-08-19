@@ -32,14 +32,6 @@ class TenantPolicy:
         """Check if tenant can upload another document."""
         return doc_count < self._limit("docs")
 
-    def can_index_chunk(self, chunk_count: int) -> bool:
-        """Check if tenant can store another chunk."""
-        return chunk_count < self._limit("chunks")
-
-    def can_query(self, queries_this_month: int) -> bool:
-        """Check if tenant has queries remaining this month."""
-        return queries_this_month < self._limit("queries_monthly")
-
     def get_limits(self) -> dict:
         """Get all limits for this plan."""
         return self._limit("docs"), self._limit("chunks"), self._limit("queries_monthly")

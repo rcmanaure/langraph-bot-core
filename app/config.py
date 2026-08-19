@@ -67,7 +67,6 @@ class Settings(BaseSettings):
     # Security
     secret_key: str = "changeme"
     fernet_key: str = ""
-    csrf_secret: str = ""
     operator_token: str = ""  # if set, used for operator/admin auth instead of secret_key
 
     # Observability
@@ -96,7 +95,6 @@ class Settings(BaseSettings):
     # configured: a vision-specialized model, not the chat model (see
     # ADR-008 and docs/model-upgrade-baseline.md).
     openai_vision_model: str = ""
-    web_search_url: str = ""
 
     @property
     def effective_embedding_base_url(self) -> str:
