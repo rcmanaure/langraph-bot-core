@@ -24,6 +24,15 @@ _SCHEMA_VERSION = "1.0.0"
 # a call whose failure is already harmless (see the except block below).
 _RATE_LIMIT_RETRY_DELAY = 1.5
 
+# Found live: under that same contention, the call doesn't always come back
+# as a clean 429 -- sometimes it just never returns (no exception, nothing
+# to retry-on-429 or fall into the except below), and the whole turn hung
+# behind it until turn.py's own timeout cut it off 45s later. This node
+# already promises "best-effort... never let a failure here affect the
+# user's reply" -- a bound is what actually keeps that promise instead of
+# depending on the client to fail cleanly.
+_LLM_CALL_TIMEOUT_SECONDS = 15
+
 _EXTRACT_PROMPT = """\
 Given the user's latest message and the assistant's reply, extract:
 - new_topic: a short (2-5 word) label for what this exchange was about (e.g. "precio biopsia", "horario atención"). Null if off-topic or unclear.
@@ -61,13 +70,18 @@ async def update_profile(state: AgentState, runtime: Runtime | None = None) -> d
         payload = f"{_EXTRACT_PROMPT}\n\nUser: {query}\nAssistant: {state.get('answer', '')}"
         structured = llm.with_structured_output(ProfileExtraction)
         try:
-            extraction: ProfileExtraction = await structured.ainvoke(payload)
+            extraction: ProfileExtraction = await asyncio.wait_for(
+                structured.ainvoke(payload), timeout=_LLM_CALL_TIMEOUT_SECONDS
+            )
         except Exception as exc:
-            if getattr(exc, "status_code", None) != 429:
+            if isinstance(exc, TimeoutError) or getattr(exc, "status_code", None) == 429:
+                logger.warning("update_profile_rate_limited retrying_in=%.1fs", _RATE_LIMIT_RETRY_DELAY)
+                await asyncio.sleep(_RATE_LIMIT_RETRY_DELAY)
+                extraction = await asyncio.wait_for(
+                    structured.ainvoke(payload), timeout=_LLM_CALL_TIMEOUT_SECONDS
+                )
+            else:
                 raise
-            logger.warning("update_profile_rate_limited retrying_in=%.1fs", _RATE_LIMIT_RETRY_DELAY)
-            await asyncio.sleep(_RATE_LIMIT_RETRY_DELAY)
-            extraction = await structured.ainvoke(payload)
 
         topics = list(profile.get("topics_of_interest") or [])
         if extraction.new_topic and extraction.new_topic not in topics:

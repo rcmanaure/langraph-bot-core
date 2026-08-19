@@ -1,4 +1,5 @@
 """Unit tests for graph nodes — all LLM/DB calls are mocked."""
+import asyncio
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -656,6 +657,70 @@ async def test_update_profile_swallows_second_rate_limit_after_retry(base_state)
     with (
         patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm),
         patch("app.graph.nodes.update_profile.asyncio.sleep", AsyncMock()),
+    ):
+        result = await update_profile(base_state, runtime=runtime)
+
+    assert result == {}
+    runtime.store.aput.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_profile_retries_once_on_hang_then_succeeds(base_state):
+    """Found live: the same shared-model contention that trips a clean 429
+    sometimes just never returns instead -- no exception to retry on, and
+    the whole turn hung behind it until turn.py's own 45s timeout cut it
+    off. A bounded wait_for is what actually catches this case."""
+    from app.schemas.profile import ProfileExtraction
+
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_structured = AsyncMock()
+    calls = {"n": 0}
+
+    async def _side_effect(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # A never-resolved Future, not asyncio.sleep -- this test patches
+            # app.graph.nodes.update_profile.asyncio.sleep (the same real
+            # asyncio module the retry delay uses), so sleep() here would
+            # return instantly too and never actually hang.
+            await asyncio.Future()
+        return ProfileExtraction(new_topic="precio biopsia")
+
+    mock_structured.ainvoke = AsyncMock(side_effect=_side_effect)
+    mock_llm.with_structured_output.return_value = mock_structured
+
+    with (
+        patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.update_profile.asyncio.sleep", AsyncMock()),
+        patch("app.graph.nodes.update_profile._LLM_CALL_TIMEOUT_SECONDS", 0.05),
+    ):
+        result = await update_profile(base_state, runtime=runtime)
+
+    assert result == {}
+    assert calls["n"] == 2
+    _, _, saved = runtime.store.aput.await_args.args
+    assert saved["topics_of_interest"] == ["precio biopsia"]
+
+
+@pytest.mark.asyncio
+async def test_update_profile_swallows_persistent_hang_after_retry(base_state):
+    """A hang on the retry too falls through to the same best-effort
+    swallow every other failure gets, never raised to the caller."""
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_structured = AsyncMock()
+
+    async def _always_hang(*args, **kwargs):
+        await asyncio.Future()  # never-resolved -- see the sleep-patching note above
+
+    mock_structured.ainvoke = AsyncMock(side_effect=_always_hang)
+    mock_llm.with_structured_output.return_value = mock_structured
+
+    with (
+        patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.update_profile.asyncio.sleep", AsyncMock()),
+        patch("app.graph.nodes.update_profile._LLM_CALL_TIMEOUT_SECONDS", 0.05),
     ):
         result = await update_profile(base_state, runtime=runtime)
 
