@@ -118,6 +118,7 @@ async def test_triage_returns_rag(base_state):
     from app.schemas.triage import TriageDecision
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="rag"))
     mock_llm.with_structured_output.return_value = mock_structured
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -133,6 +134,7 @@ async def test_triage_returns_human(base_state):
     from app.schemas.triage import TriageDecision
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="human"))
     mock_llm.with_structured_output.return_value = mock_structured
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -189,6 +191,7 @@ async def test_triage_regex_shortcut_does_not_match_greeting_plus_question(base_
     from app.schemas.triage import TriageDecision
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="rag"))
     mock_llm.with_structured_output.return_value = mock_structured
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm) as mock_get_llm:
         result = await triage(base_state)
@@ -221,6 +224,7 @@ async def test_triage_bare_rejection_without_pending_approximation_uses_llm(base
     from app.schemas.triage import TriageDecision
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="off_topic"))
     mock_llm.with_structured_output.return_value = mock_structured
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)

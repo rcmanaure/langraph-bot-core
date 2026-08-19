@@ -264,9 +264,11 @@ async def test_greeting_skips_retrieve_and_second_llm_call():
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
 
     mock_retrieve.assert_not_called()
-    # generate() must use the canned greeting, never calling the chat LLM a
-    # second time for a reply (only triage's structured-output call happens).
-    llm.ainvoke.assert_not_called()
+    # generate() must use the canned greeting, never calling the chat LLM for
+    # a reply -- the one ainvoke() call on this shared mock is triage's own
+    # parallel raw-fallback attempt (see triage.py's asyncio.gather), not a
+    # second call from generate().
+    llm.ainvoke.assert_called_once()
     assert "Hola" in result["answer"] or "hola" in result["answer"].lower()
 
 
@@ -292,7 +294,10 @@ async def test_human_escalation_routes_through_interrupt_skipping_retrieve_and_g
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
 
     mock_retrieve.assert_not_called()
-    llm.ainvoke.assert_not_called()  # generate() never runs on the human path
+    # generate() never runs on the human path -- the one ainvoke() call on
+    # this shared mock is triage's own parallel raw-fallback attempt (see
+    # triage.py's asyncio.gather), not a call from generate().
+    llm.ainvoke.assert_called_once()
     # The resume value is discarded, never folded into "answer" or the
     # message history (see ADR-009 / #39) -- delivering a reply to the user
     # is #37's job (send through the channel), not this node's.
