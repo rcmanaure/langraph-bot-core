@@ -6,7 +6,12 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import AsyncSessionLocal
-from app.graph.nodes.retrieve import GREETING_PREFIX_RE, LOCATION_RE, is_bare_rejection, last_human_text
+from app.graph.nodes.retrieve import (
+    GREETING_PREFIX_RE,
+    LOCATION_RE,
+    is_bare_rejection,
+    last_human_text,
+)
 from app.messages import HUMAN_HANDOFF
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.services import human_control
