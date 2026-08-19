@@ -41,7 +41,7 @@ async def list_tenants(_: None = Depends(verify_operator_key)):
         rows = await db.execute(
             text("""
                 SELECT id, slug, expertise_area, tone_description, specialization_context,
-                       contact_url, plan, active, created_at
+                       contact_url, greeting_message, plan, active, created_at
                   FROM tenants ORDER BY created_at DESC
             """)
         )
@@ -62,6 +62,7 @@ class TenantCreate(BaseModel):
     tone_description: str = DEFAULT_TONE_DESCRIPTION
     specialization_context: str = Field("", max_length=8000)
     contact_url: str = ""
+    greeting_message: str | None = None
     plan: str = "free"
 
 
@@ -82,10 +83,12 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
             text("""
                 INSERT INTO tenants
                     (slug, api_key_hash, webhook_secret, bot_token, plan,
-                     expertise_area, tone_description, specialization_context, contact_url, active)
+                     expertise_area, tone_description, specialization_context, contact_url,
+                     greeting_message, active)
                 VALUES
                     (:slug, :api_key_hash, :webhook_secret, :bot_token, :plan,
-                     :expertise_area, :tone_description, :specialization_context, :contact_url, true)
+                     :expertise_area, :tone_description, :specialization_context, :contact_url,
+                     :greeting_message, true)
             """),
             {
                 "slug": body.slug,
@@ -97,6 +100,7 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
                 "tone_description": body.tone_description,
                 "specialization_context": body.specialization_context,
                 "contact_url": body.contact_url,
+                "greeting_message": body.greeting_message,
             },
         )
         await db.commit()
@@ -110,6 +114,7 @@ class TenantPatch(BaseModel):
     tone_description: str | None = None
     specialization_context: str | None = Field(None, max_length=8000)
     contact_url: str | None = None
+    greeting_message: str | None = None
     active: bool | None = None
     # Credential fields — only updated when non-empty string is provided
     bot_token: str | None = None
@@ -145,6 +150,11 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
             t.specialization_context = body.specialization_context or ""
         if "contact_url" in fields:
             t.contact_url = body.contact_url
+        if "greeting_message" in fields:
+            # Nullable column, unlike specialization_context above -- NULL is
+            # the meaningful "use the hardcoded fallback" state (see
+            # generate.py), so clearing to empty should write NULL, not "".
+            t.greeting_message = body.greeting_message or None
         if "active" in fields:
             t.active = body.active
         if "webhook_secret" in fields and body.webhook_secret:
@@ -196,6 +206,7 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
         "tone_description": t.tone_description,
         "specialization_context": t.specialization_context,
         "contact_url": t.contact_url,
+        "greeting_message": t.greeting_message,
         "active": t.active,
         "webhook_registered": webhook_registered,
     }

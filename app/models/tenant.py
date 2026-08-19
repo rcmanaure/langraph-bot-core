@@ -33,6 +33,9 @@ class Tenant(Base):
     # tone_description above for the same short-label-vs-long-content split.
     specialization_context = Column(Text, nullable=False, default="", server_default="")
     contact_url = Column(String(512), nullable=True)
+    # Per-tenant override for the canned "greeting" triage reply (generate.py
+    # _GREETING_MSG). NULL = fall back to the hardcoded default there.
+    greeting_message = Column(Text, nullable=True)
     example_questions = Column(JSON, nullable=True)
     web_search_enabled = Column(Boolean, default=False, server_default="false")
     doc_structure_summary = Column(Text, nullable=True)

@@ -715,6 +715,7 @@ function renderExpandPanel(t) {
       </div>
       <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea data-field="specialization_context" maxlength="8000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer...">${esc(t.specialization_context)}</textarea></div>
       <div class="field full"><label>Tone description</label><textarea data-field="tone_description" placeholder="e.g. warm and casual, or professional and clinical">${esc(t.tone_description)}</textarea></div>
+      <div class="field full"><label>Greeting message <span class="hint">exact canned reply to a bare "hola" — blank uses the default</span></label><textarea data-field="greeting_message" placeholder="Gracias por comunicarte con...">${esc(t.greeting_message)}</textarea></div>
     </div>
   </div>
   <details class="collapsible">
@@ -827,6 +828,7 @@ function renderAddTenantForm() {
       <div class="field"><label>Expertise area</label><input type="text" id="new-expertise" placeholder="e.g. Customer support" ${state.addTenantSaving?'disabled':''}></div>
       <div class="field"><label>Contact URL</label><input type="url" id="new-contact" placeholder="https://example.com" ${state.addTenantSaving?'disabled':''}></div>
       <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea id="new-specialization-context" maxlength="8000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." ${state.addTenantSaving?'disabled':''}></textarea></div>
+      <div class="field full"><label>Greeting message <span class="hint">exact canned reply to a bare "hola" — blank uses the default</span></label><textarea id="new-greeting-message" placeholder="Gracias por comunicarte con..." ${state.addTenantSaving?'disabled':''}></textarea></div>
     </div>
     <div class="panel-actions">
       <button class="btn btn-ghost" data-action="toggle-add-tenant" ${state.addTenantSaving?'disabled':''}>Cancel</button>
@@ -1114,6 +1116,7 @@ async function saveTenant(slug) {
     specialization_context: get('specialization_context').value.trim(),
     contact_url: get('contact_url').value.trim(),
     tone_description: get('tone_description').value.trim(),
+    greeting_message: get('greeting_message').value.trim(),
     active: get('active').checked,
   };
   const botToken = get('bot_token').value.trim();
@@ -1142,6 +1145,7 @@ async function saveTenant(slug) {
     Object.assign(t, {
       plan: data.plan, expertise_area: data.expertise_area, specialization_context: data.specialization_context,
       contact_url: data.contact_url, tone_description: data.tone_description, active: data.active,
+      greeting_message: data.greeting_message,
     });
     state.saveLoading.delete(slug);
     state.expandedTenant = null;
@@ -1166,6 +1170,7 @@ async function createTenant() {
   const expertise = document.getElementById('new-expertise').value.trim();
   const specialization = document.getElementById('new-specialization-context').value.trim();
   const contact = document.getElementById('new-contact').value.trim();
+  const greeting = document.getElementById('new-greeting-message').value.trim();
   if (!slug || !botToken || !webhookSecret) {
     state.addTenantError = 'Slug, bot token, and webhook secret are required.';
     render();
@@ -1181,6 +1186,7 @@ async function createTenant() {
       body: JSON.stringify({
         slug, bot_token: botToken, webhook_secret: webhookSecret, plan,
         expertise_area: expertise, specialization_context: specialization, contact_url: contact,
+        greeting_message: greeting || null,
       }),
     });
     state.addTenantResult = { slug: data.slug, api_key: data.api_key };

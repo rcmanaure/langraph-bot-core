@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.graph.builder import build_graph
 from app.messages import HUMAN_HANDOFF
 
-TENANT_ROW = MagicMock(expertise_area="diagnóstico histológico", contact_url=None)
+TENANT_ROW = MagicMock(expertise_area="diagnóstico histológico", contact_url=None, greeting_message=None)
 
 
 def _initial_state(text: str) -> dict:
@@ -269,7 +269,7 @@ async def test_greeting_skips_retrieve_and_second_llm_call():
     # parallel raw-fallback attempt (see triage.py's asyncio.gather), not a
     # second call from generate().
     llm.ainvoke.assert_called_once()
-    assert "Hola" in result["answer"] or "hola" in result["answer"].lower()
+    assert "gracias por comunicarte" in result["answer"].lower()
 
 
 @pytest.mark.asyncio

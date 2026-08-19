@@ -101,7 +101,13 @@ Catálogo:
 
 _OFF_TOPIC_MSG = "Lo siento, no puedo ayudarle con eso. Soy un asistente especializado en {expertise}."
 
-_GREETING_MSG = "Hola, gracias por escribirnos. Somos especialistas en {expertise}. ¿En qué podemos ayudarle?"
+_GREETING_MSG = (
+    "Gracias por comunicarte con SP UNIDAD DE DIAGNOSTICO HISTOLOGICO,C.A. ¿Cómo podemos ayudarle?\n\n"
+    "No respondemos llamadas de whatsapp ni mensajes de voz, solo mensajeria texto WhatsApp, "
+    "si necesita comunicarse vía llamada llame al 04148050764.\n\n"
+    "Para cotización de estudios envíe la orden medica o una imagen de la muestra\n\n"
+    "Ubicación: https://maps.app.goo.gl/1R4Q6vDz7db2Sxa76"
+)
 
 _FALLBACK = "Lo siento, no pude procesar su consulta en este momento. Por favor intente de nuevo."
 
@@ -194,8 +200,8 @@ async def _load_tenant(slug: str) -> dict:
     async with AsyncSessionLocal() as db:
         row = (await db.execute(
             text(
-                "SELECT expertise_area, tone_description, contact_url, specialization_context "
-                "FROM tenants WHERE slug = :s"
+                "SELECT expertise_area, tone_description, contact_url, specialization_context, "
+                "greeting_message FROM tenants WHERE slug = :s"
             ),
             {"s": slug},
         )).first()
@@ -205,11 +211,13 @@ async def _load_tenant(slug: str) -> dict:
             "tone_description": DEFAULT_TONE_DESCRIPTION,
             "contact_hint": "",
             "specialization_context": "",
+            "greeting_message": None,
         }
     expertise = row.expertise_area or "este negocio"
     contact_hint = (f"\nSi necesita más ayuda, contacte: {row.contact_url}" if row.contact_url else "")
     return {
         "expertise": expertise,
+        "greeting_message": row.greeting_message,
         "tone_description": row.tone_description or DEFAULT_TONE_DESCRIPTION,
         "contact_hint": contact_hint,
         "specialization_context": row.specialization_context or "",
@@ -246,7 +254,7 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         # router already skips for this decision). Cuts a ~40s round trip
         # (retrieve+rerank+triage+generate, all sequential) down to just the
         # triage call needed to classify the message in the first place.
-        content = _GREETING_MSG.format(**tenant_ctx)
+        content = tenant_ctx.get("greeting_message") or _GREETING_MSG
         msg = AIMessage(content=content)
         return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
 
