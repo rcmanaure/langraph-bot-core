@@ -44,6 +44,33 @@ _REJECTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Shared with triage.py (imported from there, not defined there, to avoid a
+# circular import -- triage.py already imports from this module). Found
+# live: a compound question ("que examenes hacen y donde estan ubicados")
+# embeds and reranks as ONE blended query -- the one chunk with the tenant's
+# actual street address/phone ranked 13th of 20 by embedding similarity and
+# got cut by the rerank step's top-10, crowded out by chunks matching the
+# "examenes" half of the question instead. generate() then answered from
+# whatever generic "Ubicado en <ciudad>" one-liner survived instead --
+# correct but useless for someone asking for the address. retrieve() below
+# reuses this same signal to guarantee a location-focused fetch runs
+# alongside the main one instead of trusting a single blended ranking to
+# serve two intents at once.
+LOCATION_RE = re.compile(
+    r"d[oó]nde\s+(es|qued[ao]n?|est[aá]n?(?:\s+ubicados?)?|se\s+encuentran|"
+    r"puedo\s+encontrarlos?)|"
+    r"direcci[oó]n|"
+    r"c[oó]mo\s+(llego|llegar|puedo\s+llegar)|"
+    r"ubicaci[oó]n|"
+    r"en\s+qu[eé]\s+(parte|zona|sector|lugar)",
+    re.IGNORECASE,
+)
+
+# Not the user's literal words -- a fixed probe purpose-built to match
+# whatever chunk a tenant tagged with contact/address content, regardless of
+# how the user actually phrased the question.
+_LOCATION_PROBE_QUERY = "dirección ubicación teléfono contacto cómo llegar"
+
 
 def last_human_text(state: AgentState) -> str | None:
     """The literal text of the last human message, unanchored (contrast
@@ -157,6 +184,42 @@ async def retrieve(state: AgentState) -> dict:
 
     async with AsyncSessionLocal() as db:
         chunks = await retrieve_chunks(db, query, state["tenant_id"])
+        chunks = await rerank_chunks(query, chunks, settings.top_k_results)
+        if LOCATION_RE.search(last_human_text(state) or ""):
+            # After rerank, not before -- rerank is exactly the step that
+            # cuts this chunk out for a compound query (see the module docs
+            # above), so folding it into the pool before rerank would just
+            # let the same blended judgment discard it again.
+            chunks = await _ensure_location_chunk(db, state["tenant_id"], chunks)
 
-    chunks = await rerank_chunks(query, chunks, settings.top_k_results)
     return {"retrieved_chunks": cap_chunks_to_tokens(chunks, settings.retrieval_max_tokens)}
+
+
+async def _ensure_location_chunk(db, namespace: str, chunks: list[dict]) -> list[dict]:
+    """Insert the tenant's best address/contact match right after the
+    genuine top rerank result, bypassing rerank entirely for it -- rerank is
+    exactly the step that cut it out for a compound query (see LOCATION_RE's
+    docstring above), so re-running the same blended judgment here would
+    just reproduce the bug.
+
+    Found live: an EARLIER version of this prepended at index 0. generate.py's
+    _has_confirmed_match() reads chunks[0]'s similarity specifically (by
+    design -- retrieve() already reranks, so chunks[0] IS supposed to be the
+    primary match) to decide whether to answer with confidence or hedge as
+    an approximation. This probe's own similarity score (~0.4-0.5, a short
+    contact blurb scored against a generic "dirección ubicación..." probe)
+    is nowhere near settings.exact_match_threshold, so putting it at index 0
+    corrupted that signal and made generate() hedge/refuse the ENTIRE
+    answer -- including the exam-type half a real chunk[0] had already
+    confidently matched. Index 1 keeps chunks[0] as whatever rerank
+    legitimately produced (so the confirmed-match signal stays correct)
+    while still landing early enough to survive cap_chunks_to_tokens's
+    front-to-back budget walk.
+    """
+    probe = await retrieve_chunks(db, _LOCATION_PROBE_QUERY, namespace)
+    if not probe:
+        return chunks
+    best = probe[0]
+    if any(c["content"] == best["content"] for c in chunks):
+        return chunks
+    return [*chunks[:1], best, *chunks[1:]]

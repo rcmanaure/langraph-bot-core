@@ -79,6 +79,73 @@ async def test_retrieve_chains_hybrid_search_rerank_and_token_cap():
 
 
 @pytest.mark.asyncio
+async def test_retrieve_location_question_inserts_address_chunk_cut_by_rerank():
+    """Found live: a compound question ("que examenes hacen y donde estan
+    ubicados") reranks as one blended query, cutting the tenant's actual
+    address chunk out of the top-k in favor of chunks matching the other
+    half of the question. A location-intent message must get that chunk
+    back regardless of what the blended rerank decided -- at index 1, not
+    index 0: generate.py's _has_confirmed_match() reads chunks[0]'s
+    similarity specifically, and this probe's own similarity score has
+    nothing to do with how confident the REAL top match is (found live: an
+    earlier version put it at index 0 and corrupted that signal, making
+    generate() hedge/refuse the whole answer)."""
+    state = _state(messages=[HumanMessage(content="que examenes hacen y donde estan ubicados")])
+    address_chunk = {"content": "Dirección: Av. 5 de Julio, Edif. Prof. SP."}
+    top_match = {"content": "chunk about exams", "similarity": 0.9}
+    reranked = [top_match, {"content": "another exam chunk"}]
+
+    async def _fake_retrieve_chunks(db, query, namespace):
+        if query == "que examenes hacen y donde estan ubicados":
+            return [{"content": "raw pool"}]
+        return [address_chunk]  # the location probe query
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(side_effect=_fake_retrieve_chunks)),
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=reranked)),
+    ):
+        result = await retrieve(state)
+
+    assert result["retrieved_chunks"][0] == top_match
+    assert result["retrieved_chunks"][1] == address_chunk
+    assert result["retrieved_chunks"][2:] == reranked[1:]
+
+
+@pytest.mark.asyncio
+async def test_retrieve_location_question_does_not_duplicate_an_already_surviving_chunk():
+    state = _state(messages=[HumanMessage(content="cual es la direccion")])
+    address_chunk = {"content": "Dirección: Av. 5 de Julio, Edif. Prof. SP."}
+    reranked = [address_chunk, {"content": "chunk about exams"}]
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[address_chunk])),
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=reranked)),
+    ):
+        result = await retrieve(state)
+
+    assert result["retrieved_chunks"] == reranked
+
+
+@pytest.mark.asyncio
+async def test_retrieve_non_location_question_never_runs_the_location_probe():
+    state = _state(messages=[HumanMessage(content="cuanto cuesta la biopsia")])
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
+    ):
+        await retrieve(state)
+
+    mock_retrieve.assert_awaited_once()  # only the main query, no location probe
+
+
+@pytest.mark.asyncio
 async def test_retrieve_uses_previous_question_on_bare_confirmation():
     """A bare 'sí' has no retrievable content of its own — retrieve() must
     search for the PREVIOUS question, not the confirmation text itself."""

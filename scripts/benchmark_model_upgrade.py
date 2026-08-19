@@ -86,13 +86,17 @@ async def _bench_triage() -> dict:
     results = []
     for query, expected in _TRIAGE_CASES:
         start = time.perf_counter()
-        result: TriageDecision = await llm.with_structured_output(TriageDecision).ainvoke(
+        # with_structured_output() returns None (no exception) rather than
+        # raising when the model skips the tool call -- a real, observed
+        # nova-micro flake, not a bug in this script. Record it as incorrect
+        # instead of crashing the whole benchmark run over one flaky case.
+        result: TriageDecision | None = await llm.with_structured_output(TriageDecision).ainvoke(
             [SystemMessage(content=_TRIAGE_PROMPT), HumanMessage(content=query)]
         )
         elapsed = time.perf_counter() - start
         results.append({
             "query": query,
-            "correct": result.decision == expected,
+            "correct": result is not None and result.decision == expected,
             "seconds": round(elapsed, 2),
         })
     return {

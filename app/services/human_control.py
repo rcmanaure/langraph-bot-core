@@ -188,7 +188,7 @@ async def thread_messages(thread_id: str, since: datetime | None = None) -> list
                 SELECT sender, content, author, created_at
                   FROM human_control_messages
                  WHERE thread_id = :thread
-                   AND (:since IS NULL OR created_at >= :since)
+                   AND (CAST(:since AS timestamptz) IS NULL OR created_at >= CAST(:since AS timestamptz))
                  ORDER BY created_at
             """),
             {"thread": thread_id, "since": since},

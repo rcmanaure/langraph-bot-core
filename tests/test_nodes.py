@@ -1,4 +1,5 @@
 """Unit tests for graph nodes — all LLM/DB calls are mocked."""
+import asyncio
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -118,6 +119,7 @@ async def test_triage_returns_rag(base_state):
     from app.schemas.triage import TriageDecision
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="rag"))
     mock_llm.with_structured_output.return_value = mock_structured
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -133,6 +135,7 @@ async def test_triage_returns_human(base_state):
     from app.schemas.triage import TriageDecision
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="human"))
     mock_llm.with_structured_output.return_value = mock_structured
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -189,11 +192,64 @@ async def test_triage_regex_shortcut_does_not_match_greeting_plus_question(base_
     from app.schemas.triage import TriageDecision
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="rag"))
     mock_llm.with_structured_output.return_value = mock_structured
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm) as mock_get_llm:
         result = await triage(base_state)
 
     mock_get_llm.assert_called_once()
+    assert result == {"triage_decision": "rag"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "donde estan ubicados",
+        "donde se encuentran ubicados",  # exact real message, found live (#42)
+        "y donde se encuentran ubicados",  # with a leading conjunction, as sent live
+        "donde quedan?",
+        "cual es la direccion",
+        "cuál es su dirección",
+        "como llego",
+        "¿cómo puedo llegar?",
+        "ubicacion por favor",
+        "hola, donde quedan?",  # greeting prefix must not shadow this
+        "en que sector estan ubicados",
+        "donde es el laboratorio",
+    ],
+)
+async def test_triage_regex_shortcut_location_skips_llm(base_state, message):
+    # Found live (#42): the LLM classified a location question as off_topic
+    # once, and every later location question in that same thread inherited
+    # the mistake (the model conditions on its own prior turn). A
+    # deterministic regex, like the greeting shortcut above, can't be swayed
+    # by conversation history at all.
+    base_state["messages"] = [HumanMessage(content=message)]
+    with patch("app.graph.nodes.triage.get_triage_llm") as mock_get_llm:
+        result = await triage(base_state)
+    mock_get_llm.assert_not_called()
+    assert result == {"triage_decision": "rag"}
+
+
+@pytest.mark.asyncio
+async def test_triage_location_shortcut_beats_poisoned_history(base_state):
+    """The exact real-world regression (#42): a thread whose history already
+    contains one off_topic-mislabeled location exchange used to make the LLM
+    repeat that mistake 8/8 times on a fresh location question in the same
+    thread (reproduced live). The regex shortcut never asks the LLM at all,
+    so the bad precedent in history can't influence it either way."""
+    base_state["messages"] = [
+        HumanMessage(content="donde estan ubicados"),
+        AIMessage(content="Lo siento, no puedo ayudarle con eso. Soy un asistente "
+                           "especializado en diagnóstico clínico y anatomopatológico."),
+        HumanMessage(content="que tipo de examenes hacen?"),
+        AIMessage(content="Realizamos estudios histopatológicos y citológicos..."),
+        HumanMessage(content="y donde se encuentran ubicados"),
+    ]
+    with patch("app.graph.nodes.triage.get_triage_llm") as mock_get_llm:
+        result = await triage(base_state)
+    mock_get_llm.assert_not_called()
     assert result == {"triage_decision": "rag"}
 
 
@@ -221,6 +277,7 @@ async def test_triage_bare_rejection_without_pending_approximation_uses_llm(base
     from app.schemas.triage import TriageDecision
     mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="off_topic"))
     mock_llm.with_structured_output.return_value = mock_structured
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -549,6 +606,122 @@ async def test_update_profile_swallows_llm_failure(base_state):
     mock_llm.with_structured_output.side_effect = RuntimeError("boom")
 
     with patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm):
+        result = await update_profile(base_state, runtime=runtime)
+
+    assert result == {}
+    runtime.store.aput.assert_not_awaited()
+
+
+class _RateLimitError(Exception):
+    status_code = 429
+
+
+@pytest.mark.asyncio
+async def test_update_profile_retries_once_on_rate_limit_then_succeeds(base_state):
+    """Found live: generate() and update_profile() call the same model
+    back-to-back, routinely tripping OpenRouter's shared rate limit
+    (10/10 reproduced). One short retry should recover the common case."""
+    from app.schemas.profile import ProfileExtraction
+
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_structured = AsyncMock()
+    mock_structured.ainvoke = AsyncMock(
+        side_effect=[_RateLimitError(), ProfileExtraction(new_topic="precio biopsia")]
+    )
+    mock_llm.with_structured_output.return_value = mock_structured
+
+    with (
+        patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.update_profile.asyncio.sleep", AsyncMock()) as mock_sleep,
+    ):
+        result = await update_profile(base_state, runtime=runtime)
+
+    assert result == {}
+    mock_sleep.assert_awaited_once()
+    assert mock_structured.ainvoke.await_count == 2
+    _, _, saved = runtime.store.aput.await_args.args
+    assert saved["topics_of_interest"] == ["precio biopsia"]
+
+
+@pytest.mark.asyncio
+async def test_update_profile_swallows_second_rate_limit_after_retry(base_state):
+    """The retry is one shot -- a second 429 falls through to the same
+    best-effort swallow every other failure gets, never raised to the caller."""
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_structured = AsyncMock()
+    mock_structured.ainvoke = AsyncMock(side_effect=[_RateLimitError(), _RateLimitError()])
+    mock_llm.with_structured_output.return_value = mock_structured
+
+    with (
+        patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.update_profile.asyncio.sleep", AsyncMock()),
+    ):
+        result = await update_profile(base_state, runtime=runtime)
+
+    assert result == {}
+    runtime.store.aput.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_profile_retries_once_on_hang_then_succeeds(base_state):
+    """Found live: the same shared-model contention that trips a clean 429
+    sometimes just never returns instead -- no exception to retry on, and
+    the whole turn hung behind it until turn.py's own 45s timeout cut it
+    off. A bounded wait_for is what actually catches this case."""
+    from app.schemas.profile import ProfileExtraction
+
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_structured = AsyncMock()
+    calls = {"n": 0}
+
+    async def _side_effect(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # A never-resolved Future, not asyncio.sleep -- this test patches
+            # app.graph.nodes.update_profile.asyncio.sleep (the same real
+            # asyncio module the retry delay uses), so sleep() here would
+            # return instantly too and never actually hang.
+            await asyncio.Future()
+        return ProfileExtraction(new_topic="precio biopsia")
+
+    mock_structured.ainvoke = AsyncMock(side_effect=_side_effect)
+    mock_llm.with_structured_output.return_value = mock_structured
+
+    with (
+        patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.update_profile.asyncio.sleep", AsyncMock()),
+        patch("app.graph.nodes.update_profile._LLM_CALL_TIMEOUT_SECONDS", 0.05),
+    ):
+        result = await update_profile(base_state, runtime=runtime)
+
+    assert result == {}
+    assert calls["n"] == 2
+    _, _, saved = runtime.store.aput.await_args.args
+    assert saved["topics_of_interest"] == ["precio biopsia"]
+
+
+@pytest.mark.asyncio
+async def test_update_profile_swallows_persistent_hang_after_retry(base_state):
+    """A hang on the retry too falls through to the same best-effort
+    swallow every other failure gets, never raised to the caller."""
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_structured = AsyncMock()
+
+    async def _always_hang(*args, **kwargs):
+        await asyncio.Future()  # never-resolved -- see the sleep-patching note above
+
+    mock_structured.ainvoke = AsyncMock(side_effect=_always_hang)
+    mock_llm.with_structured_output.return_value = mock_structured
+
+    with (
+        patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.update_profile.asyncio.sleep", AsyncMock()),
+        patch("app.graph.nodes.update_profile._LLM_CALL_TIMEOUT_SECONDS", 0.05),
+    ):
         result = await update_profile(base_state, runtime=runtime)
 
     assert result == {}

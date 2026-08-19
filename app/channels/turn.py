@@ -8,6 +8,7 @@ that is a defect here, not a feature of the channel.
 
 What genuinely varies stays behind ChannelAdapter (app/channels/base.py).
 """
+import asyncio
 import logging
 
 from langchain_core.messages import HumanMessage
@@ -44,6 +45,17 @@ DOCUMENT_UNSUPPORTED = (
 SERVICE_UNAVAILABLE = "Lo siento, el servicio no está disponible. Por favor intente de nuevo más tarde."
 GRAPH_ERROR = "Lo siento, ocurrió un error. Por favor intente de nuevo."
 EMPTY_ANSWER = "Lo siento, no pude generar una respuesta."
+
+# Found live: graph.ainvoke() hung indefinitely on a real turn -- no
+# exception, no checkpoint write, no send attempt, event loop otherwise idle
+# (py-spy dump showed nothing running, pg_stat_activity showed no blocked
+# query). Undiagnosable after the fact and recurred later on the same
+# thread. Rather than leave the user staring at "typing..." forever with no
+# trace, bound the turn so a hang becomes a logged, user-visible failure
+# instead of silence. 45s covers the worst observed real turn (triage +
+# generate, occasionally both retried) with headroom; tighten only if that
+# proves too loose once more real timeout logs exist.
+_GRAPH_TIMEOUT_SECONDS = 45
 # Sent for every cause of an escalation (see docs/adr/ADR-009-human-control.md)
 # — the user doesn't need to know whether they asked for a person or the bot
 # ran out of things to say. Shared with generate.py's automatic-escalation
@@ -226,8 +238,15 @@ async def _reply(adapter: ChannelAdapter, inbound: Inbound, text: str, graph) ->
     # message claiming staff status in prose grants nothing (see ADR-006).
     is_staff = await resolve_staff(inbound.tenant_slug, inbound.channel, inbound.user_id)
 
-    try:
-        result = await graph.ainvoke(
+    # A plain asyncio.wait_for(graph.ainvoke(...)) would cancel the inner
+    # coroutine before this function ever sees it again, so a timeout would
+    # tell us THAT it hung but never WHERE -- exactly the dead end the prior
+    # occurrence of this bug ran into (see _GRAPH_TIMEOUT_SECONDS). Running
+    # it as its own task and shielding it from wait_for's cancellation keeps
+    # it alive and inspectable for the log line below, and only then do we
+    # cancel it ourselves.
+    task = asyncio.ensure_future(
+        graph.ainvoke(
             {
                 "tenant_id": inbound.tenant_slug,
                 "thread_id": inbound.thread_id,
@@ -237,7 +256,17 @@ async def _reply(adapter: ChannelAdapter, inbound: Inbound, text: str, graph) ->
                 "chat_id": inbound.chat_id,
             },
             config={"configurable": {"thread_id": inbound.thread_id}},
+            # A chat turn is short-lived and turn.py already never lets an
+            # exception escape (falls back to GRAPH_ERROR) -- mid-turn resume
+            # granularity from per-node checkpoints isn't used, so persist
+            # once at the end instead of after each of the graph's 8 nodes.
+            # interrupt_node still persists correctly under "exit" (LangGraph
+            # writes the checkpoint on GraphInterrupt regardless of mode).
+            durability="exit",
         )
+    )
+    try:
+        result = await asyncio.wait_for(asyncio.shield(task), timeout=_GRAPH_TIMEOUT_SECONDS)
         if result.get("__interrupt__"):
             # The graph suspended (interrupt_node) rather than finishing —
             # "answer" is whatever it was before the suspended node ran, not
@@ -249,11 +278,27 @@ async def _reply(adapter: ChannelAdapter, inbound: Inbound, text: str, graph) ->
                 answer = result["messages"][-1].content
             if not answer:
                 answer = EMPTY_ANSWER
+    except asyncio.TimeoutError:
+        logger.error("turn_graph_timeout thread=%s timeout=%ss frames=%s",
+                      inbound.thread_id, _GRAPH_TIMEOUT_SECONDS, _task_frames(task))
+        task.cancel()
+        answer = GRAPH_ERROR
     except Exception:
         logger.exception("turn_graph_failed thread=%s", inbound.thread_id)
         answer = GRAPH_ERROR
 
     await _send(adapter, inbound, answer)
+
+
+def _task_frames(task: "asyncio.Task") -> str:
+    """Where a still-pending task is currently suspended, file:line per
+    frame -- the only prior occurrence of the timeout below left no trace
+    (no exception, no DB lock, no busy loop under py-spy), so this is the
+    one shot at capturing where it's actually stuck before it's cancelled."""
+    try:
+        return " | ".join(f"{f.f_code.co_filename}:{f.f_lineno}" for f in task.get_stack(limit=8))
+    except Exception as exc:
+        return f"<unavailable: {exc}>"
 
 
 async def _send(adapter: ChannelAdapter, inbound: Inbound, text: str) -> None:

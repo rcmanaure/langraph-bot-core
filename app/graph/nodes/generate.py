@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db import AsyncSessionLocal
-from app.graph.nodes.retrieve import is_bare_rejection, last_human_text
+from app.graph.nodes.retrieve import LOCATION_RE, is_bare_rejection, last_human_text
 from app.messages import HUMAN_HANDOFF
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.services import human_control
@@ -61,6 +61,13 @@ _FORMAT_HINT_STAFF = _REGISTER_FLOOR_STAFF + _ITEM_FORMAT_RULES + """
 
 _CATALOG_FORMAT_HINT_STAFF = _REGISTER_FLOOR_STAFF + _ITEM_FORMAT_RULES
 
+# Applies whenever a price is quoted (RAG or catalog) — not per-item, one
+# line at the end of the reply.
+_RESULTS_NOTE_RULE = (
+    'Si menciona algún precio, agregue al final una nota breve: '
+    '"_Resultados: 3 a 5 días hábiles._"'
+)
+
 _RAG_SYSTEM = """\
 Es un asistente de {expertise}. Su tono es {tone_description}.{specialization_block}
 Para precios y disponibilidad use ÚNICAMENTE el contexto proporcionado — NUNCA invente un producto
@@ -75,6 +82,7 @@ REGLAS (en orden de prioridad):
 1. AMBIGÜEDAD: Si lo que pide el usuario puede referirse a varios ítems distintos, haga UNA sola pregunta breve y amable de aclaración. No asuma. EXCEPCIÓN: si el usuario ya incluyó en su mensaje el detalle que distingue entre los ítems similares (ej. pidió "con anexos" o mencionó explícitamente lo que un ítem incluye y otro no — "trompas y ovarios" especifica CON anexos), eso NO es ambigüedad — el usuario ya eligió, responda directo con ESE ítem, no pregunte de nuevo algo que ya contestó.
 2. Si el contexto trae varios ítems cuyo nombre coincide con lo que pide el usuario, muéstrelos TODOS, sin filtrar por categoría o tipo.
 3. {negative_confirmation_rule}
+4. """ + _RESULTS_NOTE_RULE + """
 - NO invente precios ni servicios.
 {format_hint}
 Contexto:
@@ -85,6 +93,7 @@ _CATALOG_SYSTEM = """\
 Es un asistente de {expertise}.
 Liste TODOS los ítems del catálogo a continuación, organizados por sección.
 No omita ningún ítem. Use los nombres y precios exactos del catálogo.{contact_hint}
+""" + _RESULTS_NOTE_RULE + """
 {format_hint}
 Catálogo:
 {context}
@@ -115,7 +124,13 @@ _MATCH_UNCONFIRMED_INSTRUCTION = (
     'necesita?". NUNCA dé el precio como si fuera seguro hasta que el usuario confirme. Cuando '
     "confirme, dé el precio con el nombre EXACTO del ítem tal como aparece en el contexto — nunca "
     "lo renombre para que suene igual a lo que pidió el usuario — y mantenga una aclaración breve "
-    "de que es lo más cercano disponible."
+    "de que es lo más cercano disponible.\n"
+    "EXCEPCIÓN — varios ítems (regla 2): si el contexto trae VARIOS ítems que coinciden por nombre, "
+    'esto NO es una aproximación incierta de un solo ítem — no pregunte genérico "¿Es lo que '
+    'necesita?"; si no es obvio cuál busca, pregunte si necesita todos o uno en particular. Si el '
+    'usuario ya confirmó (p. ej. "sí") sin especificar cuál, NO repita la lista de precios que ya '
+    'dio — confirme en una línea breve (p. ej. "Perfecto, esos son los tres.") sin re-listar, salvo '
+    "que el usuario pida verla de nuevo."
 )
 
 
@@ -132,6 +147,28 @@ _NEGATIVE_CONFIRMATION_LEAD = (
 _NEGATIVE_CONFIRMATION_RULE = _NEGATIVE_CONFIRMATION_LEAD + " y eleve al contacto: {contact_hint}"
 
 _NEGATIVE_CONFIRMATION_RULE_STAFF = _NEGATIVE_CONFIRMATION_LEAD + "."
+
+# Found live: _MATCH_UNCONFIRMED_INSTRUCTION is written for a price/item
+# approximation ("no dé el precio como seguro, pregunte si es lo que
+# necesita") -- retrieve.py's location boost (see LOCATION_RE) guarantees
+# the tenant's address/contact chunk reaches this prompt, but that chunk's
+# own retrieval similarity is naturally low (it's scored against a generic
+# probe, not the user's exact words), so _has_confirmed_match() often reads
+# "unconfirmed" even when the address itself is exact, fixed, tenant-owned
+# data with no approximation to hedge. Reproduced live: 11/12 regenerations
+# against the same real context answered with the exact address, 1/12
+# hedged into a vague restatement (once even switching to English) because
+# the model followed the price-approximation framing literally. An address
+# either IS or ISN'T in the context -- there's no "closest match" the way
+# there is for "biopsia de pulmón" vs. a similarly-named item, so this
+# exemption only fires for a location-intent message, never for an actual
+# price/item lookup where the hedge is the correct behavior.
+_LOCATION_CONFIDENCE_NOTE = (
+    "\nExcepción — datos de contacto/ubicación: si el contexto incluye la dirección, teléfono o "
+    "forma de contacto del negocio, indíquelos de forma directa y seguros — NO son una aproximación "
+    "de un ítem, son datos fijos del negocio, así que la instrucción de arriba sobre no confirmar "
+    "precios/preguntar \"¿Es lo que necesita?\" no aplica a ellos."
+)
 
 
 def _has_confirmed_match(chunks: list[dict]) -> bool:
@@ -276,6 +313,8 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         hint_template = _FORMAT_HINT_STAFF if is_staff else _FORMAT_HINT
     format_hint = hint_template.format(tone_description=tenant_ctx["tone_description"])
     match_instruction = _MATCH_CONFIRMED_INSTRUCTION if confirmed else _MATCH_UNCONFIRMED_INSTRUCTION
+    if not confirmed and LOCATION_RE.search(last_human_text(state) or ""):
+        match_instruction += _LOCATION_CONFIDENCE_NOTE
     negative_confirmation_rule = (
         _NEGATIVE_CONFIRMATION_RULE_STAFF if is_staff
         else _NEGATIVE_CONFIRMATION_RULE.format(contact_hint=tenant_ctx["contact_hint"])

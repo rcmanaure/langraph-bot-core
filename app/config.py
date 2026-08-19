@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openai_model: str = "mistralai/mistral-small-3.2-24b-instruct"
     openai_fallback_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
-    triage_model: str = "amazon/nova-micro-v1"
+    triage_model: str = "meta-llama/llama-3.1-8b-instruct"
 
     # Embeddings — same key/base as chat; override only if using a different provider
     embedding_base_url: str = ""

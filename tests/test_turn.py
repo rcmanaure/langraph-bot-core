@@ -7,6 +7,7 @@ auth, Telegram's album buffering — is tested in the per-channel files.
 FakeAdapter is the second adapter that makes the seam real: two in production
 (Telegram, WhatsApp) plus this one in tests.
 """
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -238,6 +239,22 @@ async def test_graph_suspension_sends_the_handoff_message_not_empty_answer(graph
 @pytest.mark.asyncio
 async def test_graph_failure_sends_a_spanish_error(graph):
     graph.ainvoke.side_effect = RuntimeError("boom")
+    adapter = FakeAdapter()
+
+    await run_turn(adapter, make_inbound(text="hola"), graph)
+    assert adapter.sent == [turn_module.GRAPH_ERROR]
+
+
+@pytest.mark.asyncio
+async def test_graph_hang_times_out_and_sends_a_spanish_error(graph, monkeypatch):
+    # Found live: graph.ainvoke() hung forever with no exception -- a stuck
+    # coroutine must not leave the user staring at "typing..." indefinitely.
+    monkeypatch.setattr(turn_module, "_GRAPH_TIMEOUT_SECONDS", 0.05)
+
+    async def _hang(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    graph.ainvoke.side_effect = _hang
     adapter = FakeAdapter()
 
     await run_turn(adapter, make_inbound(text="hola"), graph)
