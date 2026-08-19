@@ -1,0 +1,1062 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+:root {
+  --bg:           #08090a;
+  --surface:      #191a1b;
+  --fg:   #f7f8f8;
+  --fg-2: #d0d6e0;
+  --muted: #8a8f98;
+  --meta:  #62666d;
+  --border:      rgba(255, 255, 255, 0.08);
+  --border-soft: rgba(255, 255, 255, 0.05);
+  --accent:        {{accent}};
+  --accent-hover:  #828fff;
+  --success: #27a644;
+  --warn:    #eab308;
+  --danger:  #dc2626;
+  --font-body: "Inter Variable", "Inter", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Berkeley Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px; --radius-pill: 9999px;
+  --motion-fast: 150ms; --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg-2); font-family: var(--font-body); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+button { font-family: inherit; cursor: pointer; }
+input, select, textarea { font-family: inherit; font-size: 14px; color: var(--fg); }
+a { color: var(--accent-hover); } a:hover { color: var(--accent); }
+svg.icon { width: 16px; height: 16px; flex: none; }
+.mono { font-family: var(--font-mono); }
+
+.app-shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+.sidebar { background: var(--surface); border-right: 1px solid var(--border-soft); display: flex; flex-direction: column; padding: 16px 12px; }
+.sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 8px 8px 24px; }
+.brand-mark { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; flex: none; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+.brand-text strong { font-size: 14px; color: var(--fg); font-weight: 600; }
+.brand-text span { font-size: 11px; color: var(--meta); font-family: var(--font-mono); }
+.sidebar-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; background: transparent; border: 1px solid transparent; color: var(--muted); font-size: 14px; font-weight: 500; text-align: left; width: 100%; }
+.nav-item:hover { background: rgba(255,255,255,0.04); color: var(--fg-2); }
+.nav-item.active { background: rgba(94,106,210,0.14); color: var(--fg); border-color: rgba(94,106,210,0.25); }
+.nav-count { margin-left: auto; background: rgba(234,179,8,0.16); color: #f4cc4b; font-size: 11px; font-weight: 590; font-family: var(--font-mono); border-radius: 9999px; padding: 1px 7px; }
+.sidebar-footer { padding-top: 16px; border-top: 1px solid var(--border-soft); margin-top: 12px; }
+.env-tag { font-family: var(--font-mono); font-size: 10px; color: var(--success); background: rgba(39,166,68,0.12); border: 1px solid rgba(39,166,68,0.3); border-radius: 6px; padding: 4px 8px; text-align: center; letter-spacing: 0.04em; }
+
+.main { padding: 24px 32px; max-width: 1320px; }
+.main.no-pad { padding: 0; max-width: none; height: 100vh; overflow: hidden; }
+.view-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.view-header h2 { font-size: 24px; font-weight: 550; color: var(--fg); letter-spacing: -0.02em; }
+.view-header p { font-size: 14px; color: var(--muted); margin-top: 4px; }
+.toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 6px; border: 1px solid transparent; font-size: 14px; font-weight: 510; padding: 8px 14px; transition: background var(--motion-fast) var(--ease-standard); white-space: nowrap; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-ghost { background: rgba(255,255,255,0.02); color: #e2e4e7; border-color: rgb(36,40,44); }
+.btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,0.05); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger-outline { background: rgba(220,38,38,0.06); color: #ff9d9d; border-color: rgba(220,38,38,0.35); }
+.btn-danger-outline:hover:not(:disabled) { background: rgba(220,38,38,0.14); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+/* Overview */
+.stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; margin-bottom: 28px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; text-align: left; width: 100%; }
+.stat-card.clickable { cursor: pointer; transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard); }
+.stat-card.clickable:hover { border-color: rgba(94,106,210,0.4); background: rgba(94,106,210,0.05); }
+.stat-card .stat-top { display: flex; align-items: center; justify-content: space-between; }
+.stat-card .stat-label { font-size: 12px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--meta); }
+.stat-card .stat-link { font-size: 11px; color: var(--accent-hover); }
+.stat-icon { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex: none; }
+.stat-card .stat-value { font-size: 30px; font-weight: 560; color: var(--fg); letter-spacing: -0.02em; }
+.stat-card .stat-sub { font-size: 12px; color: var(--muted); }
+.quick-actions { display: flex; gap: 12px; margin-bottom: 28px; }
+.quick-action { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; flex: 1; text-align: left; color: var(--fg-2); }
+.quick-action:hover { border-color: rgba(94,106,210,0.4); background: rgba(94,106,210,0.05); }
+.quick-action .qa-icon { width: 32px; height: 32px; border-radius: 8px; background: rgba(94,106,210,0.14); color: var(--accent-hover); display: flex; align-items: center; justify-content: center; flex: none; }
+.quick-action strong { display: block; font-size: 13px; color: var(--fg); font-weight: 590; }
+.quick-action span { font-size: 12px; color: var(--muted); }
+.section-title { font-size: 13px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-2); margin-bottom: 12px; }
+.activity-list { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.activity-item { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border-soft); }
+.activity-item:last-child { border-bottom: none; }
+.activity-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; margin-top: 6px; }
+.activity-text { flex: 1; font-size: 13px; color: var(--fg-2); }
+.activity-time { font-size: 12px; color: var(--meta); font-family: var(--font-mono); white-space: nowrap; }
+
+/* Badges */
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 9999px; font-size: 12px; font-weight: 510; border: 1px solid transparent; white-space: nowrap; }
+.badge .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.badge-plan-free { background: rgba(255,255,255,0.04); color: var(--muted); border-color: var(--border); }
+.badge-plan-basic { background: rgba(130,143,255,0.10); color: #a7b0ff; border-color: rgba(130,143,255,0.3); }
+.badge-plan-pro { background: rgba(94,106,210,0.18); color: #c2c9ff; border-color: rgba(94,106,210,0.45); }
+.badge-status-active { background: rgba(39,166,68,0.10); color: #4fd977; border-color: rgba(39,166,68,0.3); }
+.badge-status-inactive { background: rgba(255,255,255,0.03); color: var(--meta); border-color: var(--border); }
+.badge-wh-registered { background: rgba(39,166,68,0.10); color: #4fd977; border-color: rgba(39,166,68,0.3); }
+.badge-wh-mismatch { background: rgba(234,179,8,0.10); color: #f4cc4b; border-color: rgba(234,179,8,0.35); }
+.badge-wh-unknown { background: rgba(255,255,255,0.03); color: var(--meta); border-color: var(--border); }
+.badge-job-pending { background: rgba(255,255,255,0.03); color: var(--meta); border-color: var(--border); }
+.badge-job-running { background: rgba(94,106,210,0.14); color: #a7b0ff; border-color: rgba(94,106,210,0.35); }
+.badge-job-done { background: rgba(39,166,68,0.10); color: #4fd977; border-color: rgba(39,166,68,0.3); }
+.badge-job-failed { background: rgba(220,38,38,0.12); color: #ff8a8a; border-color: rgba(220,38,38,0.35); }
+
+/* Search + filters */
+.search-box { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; min-width: 220px; }
+.search-box svg { color: var(--meta); flex: none; }
+.search-box input { background: transparent; border: none; outline: none; color: var(--fg); font-size: 13px; width: 100%; }
+.search-box input::placeholder { color: var(--meta); }
+.filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 9999px; border: 1px solid var(--border); background: rgba(255,255,255,0.02); color: var(--muted); font-size: 12px; font-weight: 510; }
+.filter-chip:hover { color: var(--fg-2); }
+.filter-chip.active { background: rgba(94,106,210,0.16); color: var(--fg); border-color: rgba(94,106,210,0.4); }
+.filter-chip .count { font-family: var(--font-mono); font-size: 11px; opacity: 0.7; }
+select.field-select { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; color: var(--fg); font-size: 13px; }
+
+/* Tenants table */
+.tt-grid { --cols: 30px minmax(150px,1.2fr) minmax(120px,1fr) 92px 96px 130px 30px; }
+.table-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-top: 16px; }
+.tt-head, .tt-row { display: grid; grid-template-columns: var(--cols); align-items: center; }
+.tt-head { padding: 10px 16px; border-bottom: 1px solid var(--border-soft); background: rgba(255,255,255,0.015); }
+.tt-head span { font-size: 11px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--meta); }
+.tt-row { padding: 11px 16px; border-bottom: 1px solid var(--border-soft); cursor: pointer; }
+.tt-row:hover { background: rgba(255,255,255,0.025); }
+.tt-row:last-child { border-bottom: none; }
+.tt-row.expanded { background: rgba(94,106,210,0.05); }
+.tt-cell { font-size: 14px; color: var(--fg-2); padding-right: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-cell.slug { font-family: var(--font-mono); color: var(--fg); font-size: 13px; font-weight: 500; }
+.tt-cell.expertise { color: var(--muted); }
+.tt-chevron { display: flex; color: var(--meta); transition: transform var(--motion-fast) var(--ease-standard); }
+.tt-row.expanded .tt-chevron { transform: rotate(90deg); color: var(--accent-hover); }
+
+.expand-wrap { grid-column: 1 / -1; background: #101112; border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); padding: 20px; cursor: default; }
+.panel-section { padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--border-soft); }
+.panel-section:last-of-type { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.panel-section-title { font-size: 11px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-2); margin-bottom: 12px; }
+.field-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label { font-size: 11px; font-weight: 590; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.field input, .field select { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--fg); width: 100%; }
+.toggle-row { display: flex; align-items: center; gap: 10px; }
+.toggle { position: relative; width: 38px; height: 22px; flex: none; }
+.toggle input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.toggle .track { position: absolute; inset: 0; background: rgba(255,255,255,0.1); border-radius: 999px; border: 1px solid var(--border); }
+.toggle .thumb { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--meta); transition: transform var(--motion-fast) var(--ease-standard); }
+.toggle input:checked + .track { background: rgba(39,166,68,0.25); border-color: rgba(39,166,68,0.4); }
+.toggle input:checked + .track + .thumb { transform: translateX(16px); background: var(--success); }
+.toggle-label { font-size: 13px; color: var(--fg-2); }
+.staff-list { display: flex; flex-direction: column; gap: 6px; }
+.staff-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border-soft); }
+.staff-row:first-child { border-top: none; }
+.staff-row .staff-name { flex: 1; color: var(--fg-2); font-size: 13px; }
+.staff-row .staff-role { font-size: 11px; color: var(--meta); font-family: var(--font-mono); text-transform: uppercase; }
+.staff-add-row { display: flex; gap: 8px; margin-top: 10px; }
+.staff-add-row input { flex: 1; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; color: var(--fg); font-size: 13px; }
+.staff-add-row select { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; color: var(--fg); font-size: 13px; }
+.danger-zone { border: 1px solid rgba(220,38,38,0.3); border-radius: 8px; background: rgba(220,38,38,0.035); padding: 14px; }
+.danger-zone > h4 { font-size: 11px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: #ff9d9d; margin-bottom: 10px; }
+.danger-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.danger-row .desc strong { color: var(--fg-2); font-size: 13px; font-weight: 590; display: block; }
+.danger-row .desc p { color: var(--meta); font-size: 12px; margin-top: 2px; }
+.confirm-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.confirm-inline input { background: rgba(255,255,255,0.03); border: 1px solid rgba(220,38,38,0.4); border-radius: 6px; padding: 6px 9px; color: var(--fg); font-family: var(--font-mono); font-size: 12px; width: 170px; }
+
+/* Add tenant form */
+.add-form { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-top: 16px; }
+.add-form h3 { font-size: 15px; font-weight: 590; color: var(--fg); margin-bottom: 14px; }
+.add-form .field-grid { grid-template-columns: repeat(3, minmax(0,1fr)); margin-bottom: 14px; }
+.add-form .actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+/* Documents */
+.docs-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.dropzone { border: 1.5px dashed var(--border); border-radius: 12px; padding: 32px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; background: rgba(255,255,255,0.012); }
+.dropzone .dz-icon { width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.04); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.dropzone strong { color: var(--fg); font-size: 14px; font-weight: 590; }
+.dropzone p { color: var(--meta); font-size: 12px; }
+.data-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+.data-table-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.data-table th { text-align: left; font-size: 11px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--meta); padding: 10px 16px; border-bottom: 1px solid var(--border-soft); background: rgba(255,255,255,0.015); }
+.data-table td { padding: 11px 16px; border-bottom: 1px solid var(--border-soft); font-size: 13px; color: var(--fg-2); }
+.data-table tr:last-child td { border-bottom: none; }
+.file-name { font-family: var(--font-mono); font-size: 13px; color: var(--fg); }
+.chunk-count { font-family: var(--font-mono); color: var(--muted); }
+.ts { font-family: var(--font-mono); font-size: 12px; color: var(--meta); }
+.empty-state { padding: 32px; text-align: center; color: var(--meta); font-size: 13px; }
+
+/* Jobs */
+.job-progress-cell { display: flex; align-items: center; gap: 8px; min-width: 140px; }
+.progress { height: 7px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow: hidden; flex: 1; width: 90px; }
+.progress-fill { height: 100%; background: var(--accent); border-radius: 999px; }
+.job-progress-cell .count { font-size: 11px; color: var(--meta); font-family: var(--font-mono); white-space: nowrap; }
+.err-text { color: #ff8a8a; font-size: 12px; }
+
+/* Operator (embedded) */
+.op-shell { height: 100%; display: grid; grid-template-columns: 340px 1fr; }
+.op-list-pane { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
+.op-list-header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.op-list-header h1 { font-size: 15px; color: var(--fg); font-weight: 590; margin-bottom: 10px; }
+.op-search { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; margin-bottom: 10px; }
+.op-search svg { color: var(--meta); }
+.op-search input { flex: 1; background: transparent; border: none; outline: none; font-size: 13px; color: var(--fg); }
+.op-chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.op-thread-list { overflow-y: auto; flex: 1; }
+.op-thread-row { display: block; width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--border-soft); padding: 12px 16px; color: var(--fg-2); }
+.op-thread-row:hover { background: rgba(255,255,255,0.03); }
+.op-thread-row.active { background: rgba(94,106,210,0.08); border-left: 2px solid var(--accent); padding-left: 14px; }
+.op-row-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 12px; color: var(--muted); }
+.op-row-id { display: flex; align-items: center; gap: 7px; }
+.op-channel-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.op-channel-dot.whatsapp { background: #27a644; }
+.op-channel-dot.telegram { background: #5e9bd2; }
+.op-row-preview { font-size: 13px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-row-meta { margin-top: 7px; display: flex; gap: 6px; flex-wrap: wrap; }
+.op-tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.op-tag.urgent { color: #ff8a8a; border-color: rgba(220,38,38,0.35); background: rgba(220,38,38,0.08); }
+.op-tag.attending { color: #f4cc4b; border-color: rgba(234,179,8,0.35); background: rgba(234,179,8,0.08); }
+.op-detail-pane { display: flex; flex-direction: column; min-height: 0; }
+.op-detail-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--meta); font-size: 13px; }
+.op-detail-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.op-detail-header .title { font-size: 14px; color: var(--fg); font-weight: 590; }
+.op-detail-header .sub { font-size: 12px; color: var(--muted); margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+.op-messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.op-msg-row { display: flex; flex-direction: column; max-width: 68%; }
+.op-msg-row.self { align-self: flex-end; align-items: flex-end; }
+.op-msg-row.other { align-self: flex-start; align-items: flex-start; }
+.op-msg-meta { font-size: 11px; color: var(--meta); margin-bottom: 3px; display: flex; gap: 6px; align-items: center; }
+.op-sender-chip { font-size: 10px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 4px; }
+.op-sender-chip.user { background: rgba(255,255,255,0.06); color: var(--muted); }
+.op-sender-chip.bot { background: rgba(94,106,210,0.14); color: #a7b0ff; }
+.op-sender-chip.operator { background: rgba(39,166,68,0.14); color: #4fd977; }
+.op-msg-bubble { padding: 9px 13px; border-radius: 10px; font-size: 13px; line-height: 1.45; }
+.op-msg-row.other .op-msg-bubble { background: var(--surface); color: var(--fg-2); }
+.op-msg-row.self .op-msg-bubble { background: var(--accent); color: #fff; }
+.op-reply-area { border-top: 1px solid var(--border); padding: 14px 20px; background: var(--surface); }
+.op-reply-error { display: none; color: #ff8a8a; font-size: 12px; margin-bottom: 8px; }
+.op-reply-error.show { display: block; }
+.op-canned-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.op-canned-chip { font-size: 11px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border); background: rgba(255,255,255,0.02); color: var(--muted); }
+.op-canned-chip:hover { color: var(--fg-2); border-color: rgba(94,106,210,0.4); }
+.op-author-row { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
+.op-author-row label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.op-author-row input { padding: 6px 9px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 6px; color: var(--fg); width: 150px; font-size: 13px; }
+.op-reply-row { display: flex; gap: 8px; }
+.op-reply-row input[type=text] { flex: 1; padding: 10px 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); font-size: 13px; }
+.op-reply-row input[type=text]:focus { outline: none; border-color: var(--accent); }
+
+@media (max-width: 1000px) {
+  .stat-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .quick-actions { flex-direction: column; }
+}
+</style>
+</helmet>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-mark">L</div>
+      <div class="brand-text"><strong>langraph-bot</strong><span>admin</span></div>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="{{navOverviewClass}}" onClick="{{onNavOverview}}">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+        Overview
+      </button>
+      <button class="{{navTenantsClass}}" onClick="{{onNavTenants}}">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+        Tenants
+      </button>
+      <button class="{{navDocumentsClass}}" onClick="{{onNavDocuments}}">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+        Documents
+      </button>
+      <button class="{{navJobsClass}}" onClick="{{onNavJobs}}">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+        Jobs
+      </button>
+      <button class="{{navOperatorClass}}" onClick="{{onNavOperator}}">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+        Operador
+        <sc-if value="{{operatorHasPending}}" hint-placeholder-val="{{false}}">
+          <span class="nav-count">{{stats.pendingHuman}}</span>
+        </sc-if>
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="env-tag">production</div>
+    </div>
+  </aside>
+
+  <main class="main {{mainExtraClass}}">
+
+    <sc-if value="{{isOverview}}" hint-placeholder-val="{{true}}">
+      <div class="view-header">
+        <div><h2>Overview</h2><p>Estado general de la plataforma.</p></div>
+      </div>
+
+      <div class="stat-grid">
+        <button type="button" class="stat-card clickable" onClick="{{onStatTenants}}">
+          <div class="stat-top">
+            <span class="stat-label">Tenants</span>
+            <div class="stat-icon" style="background:rgba(94,106,210,0.14);color:#a7b0ff;">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>
+            </div>
+          </div>
+          <div class="stat-value">{{stats.totalTenants}}</div>
+          <div class="stat-sub">{{stats.activeTenants}} activos</div>
+          <span class="stat-link">Ver tenants →</span>
+        </button>
+        <button type="button" class="stat-card clickable" onClick="{{onStatOperator}}">
+          <div class="stat-top">
+            <span class="stat-label">Esperando operador</span>
+            <div class="stat-icon" style="background:rgba(234,179,8,0.14);color:#f4cc4b;">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            </div>
+          </div>
+          <div class="stat-value">{{stats.pendingHuman}}</div>
+          <div class="stat-sub">conversaciones en cola</div>
+          <span class="stat-link">Ir a Operador →</span>
+        </button>
+        <button type="button" class="stat-card clickable" onClick="{{onStatDocuments}}">
+          <div class="stat-top">
+            <span class="stat-label">Chunks indexados</span>
+            <div class="stat-icon" style="background:rgba(39,166,68,0.14);color:#4fd977;">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+            </div>
+          </div>
+          <div class="stat-value">{{stats.chunksIndexed}}</div>
+          <div class="stat-sub">en {{stats.filesIndexed}} archivos</div>
+          <span class="stat-link">Ver documentos →</span>
+        </button>
+        <button type="button" class="stat-card clickable" onClick="{{onStatJobs}}">
+          <div class="stat-top">
+            <span class="stat-label">Jobs corriendo</span>
+            <div class="stat-icon" style="background:rgba(220,38,38,0.14);color:#ff8a8a;">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            </div>
+          </div>
+          <div class="stat-value">{{stats.jobsRunning}}</div>
+          <div class="stat-sub">{{stats.jobsFailed}} fallidos (7d)</div>
+          <span class="stat-link">Ver jobs →</span>
+        </button>
+      </div>
+
+      <div class="quick-actions">
+        <button class="quick-action" onClick="{{onQuickNewTenant}}">
+          <div class="qa-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></div>
+          <div><strong>Nuevo tenant</strong><span>Alta de clínica en la plataforma</span></div>
+        </button>
+        <button class="quick-action" onClick="{{onQuickJobs}}">
+          <div class="qa-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg></div>
+          <div><strong>Ver jobs activos</strong><span>{{stats.jobsRunning}} indexaciones corriendo</span></div>
+        </button>
+        <button class="quick-action" onClick="{{onQuickDocuments}}">
+          <div class="qa-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg></div>
+          <div><strong>Subir documento</strong><span>Cargar material para indexar</span></div>
+        </button>
+      </div>
+
+      <div class="section-title">Actividad reciente</div>
+      <div class="activity-list">
+        <sc-for list="{{activity}}" as="item" hint-placeholder-count="5">
+          <div class="activity-item">
+            <span class="activity-dot" style="background:{{item.dotColor}}"></span>
+            <span class="activity-text">{{item.text}}</span>
+            <span class="activity-time">{{item.time}}</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isTenants}}" hint-placeholder-val="{{false}}">
+      <div class="view-header">
+        <div><h2>Tenants</h2><p>{{tenants.length}} de {{allTenantsCount}} tenants</p></div>
+        <div class="toolbar">
+          <div class="search-box">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="text" placeholder="Buscar nombre o slug…" value="{{search}}" onInput="{{onSearchInput}}">
+          </div>
+          <select class="field-select" value="{{planFilter}}" onChange="{{onPlanFilterChange}}">
+            <option value="all">Todos los planes</option>
+            <option value="free">Free</option>
+            <option value="basic">Basic</option>
+            <option value="pro">Pro</option>
+          </select>
+          <select class="field-select" value="{{statusFilter}}" onChange="{{onStatusFilterChange}}">
+            <option value="all">Cualquier estado</option>
+            <option value="active">Activos</option>
+            <option value="inactive">Inactivos</option>
+          </select>
+          <button class="btn btn-primary" onClick="{{onToggleAdd}}">+ Nuevo tenant</button>
+        </div>
+      </div>
+
+      <sc-if value="{{addOpen}}" hint-placeholder-val="{{false}}">
+        <div class="add-form">
+          <h3>Nuevo tenant</h3>
+          <div class="field-grid">
+            <div class="field"><label>Nombre</label><input type="text" placeholder="Clínica Norte" value="{{newName}}" onInput="{{onNewNameInput}}"></div>
+            <div class="field"><label>Slug</label><input type="text" class="mono" placeholder="clinica-norte" value="{{newSlug}}" onInput="{{onNewSlugInput}}"></div>
+            <div class="field"><label>Plan</label>
+              <select value="{{newPlan}}" onChange="{{onNewPlanChange}}">
+                <option value="free">Free</option>
+                <option value="basic">Basic</option>
+                <option value="pro">Pro</option>
+              </select>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-ghost" onClick="{{onToggleAdd}}">Cancelar</button>
+            <button class="btn btn-primary" onClick="{{onSaveNewTenant}}" disabled="{{newTenantInvalid}}">Crear tenant</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <div class="table-card">
+        <div class="tt-grid">
+          <div class="tt-head">
+            <span></span><span>Tenant</span><span>Expertise</span><span>Plan</span><span>Estado</span><span>Webhook</span><span></span>
+          </div>
+          <sc-for list="{{tenants}}" as="tenant" hint-placeholder-count="4">
+            <div class="tt-row {{tenant.rowClass}}" onClick="{{tenant.toggle}}">
+              <div class="tt-chevron"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></div>
+              <div class="tt-cell">{{tenant.name}}<br><span class="mono" style="font-size:11px;color:var(--meta);">{{tenant.slug}}</span></div>
+              <div class="tt-cell expertise">{{tenant.expertise}}</div>
+              <div class="tt-cell"><span class="badge {{tenant.planClass}}">{{tenant.plan}}</span></div>
+              <div class="tt-cell"><span class="badge {{tenant.statusClass}}"><span class="dot" style="background:{{tenant.statusDot}}"></span>{{tenant.statusText}}</span></div>
+              <div class="tt-cell"><span class="badge {{tenant.whClass}}"><span class="dot" style="background:{{tenant.whDot}}"></span>{{tenant.webhook}}</span></div>
+              <div></div>
+            </div>
+            <sc-if value="{{tenant.expanded}}" hint-placeholder-val="{{false}}">
+              <div class="expand-wrap" onClick="{{tenant.stop}}">
+                <div class="panel-section">
+                  <div class="panel-section-title">Configuración</div>
+                  <div class="field-grid">
+                    <div class="field"><label>Plan</label>
+                      <select value="{{tenant.plan}}" onChange="{{tenant.setPlan}}">
+                        <option value="free">Free</option><option value="basic">Basic</option><option value="pro">Pro</option>
+                      </select>
+                    </div>
+                    <div class="field"><label>Estado</label>
+                      <div class="toggle-row">
+                        <div class="toggle"><input type="checkbox" checked="{{tenant.active}}" onChange="{{tenant.toggleActive}}"><div class="track"></div><div class="thumb"></div></div>
+                        <span class="toggle-label">{{tenant.statusText}}</span>
+                      </div>
+                    </div>
+                    <div class="field"><label>Creado</label><input type="text" class="mono" value="{{tenant.created}}" readonly></div>
+                  </div>
+                </div>
+                <div class="panel-section">
+                  <div class="panel-section-title">Staff ({{tenant.staff.length}})</div>
+                  <div class="staff-list">
+                    <sc-for list="{{tenant.staff}}" as="member" hint-placeholder-count="2">
+                      <div class="staff-row">
+                        <span class="staff-name">{{member.name}}</span>
+                        <span class="staff-role">{{member.role}}</span>
+                        <button class="btn btn-sm btn-ghost" onClick="{{member.remove}}">Quitar</button>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div class="staff-add-row">
+                    <input type="text" placeholder="Nombre" value="{{tenant.addStaffName}}" onInput="{{tenant.setAddStaffName}}">
+                    <select value="{{tenant.addStaffRole}}" onChange="{{tenant.setAddStaffRole}}">
+                      <option value="agent">Agent</option><option value="admin">Admin</option>
+                    </select>
+                    <button class="btn btn-sm btn-ghost" onClick="{{tenant.addStaff}}">Agregar</button>
+                  </div>
+                </div>
+                <div class="danger-zone">
+                  <h4>Zona de peligro</h4>
+                  <div class="danger-row">
+                    <div class="desc"><strong>Eliminar tenant</strong><p>Borra el tenant y todos sus documentos indexados. No se puede deshacer.</p></div>
+                    <sc-if value="{{tenant.confirming}}" hint-placeholder-val="{{false}}">
+                      <div class="confirm-inline">
+                        <input type="text" class="mono" placeholder="{{tenant.slug}}" value="{{tenant.confirmInput}}" onInput="{{tenant.setConfirmInput}}">
+                        <button class="btn btn-sm btn-danger" onClick="{{tenant.confirmDelete}}" disabled="{{tenant.confirmMismatch}}">Confirmar</button>
+                        <button class="btn btn-sm btn-ghost" onClick="{{tenant.cancelDelete}}">Cancelar</button>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{tenant.notConfirming}}" hint-placeholder-val="{{true}}">
+                      <button class="btn btn-sm btn-danger-outline" onClick="{{tenant.startDelete}}">Eliminar tenant</button>
+                    </sc-if>
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+          </sc-for>
+        </div>
+      </div>
+
+      <sc-if value="{{tenantsEmpty}}" hint-placeholder-val="{{false}}">
+        <div class="empty-state">Ningún tenant coincide con el filtro.</div>
+      </sc-if>
+    </sc-if>
+
+    <sc-if value="{{isDocuments}}" hint-placeholder-val="{{false}}">
+      <div class="view-header">
+        <div><h2>Documents</h2><p>Gestión de material indexado por tenant.</p></div>
+      </div>
+      <div class="docs-toolbar">
+        <select class="field-select" value="{{docsTenant}}" onChange="{{onDocsTenantChange}}">
+          <sc-for list="{{tenantOptions}}" as="opt" hint-placeholder-count="4">
+            <option value="{{opt.slug}}">{{opt.name}}</option>
+          </sc-for>
+        </select>
+        <span class="mono" style="font-size:12px;color:var(--meta);">{{docsTotalChunks}} chunks indexados</span>
+      </div>
+
+      <div class="dropzone">
+        <div class="dz-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg></div>
+        <strong>Arrastrá un PDF o Markdown</strong>
+        <p>o hacé click para elegir un archivo</p>
+        <button class="btn btn-primary btn-sm" onClick="{{onUploadDemo}}">Subir documento (demo)</button>
+      </div>
+
+      <div class="data-table-card">
+        <table class="data-table">
+          <thead><tr><th>Archivo</th><th>Chunks</th><th>Indexado</th><th></th></tr></thead>
+          <tbody>
+            <sc-for list="{{docsFiles}}" as="doc" hint-placeholder-count="2">
+              <tr>
+                <td class="file-name">{{doc.name}}</td>
+                <td class="chunk-count">{{doc.chunks}}</td>
+                <td class="ts">{{doc.indexed}}</td>
+                <td><button class="btn btn-sm btn-ghost" onClick="{{doc.remove}}">Eliminar</button></td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+        <sc-if value="{{docsEmpty}}" hint-placeholder-val="{{false}}">
+          <div class="empty-state">Este tenant todavía no tiene documentos indexados.</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isJobs}}" hint-placeholder-val="{{false}}">
+      <div class="view-header">
+        <div><h2>Jobs</h2><p>Indexaciones en curso e históricas.</p></div>
+      </div>
+      <div class="toolbar" style="margin-bottom:16px;">
+        <button class="filter-chip {{jobsFilterAllClass}}" onClick="{{onJobsFilterAll}}">Todos <span class="count">{{jobCounts.all}}</span></button>
+        <button class="filter-chip {{jobsFilterRunningClass}}" onClick="{{onJobsFilterRunning}}">Corriendo <span class="count">{{jobCounts.running}}</span></button>
+        <button class="filter-chip {{jobsFilterPendingClass}}" onClick="{{onJobsFilterPending}}">Pendiente <span class="count">{{jobCounts.pending}}</span></button>
+        <button class="filter-chip {{jobsFilterDoneClass}}" onClick="{{onJobsFilterDone}}">Listo <span class="count">{{jobCounts.done}}</span></button>
+        <button class="filter-chip {{jobsFilterFailedClass}}" onClick="{{onJobsFilterFailed}}">Fallido <span class="count">{{jobCounts.failed}}</span></button>
+      </div>
+      <div class="data-table-card">
+        <table class="data-table">
+          <thead><tr><th>Job</th><th>Tenant</th><th>Estado</th><th>Progreso</th><th>Creado</th></tr></thead>
+          <tbody>
+            <sc-for list="{{jobs}}" as="job" hint-placeholder-count="3">
+              <tr>
+                <td class="mono">{{job.id}}</td>
+                <td>{{job.tenant}}</td>
+                <td><span class="badge {{job.statusClass}}"><span class="dot" style="background:{{job.statusDot}}"></span>{{job.status}}</span></td>
+                <td>
+                  <div class="job-progress-cell">
+                    <div class="progress"><div class="progress-fill" style="width:{{job.pct}}"></div></div>
+                    <span class="count">{{job.done}}/{{job.total}}</span>
+                  </div>
+                  <sc-if value="{{job.hasError}}" hint-placeholder-val="{{false}}">
+                    <div class="err-text">{{job.error}}</div>
+                  </sc-if>
+                </td>
+                <td class="ts">{{job.created}}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+        <sc-if value="{{jobsEmpty}}" hint-placeholder-val="{{false}}">
+          <div class="empty-state">Ningún job en este estado.</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isOperator}}" hint-placeholder-val="{{false}}">
+      <div class="op-shell">
+        <div class="op-list-pane">
+          <div class="op-list-header">
+            <h1>Conversaciones</h1>
+            <div class="op-search">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input type="text" placeholder="Buscar tenant o mensaje…" value="{{opSearch}}" onInput="{{onOpSearchInput}}">
+            </div>
+            <div class="op-chip-row">
+              <button class="filter-chip {{opFilterAllClass}}" onClick="{{onOpFilterAll}}">Todas <span class="count">{{opCounts.all}}</span></button>
+              <button class="filter-chip {{opFilterUrgentClass}}" onClick="{{onOpFilterUrgent}}">Urgentes <span class="count">{{opCounts.urgent}}</span></button>
+              <button class="filter-chip {{opFilterMineClass}}" onClick="{{onOpFilterMine}}">Asignadas a mí <span class="count">{{opCounts.mine}}</span></button>
+            </div>
+          </div>
+          <div class="op-thread-list">
+            <sc-for list="{{opThreads}}" as="t" hint-placeholder-count="4">
+              <button class="op-thread-row {{t.rowClass}}" onClick="{{t.select}}">
+                <div class="op-row-top">
+                  <span class="op-row-id"><span class="op-channel-dot {{t.channel}}"></span>{{t.tenant}} · {{t.channel}}</span>
+                  <span>{{t.waitLabel}}</span>
+                </div>
+                <div class="op-row-preview">{{t.preview}}</div>
+                <div class="op-row-meta">
+                  <sc-if value="{{t.hasAttending}}" hint-placeholder-val="{{false}}">
+                    <span class="op-tag attending">{{t.attending}}</span>
+                  </sc-if>
+                  <sc-if value="{{t.hasWindow}}" hint-placeholder-val="{{false}}">
+                    <span class="op-tag {{t.windowTagClass}}">{{t.windowLabel}}</span>
+                  </sc-if>
+                </div>
+              </button>
+            </sc-for>
+            <sc-if value="{{opThreadsEmpty}}" hint-placeholder-val="{{false}}">
+              <div class="empty-state">Ninguna conversación coincide con el filtro.</div>
+            </sc-if>
+          </div>
+        </div>
+        <div class="op-detail-pane">
+          <sc-if value="{{opHasSelection}}" hint-placeholder-val="{{false}}">
+            <div class="op-detail-header">
+              <div>
+                <div class="title">{{opSelected.tenant}}</div>
+                <div class="sub"><span class="op-channel-dot {{opSelected.channel}}"></span>{{opSelected.channel}} · {{opSelected.threadId}}</div>
+              </div>
+              <button class="btn btn-danger-outline" onClick="{{onOpEndControl}}">Terminar control humano</button>
+            </div>
+            <div class="op-messages">
+              <sc-for list="{{opMessages}}" as="m" hint-placeholder-count="4">
+                <div class="op-msg-row {{m.side}}">
+                  <div class="op-msg-meta">
+                    <span class="op-sender-chip {{m.sender}}">{{m.label}}</span>
+                    <span>{{m.time}}</span>
+                  </div>
+                  <div class="op-msg-bubble">{{m.content}}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div class="op-reply-area">
+              <div class="op-reply-error {{opReplyErrorClass}}">{{opReplyError}}</div>
+              <div class="op-canned-row">
+                <sc-for list="{{opCannedReplies}}" as="c" hint-placeholder-count="4">
+                  <button class="op-canned-chip" onClick="{{c.use}}">{{c.text}}</button>
+                </sc-for>
+              </div>
+              <div class="op-author-row">
+                <label>Tu nombre</label>
+                <input type="text" placeholder="María" value="{{opAuthor}}" onInput="{{onOpAuthorInput}}">
+              </div>
+              <form class="op-reply-row" onSubmit="{{onOpSendReply}}">
+                <input type="text" placeholder="Escribí una respuesta…" value="{{opReplyText}}" onInput="{{onOpReplyInput}}" autocomplete="off">
+                <button type="submit" class="btn btn-primary">Enviar</button>
+              </form>
+            </div>
+          </sc-if>
+          <sc-if value="{{opNoSelection}}" hint-placeholder-val="{{true}}">
+            <div class="op-detail-empty">Elegí una conversación de la lista.</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+  </main>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#5e6ad2"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      activeTab: 'overview',
+      search: '',
+      planFilter: 'all',
+      statusFilter: 'all',
+      expandedSlug: null,
+      addOpen: false,
+      newName: '',
+      newSlug: '',
+      newPlan: 'free',
+      addStaffName: '',
+      addStaffRole: 'agent',
+      confirmingSlug: null,
+      confirmInput: '',
+      jobsFilter: 'all',
+      docsTenant: 'acme-dental',
+      tenants: [
+        { slug: 'acme-dental', name: 'Acme Dental', plan: 'pro', active: true, expertise: 'Odontología general', webhook: 'registered', created: '2026-01-14', staff: [{ name: 'Dra. Pérez', role: 'admin' }, { name: 'Juan Ríos', role: 'agent' }] },
+        { slug: 'sonrisas-plus', name: 'Sonrisas Plus', plan: 'basic', active: true, expertise: 'Ortodoncia', webhook: 'registered', created: '2026-02-03', staff: [{ name: 'Marta Gil', role: 'admin' }] },
+        { slug: 'clinica-sur', name: 'Clínica Sur', plan: 'free', active: false, expertise: 'Estética dental', webhook: 'unknown', created: '2025-11-20', staff: [] },
+        { slug: 'vital-derma', name: 'Vital Derma', plan: 'pro', active: true, expertise: 'Dermatología', webhook: 'mismatch', created: '2026-03-11', staff: [{ name: 'Dr. Soto', role: 'admin' }] },
+      ],
+      jobs: [
+        { id: 'job-8841', tenant: 'acme-dental', status: 'done', total: 340, done: 340, created: '2026-08-17 09:02' },
+        { id: 'job-8842', tenant: 'vital-derma', status: 'running', total: 220, done: 96, created: '2026-08-19 08:40' },
+        { id: 'job-8843', tenant: 'sonrisas-plus', status: 'pending', total: 0, done: 0, created: '2026-08-19 08:55' },
+        { id: 'job-8840', tenant: 'clinica-sur', status: 'failed', total: 120, done: 45, error: 'Error de parseo de PDF en página 12', created: '2026-08-16 17:20' },
+        { id: 'job-8839', tenant: 'acme-dental', status: 'done', total: 88, done: 88, created: '2026-08-15 11:10' },
+      ],
+      chunkFilesByTenant: {
+        'acme-dental': [{ name: 'lista-precios.pdf', chunks: 142, indexed: '2026-06-02' }, { name: 'faq-general.md', chunks: 38, indexed: '2026-05-20' }],
+        'sonrisas-plus': [{ name: 'catalogo-ortodoncia.pdf', chunks: 96, indexed: '2026-04-11' }],
+        'clinica-sur': [],
+        'vital-derma': [{ name: 'tratamientos-dermato.pdf', chunks: 220, indexed: '2026-08-01' }],
+      },
+      activity: [
+        { type: 'job', text: 'Indexación completa para vital-derma (220 chunks)', time: 'hace 12 min', dotColor: 'var(--success)' },
+        { type: 'tenant', text: 'Nuevo tenant creado: Vital Derma', time: 'hace 1 h', dotColor: 'var(--accent)' },
+        { type: 'webhook', text: 'Webhook mismatch detectado en vital-derma', time: 'hace 1 h', dotColor: 'var(--warn)' },
+        { type: 'staff', text: 'Marta Gil agregada como admin en sonrisas-plus', time: 'hace 3 h', dotColor: 'var(--accent)' },
+        { type: 'job', text: 'Job job-8840 falló: error de parseo de PDF', time: 'hace 5 h', dotColor: 'var(--danger)' },
+      ],
+
+      opSearch: '',
+      opUrgentOnly: false,
+      opMineOnly: false,
+      opSelectedId: null,
+      opAuthor: '',
+      opReplyText: '',
+      opReplyError: '',
+      opThreads: [
+        { id: 't1', tenant: 'acme-dental', channel: 'whatsapp', preview: 'Hola, quería consultar precio de blanqueamiento', waitMin: 4, windowSec: 74000, attending: null },
+        { id: 't2', tenant: 'vital-derma', channel: 'telegram', preview: '¿Tienen turno para mañana temprano?', waitMin: 22, windowSec: null, attending: 'Dr. Soto' },
+        { id: 't3', tenant: 'sonrisas-plus', channel: 'whatsapp', preview: 'No entendí bien la respuesta del bot sobre financiación', waitMin: 51, windowSec: 2280, attending: null },
+        { id: 't4', tenant: 'acme-dental', channel: 'whatsapp', preview: 'Necesito cancelar mi turno de hoy', waitMin: 2, windowSec: 61000, attending: 'Vos' },
+      ],
+      opMessagesById: {
+        t1: [
+          { sender: 'user', content: 'Hola, quería consultar precio de blanqueamiento', time: '09:41' },
+          { sender: 'bot', content: 'El blanqueamiento dental arranca en $45.000. ¿Querés que te derive con un asesor para coordinar turno?', time: '09:41' },
+          { sender: 'user', content: 'Sí, prefiero hablar con alguien', time: '09:42' },
+        ],
+        t2: [
+          { sender: 'user', content: '¿Tienen turno para mañana temprano?', time: '08:55' },
+          { sender: 'bot', content: 'Los turnos de mañana están disponibles desde las 9. ¿Confirmo alguno?', time: '08:56' },
+          { sender: 'operator', author: 'Dr. Soto', content: 'Hola, te puedo dar las 9:30. ¿Te sirve?', time: '09:10' },
+        ],
+        t3: [
+          { sender: 'user', content: 'No entendí bien la respuesta del bot sobre financiación', time: '08:30' },
+          { sender: 'bot', content: 'Ofrecemos financiación en 3, 6 y 12 cuotas sin interés con tarjeta de débito o crédito.', time: '08:30' },
+          { sender: 'user', content: 'Pero con qué bancos exactamente?', time: '08:31' },
+        ],
+        t4: [
+          { sender: 'user', content: 'Necesito cancelar mi turno de hoy', time: '09:58' },
+          { sender: 'operator', author: 'Vos', content: 'Hola! Ya lo cancelo, ¿querés reprogramar para otro día?', time: '09:59' },
+        ],
+      },
+      opCannedReplies: [
+        'Ya te estoy ayudando, un momento.',
+        'Gracias por tu paciencia.',
+        '¿Podés confirmarme tu nombre completo?',
+        'Te derivo con el equipo correspondiente.',
+      ],
+    };
+  }
+
+  setTab(tab) { return () => this.setState({ activeTab: tab, expandedSlug: null }); }
+  toggleExpand(slug) { return (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.setState({ expandedSlug: this.state.expandedSlug === slug ? null : slug, confirmingSlug: null, confirmInput: '' }); }; }
+  stopClick() { return (e) => { if (e && e.stopPropagation) e.stopPropagation(); }; }
+
+  onSearchInput(e) { this.setState({ search: e.target.value }); }
+  onPlanFilterChange(e) { this.setState({ planFilter: e.target.value }); }
+  onStatusFilterChange(e) { this.setState({ statusFilter: e.target.value }); }
+
+  toggleAdd() { this.setState({ addOpen: !this.state.addOpen, newName: '', newSlug: '' }); }
+  onNewNameInput(e) { this.setState({ newName: e.target.value }); }
+  onNewSlugInput(e) { this.setState({ newSlug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') }); }
+  onNewPlanChange(e) { this.setState({ newPlan: e.target.value }); }
+  saveNewTenant() {
+    const { newName, newSlug, newPlan, tenants } = this.state;
+    if (!newName.trim() || !newSlug.trim()) return;
+    if (tenants.some((t) => t.slug === newSlug)) return;
+    const next = tenants.concat([{ slug: newSlug, name: newName, plan: newPlan, active: true, expertise: '—', webhook: 'unknown', created: new Date().toISOString().slice(0, 10), staff: [] }]);
+    this.setState({ tenants: next, addOpen: false, newName: '', newSlug: '' });
+  }
+
+  setPlan(slug) { return (e) => { const v = e.target.value; this.setState({ tenants: this.state.tenants.map((t) => t.slug === slug ? Object.assign({}, t, { plan: v }) : t) }); }; }
+  toggleActive(slug) { return () => this.setState({ tenants: this.state.tenants.map((t) => t.slug === slug ? Object.assign({}, t, { active: !t.active }) : t) }); }
+
+  setAddStaffName(e) { this.setState({ addStaffName: e.target.value }); }
+  setAddStaffRole(e) { this.setState({ addStaffRole: e.target.value }); }
+  addStaff(slug) {
+    return () => {
+      const name = this.state.addStaffName.trim();
+      if (!name) return;
+      const role = this.state.addStaffRole;
+      this.setState({
+        tenants: this.state.tenants.map((t) => t.slug === slug ? Object.assign({}, t, { staff: t.staff.concat([{ name, role }]) }) : t),
+        addStaffName: '',
+      });
+    };
+  }
+  removeStaffMember(slug, idx) {
+    return () => this.setState({ tenants: this.state.tenants.map((t) => t.slug === slug ? Object.assign({}, t, { staff: t.staff.filter((_, i) => i !== idx) }) : t) });
+  }
+
+  startDelete(slug) { return () => this.setState({ confirmingSlug: slug, confirmInput: '' }); }
+  cancelDelete() { this.setState({ confirmingSlug: null, confirmInput: '' }); }
+  setConfirmInput(e) { this.setState({ confirmInput: e.target.value }); }
+  confirmDelete(slug) {
+    return () => {
+      if (this.state.confirmInput !== slug) return;
+      this.setState({ tenants: this.state.tenants.filter((t) => t.slug !== slug), expandedSlug: null, confirmingSlug: null, confirmInput: '' });
+    };
+  }
+
+  setJobsFilter(f) { return () => this.setState({ jobsFilter: f }); }
+  onDocsTenantChange(e) { this.setState({ docsTenant: e.target.value }); }
+  removeChunkFile(tenant, idx) { return () => { const cur = this.state.chunkFilesByTenant[tenant] || []; const next = Object.assign({}, this.state.chunkFilesByTenant, { [tenant]: cur.filter((_, i) => i !== idx) }); this.setState({ chunkFilesByTenant: next }); }; }
+  uploadDemo() {
+    const t = this.state.docsTenant;
+    const cur = this.state.chunkFilesByTenant[t] || [];
+    const next = Object.assign({}, this.state.chunkFilesByTenant, { [t]: cur.concat([{ name: 'documento-nuevo.pdf', chunks: Math.floor(20 + Math.random() * 80), indexed: new Date().toISOString().slice(0, 10) }]) });
+    this.setState({ chunkFilesByTenant: next });
+  }
+
+  opOnSearchInput(e) { this.setState({ opSearch: e.target.value }); }
+  opSetFilter(urgentOnly, mineOnly) { return () => this.setState({ opUrgentOnly: urgentOnly, opMineOnly: mineOnly }); }
+  opSelect(id) { return () => this.setState({ opSelectedId: id, opReplyText: '', opReplyError: '' }); }
+  opOnAuthorInput(e) { this.setState({ opAuthor: e.target.value }); }
+  opOnReplyInput(e) { this.setState({ opReplyText: e.target.value }); }
+  opUseCanned(text) { return () => this.setState({ opReplyText: text }); }
+  opSendReply(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const text = this.state.opReplyText.trim();
+    const author = this.state.opAuthor.trim();
+    if (!text || !author) { this.setState({ opReplyError: 'Escribí tu nombre y un mensaje antes de enviar.' }); return; }
+    const id = this.state.opSelectedId;
+    const cur = this.state.opMessagesById[id] || [];
+    const next = Object.assign({}, this.state.opMessagesById, { [id]: cur.concat([{ sender: 'operator', author, content: text, time: 'ahora' }]) });
+    this.setState({ opMessagesById: next, opReplyText: '', opReplyError: '' });
+  }
+  opEndControl() {
+    const id = this.state.opSelectedId;
+    this.setState({ opThreads: this.state.opThreads.filter((t) => t.id !== id), opSelectedId: null });
+  }
+  opFmtWait(min) {
+    if (min < 60) return min + ' min esperando';
+    const h = Math.floor(min / 60), m = min % 60;
+    return h + 'h ' + m + 'min esperando';
+  }
+  opFmtWindow(sec) {
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+    return h + 'h ' + m + 'min de ventana';
+  }
+
+  renderVals() {
+    const s = this.state;
+    const planBadge = (p) => 'badge-plan-' + p;
+    const whDot = { registered: '#4fd977', mismatch: '#f4cc4b', unknown: '#62666d', error: '#ff8a8a' };
+    const whClass = { registered: 'badge-wh-registered', mismatch: 'badge-wh-mismatch', unknown: 'badge-wh-unknown', error: 'badge-wh-mismatch' };
+
+    const filtered = s.tenants.filter((t) => {
+      if (s.planFilter !== 'all' && t.plan !== s.planFilter) return false;
+      if (s.statusFilter === 'active' && !t.active) return false;
+      if (s.statusFilter === 'inactive' && t.active) return false;
+      const q = s.search.trim().toLowerCase();
+      if (q && !(t.name.toLowerCase().includes(q) || t.slug.includes(q))) return false;
+      return true;
+    });
+
+    const tenants = filtered.map((t) => {
+      const expanded = s.expandedSlug === t.slug;
+      const confirming = s.confirmingSlug === t.slug;
+      return Object.assign({}, t, {
+        rowClass: expanded ? 'expanded' : '',
+        expanded,
+        toggle: this.toggleExpand(t.slug),
+        stop: this.stopClick(),
+        planClass: planBadge(t.plan),
+        statusClass: t.active ? 'badge-status-active' : 'badge-status-inactive',
+        statusDot: t.active ? '#4fd977' : 'var(--meta)',
+        statusText: t.active ? 'activo' : 'inactivo',
+        whClass: whClass[t.webhook] || 'badge-wh-unknown',
+        whDot: whDot[t.webhook] || 'var(--meta)',
+        setPlan: this.setPlan(t.slug),
+        toggleActive: this.toggleActive(t.slug),
+        addStaffName: s.addStaffName,
+        addStaffRole: s.addStaffRole,
+        setAddStaffName: this.setAddStaffName.bind(this),
+        setAddStaffRole: this.setAddStaffRole.bind(this),
+        addStaff: this.addStaff(t.slug),
+        staff: t.staff.map((m, i) => Object.assign({}, m, { remove: this.removeStaffMember(t.slug, i) })),
+        confirming,
+        notConfirming: !confirming,
+        confirmInput: s.confirmInput,
+        confirmMismatch: s.confirmInput !== t.slug,
+        setConfirmInput: this.setConfirmInput.bind(this),
+        startDelete: this.startDelete(t.slug),
+        cancelDelete: this.cancelDelete.bind(this),
+        confirmDelete: this.confirmDelete(t.slug),
+      });
+    });
+
+    const docsFiles = (s.chunkFilesByTenant[s.docsTenant] || []).map((d, i) => Object.assign({}, d, { remove: this.removeChunkFile(s.docsTenant, i) }));
+    const docsTotalChunks = docsFiles.reduce((sum, d) => sum + d.chunks, 0);
+
+    const jobsFiltered = s.jobs.filter((j) => s.jobsFilter === 'all' || j.status === s.jobsFilter);
+    const jobStatusClass = { pending: 'badge-job-pending', running: 'badge-job-running', done: 'badge-job-done', failed: 'badge-job-failed' };
+    const jobStatusDot = { pending: 'var(--meta)', running: '#a7b0ff', done: '#4fd977', failed: '#ff8a8a' };
+    const jobs = jobsFiltered.map((j) => Object.assign({}, j, {
+      statusClass: jobStatusClass[j.status],
+      statusDot: jobStatusDot[j.status],
+      pct: (j.total ? Math.round((j.done / j.total) * 100) : 0) + '%',
+      hasError: !!j.error,
+    }));
+    const jobCounts = {
+      all: s.jobs.length,
+      running: s.jobs.filter((j) => j.status === 'running').length,
+      pending: s.jobs.filter((j) => j.status === 'pending').length,
+      done: s.jobs.filter((j) => j.status === 'done').length,
+      failed: s.jobs.filter((j) => j.status === 'failed').length,
+    };
+
+    const opIsUrgent = (t) => t.windowSec !== null && t.windowSec < 3600;
+    let opVisible = s.opThreads;
+    if (s.opUrgentOnly) opVisible = opVisible.filter(opIsUrgent);
+    if (s.opMineOnly) opVisible = opVisible.filter((t) => t.attending === 'Vos');
+    const opQ = s.opSearch.trim().toLowerCase();
+    if (opQ) opVisible = opVisible.filter((t) => t.tenant.toLowerCase().includes(opQ) || t.preview.toLowerCase().includes(opQ));
+    const opThreads = opVisible.map((t) => ({
+      id: t.id,
+      tenant: t.tenant,
+      channel: t.channel,
+      preview: t.preview,
+      waitLabel: this.opFmtWait(t.waitMin),
+      hasAttending: !!t.attending,
+      attending: t.attending ? 'Atendiendo: ' + t.attending : '',
+      hasWindow: t.windowSec !== null,
+      windowLabel: t.windowSec !== null ? this.opFmtWindow(t.windowSec) : '',
+      windowTagClass: opIsUrgent(t) ? 'urgent' : '',
+      rowClass: t.id === s.opSelectedId ? 'active' : '',
+      select: this.opSelect(t.id),
+    }));
+    const opSelectedThread = s.opThreads.find((t) => t.id === s.opSelectedId) || null;
+    const opMessages = opSelectedThread ? (s.opMessagesById[opSelectedThread.id] || []).map((m) => ({
+      sender: m.sender,
+      side: m.sender === 'operator' ? 'self' : 'other',
+      label: m.sender === 'operator' ? (m.author || 'Operador') : (m.sender === 'bot' ? 'Bot' : 'Usuario'),
+      time: m.time,
+      content: m.content,
+    })) : [];
+
+    const activeTenants = s.tenants.filter((t) => t.active).length;
+    const chunksIndexed = Object.values(s.chunkFilesByTenant).flat().reduce((sum, d) => sum + d.chunks, 0);
+    const filesIndexed = Object.values(s.chunkFilesByTenant).flat().length;
+
+    return {
+      accent: this.props.accent ?? '#5e6ad2',
+      isOverview: s.activeTab === 'overview',
+      isTenants: s.activeTab === 'tenants',
+      isDocuments: s.activeTab === 'documents',
+      isJobs: s.activeTab === 'jobs',
+      isOperator: s.activeTab === 'operator',
+      mainExtraClass: s.activeTab === 'operator' ? 'no-pad' : '',
+      navOperatorClass: s.activeTab === 'operator' ? 'nav-item active' : 'nav-item',
+      onNavOperator: this.setTab('operator'),
+      onStatOperator: this.setTab('operator'),
+      operatorHasPending: true,
+      navOverviewClass: s.activeTab === 'overview' ? 'nav-item active' : 'nav-item',
+      navTenantsClass: s.activeTab === 'tenants' ? 'nav-item active' : 'nav-item',
+      navDocumentsClass: s.activeTab === 'documents' ? 'nav-item active' : 'nav-item',
+      navJobsClass: s.activeTab === 'jobs' ? 'nav-item active' : 'nav-item',
+      onNavOverview: this.setTab('overview'),
+      onNavTenants: this.setTab('tenants'),
+      onNavDocuments: this.setTab('documents'),
+      onNavJobs: this.setTab('jobs'),
+      onQuickNewTenant: () => { this.setState({ activeTab: 'tenants', addOpen: true }); },
+      onQuickJobs: () => { this.setState({ activeTab: 'jobs', jobsFilter: 'running' }); },
+      onQuickDocuments: this.setTab('documents'),
+      onStatTenants: this.setTab('tenants'),
+      onStatDocuments: this.setTab('documents'),
+      onStatJobs: () => { this.setState({ activeTab: 'jobs', jobsFilter: 'running' }); },
+
+      stats: {
+        totalTenants: s.tenants.length,
+        activeTenants,
+        pendingHuman: 3,
+        chunksIndexed,
+        filesIndexed,
+        jobsRunning: jobCounts.running,
+        jobsFailed: jobCounts.failed,
+      },
+      activity: s.activity,
+
+      search: s.search,
+      onSearchInput: this.onSearchInput.bind(this),
+      planFilter: s.planFilter,
+      onPlanFilterChange: this.onPlanFilterChange.bind(this),
+      statusFilter: s.statusFilter,
+      onStatusFilterChange: this.onStatusFilterChange.bind(this),
+      onToggleAdd: this.toggleAdd.bind(this),
+      addOpen: s.addOpen,
+      newName: s.newName,
+      onNewNameInput: this.onNewNameInput.bind(this),
+      newSlug: s.newSlug,
+      onNewSlugInput: this.onNewSlugInput.bind(this),
+      newPlan: s.newPlan,
+      onNewPlanChange: this.onNewPlanChange.bind(this),
+      newTenantInvalid: !s.newName.trim() || !s.newSlug.trim(),
+      onSaveNewTenant: this.saveNewTenant.bind(this),
+      tenants,
+      allTenantsCount: s.tenants.length,
+      tenantsEmpty: tenants.length === 0,
+
+      tenantOptions: s.tenants.map((t) => ({ slug: t.slug, name: t.name })),
+      docsTenant: s.docsTenant,
+      onDocsTenantChange: this.onDocsTenantChange.bind(this),
+      docsFiles,
+      docsEmpty: docsFiles.length === 0,
+      docsTotalChunks,
+      onUploadDemo: this.uploadDemo.bind(this),
+
+      jobs,
+      jobCounts,
+      jobsEmpty: jobs.length === 0,
+      jobsFilterAllClass: s.jobsFilter === 'all' ? 'active' : '',
+      jobsFilterRunningClass: s.jobsFilter === 'running' ? 'active' : '',
+      jobsFilterPendingClass: s.jobsFilter === 'pending' ? 'active' : '',
+      jobsFilterDoneClass: s.jobsFilter === 'done' ? 'active' : '',
+      jobsFilterFailedClass: s.jobsFilter === 'failed' ? 'active' : '',
+      onJobsFilterAll: this.setJobsFilter('all'),
+      onJobsFilterRunning: this.setJobsFilter('running'),
+      onJobsFilterPending: this.setJobsFilter('pending'),
+      onJobsFilterDone: this.setJobsFilter('done'),
+      onJobsFilterFailed: this.setJobsFilter('failed'),
+
+      opSearch: s.opSearch,
+      onOpSearchInput: this.opOnSearchInput.bind(this),
+      opCounts: {
+        all: s.opThreads.length,
+        urgent: s.opThreads.filter(opIsUrgent).length,
+        mine: s.opThreads.filter((t) => t.attending === 'Vos').length,
+      },
+      opFilterAllClass: (!s.opUrgentOnly && !s.opMineOnly) ? 'active' : '',
+      opFilterUrgentClass: s.opUrgentOnly ? 'active' : '',
+      opFilterMineClass: s.opMineOnly ? 'active' : '',
+      onOpFilterAll: this.opSetFilter(false, false),
+      onOpFilterUrgent: this.opSetFilter(true, false),
+      onOpFilterMine: this.opSetFilter(false, true),
+      opThreads,
+      opThreadsEmpty: opThreads.length === 0,
+      opHasSelection: !!opSelectedThread,
+      opNoSelection: !opSelectedThread,
+      opSelected: opSelectedThread ? { tenant: opSelectedThread.tenant, channel: opSelectedThread.channel, threadId: opSelectedThread.id } : { tenant: '', channel: '', threadId: '' },
+      opMessages,
+      onOpEndControl: this.opEndControl.bind(this),
+      opCannedReplies: s.opCannedReplies.map((text) => ({ text, use: this.opUseCanned(text) })),
+      opAuthor: s.opAuthor,
+      onOpAuthorInput: this.opOnAuthorInput.bind(this),
+      opReplyText: s.opReplyText,
+      onOpReplyInput: this.opOnReplyInput.bind(this),
+      onOpSendReply: this.opSendReply.bind(this),
+      opReplyError: s.opReplyError,
+      opReplyErrorClass: s.opReplyError ? 'show' : '',
+    };
+  }
+}
+</script>
+</body>
+</html>

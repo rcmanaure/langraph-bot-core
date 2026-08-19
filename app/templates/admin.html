@@ -207,6 +207,86 @@ code, .mono { font-family: var(--font-mono); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinning { animation: spin 0.8s linear infinite; }
 
+/* ── Overview ─────────────────────────────────────────────────────── */
+.stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: var(--space-4); margin-bottom: var(--space-8); }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-5); display: flex; flex-direction: column; gap: 10px; text-align: left; width: 100%; font-family: inherit; color: inherit; }
+.stat-card.clickable { cursor: pointer; transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard); }
+.stat-card.clickable:hover { border-color: rgba(94,106,210,0.4); background: rgba(94,106,210,0.05); }
+.stat-top { display: flex; align-items: center; justify-content: space-between; }
+.stat-label { font-size: 11px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--meta); }
+.stat-icon { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex: none; }
+.stat-value { font-size: var(--text-2xl); font-weight: 560; color: var(--fg); letter-spacing: -0.02em; }
+.stat-sub { font-size: 12px; color: var(--muted); }
+.stat-link { font-size: 11px; color: var(--accent-hover); }
+.quick-actions { display: flex; gap: var(--space-4); margin-bottom: var(--space-8); flex-wrap: wrap; }
+.quick-action { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-4); flex: 1; min-width: 220px; text-align: left; color: var(--fg-2); font-family: inherit; }
+.quick-action:hover { border-color: rgba(94,106,210,0.4); background: rgba(94,106,210,0.05); }
+.qa-icon { width: 32px; height: 32px; border-radius: 8px; background: rgba(94,106,210,0.14); color: var(--accent-hover); display: flex; align-items: center; justify-content: center; flex: none; }
+.quick-action strong { display: block; font-size: 13px; color: var(--fg); font-weight: 590; }
+.quick-action span { font-size: 12px; color: var(--muted); }
+.section-title { font-size: 12px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-2); margin-bottom: var(--space-3); }
+
+/* ── Search + filters ─────────────────────────────────────────────── */
+.search-box { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 10px; min-width: 220px; }
+.search-box svg { color: var(--meta); flex: none; }
+.search-box input { background: transparent; border: none; outline: none; color: var(--fg); font-size: var(--text-sm); width: 100%; }
+.search-box input::placeholder { color: var(--meta); }
+.filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: rgba(255,255,255,0.02); color: var(--muted); font-size: 12px; font-weight: 510; }
+.filter-chip:hover { color: var(--fg-2); }
+.filter-chip.active { background: rgba(94,106,210,0.16); color: var(--fg); border-color: rgba(94,106,210,0.4); }
+.filter-chip .count { font-family: var(--font-mono); font-size: 11px; opacity: 0.7; }
+select.field-select { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 10px; color: var(--fg); font-size: var(--text-sm); }
+.nav-count { margin-left: auto; background: rgba(234,179,8,0.16); color: #f4cc4b; font-size: 11px; font-weight: 590; font-family: var(--font-mono); border-radius: var(--radius-pill); padding: 1px 7px; }
+
+/* ── Operator (embedded) ─────────────────────────────────────────────── */
+.main.no-pad { padding: 0; max-width: none; height: 100vh; overflow: hidden; }
+.op-shell { height: 100%; display: grid; grid-template-columns: 340px 1fr; }
+.op-list-pane { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
+.op-list-header { padding: var(--space-4); border-bottom: 1px solid var(--border); }
+.op-list-header h1 { font-size: var(--text-lg); color: var(--fg); font-weight: 590; margin-bottom: 10px; }
+.op-chip-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.op-thread-list { overflow-y: auto; flex: 1; }
+.op-thread-row { display: block; width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--border-soft); padding: 12px var(--space-4); color: var(--fg-2); font-family: inherit; }
+.op-thread-row:hover { background: rgba(255,255,255,0.03); }
+.op-thread-row.active { background: rgba(94,106,210,0.08); border-left: 2px solid var(--accent); padding-left: calc(var(--space-4) - 2px); }
+.op-row-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 12px; color: var(--muted); }
+.op-row-id { display: flex; align-items: center; gap: 7px; }
+.op-channel-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.op-channel-dot.whatsapp { background: var(--success); }
+.op-channel-dot.telegram { background: #5e9bd2; }
+.op-row-preview { font-size: var(--text-sm); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-row-meta { margin-top: 7px; display: flex; gap: 6px; flex-wrap: wrap; }
+.op-tag { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border); color: var(--muted); }
+.op-tag.urgent { color: #ff8a8a; border-color: rgba(220,38,38,0.35); background: rgba(220,38,38,0.08); }
+.op-tag.attending { color: #f4cc4b; border-color: rgba(234,179,8,0.35); background: rgba(234,179,8,0.08); }
+.op-detail-pane { display: flex; flex-direction: column; min-height: 0; }
+.op-detail-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--meta); font-size: var(--text-sm); }
+.op-detail-header { padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); }
+.op-detail-header .title { font-size: var(--text-base); color: var(--fg); font-weight: 590; }
+.op-detail-header .sub { font-size: 12px; color: var(--muted); margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+.op-messages { flex: 1; overflow-y: auto; padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
+.op-msg-row { display: flex; flex-direction: column; max-width: 68%; }
+.op-msg-row.self { align-self: flex-end; align-items: flex-end; }
+.op-msg-row.other { align-self: flex-start; align-items: flex-start; }
+.op-msg-meta { font-size: 11px; color: var(--meta); margin-bottom: 3px; display: flex; gap: 6px; align-items: center; }
+.op-sender-chip { font-size: 10px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 4px; }
+.op-sender-chip.user { background: rgba(255,255,255,0.06); color: var(--muted); }
+.op-sender-chip.bot { background: rgba(94,106,210,0.14); color: #a7b0ff; }
+.op-sender-chip.operator { background: rgba(39,166,68,0.14); color: #4fd977; }
+.op-msg-bubble { padding: 9px 13px; border-radius: var(--radius-md); font-size: var(--text-sm); line-height: 1.45; }
+.op-msg-row.other .op-msg-bubble { background: var(--surface); color: var(--fg-2); }
+.op-msg-row.self .op-msg-bubble { background: var(--accent); color: #fff; }
+.op-reply-area { border-top: 1px solid var(--border); padding: var(--space-4) var(--space-5); background: var(--surface); }
+.op-canned-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.op-canned-chip { font-size: 11px; padding: 5px 10px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: rgba(255,255,255,0.02); color: var(--muted); font-family: inherit; }
+.op-canned-chip:hover { color: var(--fg-2); border-color: rgba(94,106,210,0.4); }
+.op-author-row { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
+.op-author-row label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.op-author-row input { padding: 6px 9px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg); width: 150px; font-size: var(--text-sm); }
+.op-reply-row { display: flex; gap: 8px; }
+.op-reply-row input[type=text] { flex: 1; padding: 10px 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--fg); font-size: var(--text-sm); }
+.op-reply-row input[type=text]:focus { outline: none; border-color: var(--accent); }
+
 /* ── Tenants table ────────────────────────────────────────────────── */
 .tt-grid { --cols: 30px minmax(150px,1.2fr) minmax(160px,1.5fr) 92px 96px 168px 108px 30px; }
 .table-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; margin-top: var(--space-5); }
@@ -402,7 +482,11 @@ details.collapsible .details-body { padding: 0 var(--space-4) var(--space-4); }
       <div class="brand-text"><strong>langraph-bot</strong><span>admin</span></div>
     </div>
     <nav class="sidebar-nav" data-od-id="sidebar-nav" id="sidebar-nav">
-      <button class="nav-item active" data-tab="tenants" data-od-id="nav-tenants">
+      <button class="nav-item active" data-tab="overview" data-od-id="nav-overview">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+        Overview
+      </button>
+      <button class="nav-item" data-tab="tenants" data-od-id="nav-tenants">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
         Tenants
       </button>
@@ -413,6 +497,11 @@ details.collapsible .details-body { padding: 0 var(--space-4) var(--space-4); }
       <button class="nav-item" data-tab="jobs" data-od-id="nav-jobs">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
         Jobs
+      </button>
+      <button class="nav-item" data-tab="operator" data-od-id="nav-operator">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+        Operator
+        <span class="nav-count hidden" id="operator-nav-count" data-od-id="operator-nav-count">0</span>
       </button>
     </nav>
     <div class="sidebar-footer">
@@ -448,6 +537,21 @@ function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;',
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 function fmtDate(iso) { if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }); }
 function fmtTime(iso) { if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }); }
+function fmtWait(iso) {
+  if (!iso) return '';
+  const diffMin = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin} min waiting`;
+  const h = Math.floor(diffMin / 60), m = diffMin % 60;
+  return `${h}h ${m}min waiting`;
+}
+function fmtWaWindow(seconds) {
+  if (seconds === null || seconds === undefined) return null;
+  if (seconds <= 0) return 'WhatsApp window expired';
+  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}min window left`;
+}
+function opIsUrgent(t) { return t.wa_window_remaining_seconds !== null && t.wa_window_remaining_seconds !== undefined && t.wa_window_remaining_seconds < 3600; }
 
 /* ── Auth / API layer ─────────────────────────────────────────────── */
 const OPERATOR_KEY_STORAGE = 'lgb_admin_operator_key';
@@ -459,7 +563,9 @@ async function api(path, opts) {
   let data = null;
   try { data = await res.json(); } catch { data = null; }
   if (!res.ok) {
-    const err = new Error((data && data.detail) || `Request failed (${res.status})`);
+    const detail = data && data.detail;
+    const message = (detail && typeof detail === 'object' ? detail.error : detail) || `Request failed (${res.status})`;
+    const err = new Error(message);
     err.status = res.status;
     err.data = data;
     throw err;
@@ -473,10 +579,13 @@ async function verifyKey(key) {
 
 /* ── State ────────────────────────────────────────────────────────── */
 const state = {
-  activeTab: 'tenants',
+  activeTab: 'overview',
   tenants: [],
   tenantsLoading: false,
   tenantsError: '',
+  tenantsSearch: '',
+  tenantsPlanFilter: 'all',
+  tenantsStatusFilter: 'all',
   expandedTenant: null,
   addTenantOpen: false,
   addTenantSaving: false,
@@ -513,7 +622,34 @@ const state = {
   jobs: [],
   jobsLoading: false,
   jobsFilter: 'all',
+  jobsStatusFilter: 'all',
+
+  overviewLoading: false,
+  pendingCount: null,
+  docsAgg: null,
+  overviewJobs: null,
+
+  opThreads: [],
+  opThreadsLoading: false,
+  opSelectedThreadId: null,
+  opMessages: [],
+  opLoadingDetail: false,
+  opReplyError: '',
+  opSearch: '',
+  opFilter: 'all',
+  opPollTimer: null,
 };
+const OP_AUTHOR_STORAGE = 'lgb_operator_author';
+const OP_SEND_ERRORS = {
+  outside_service_window: 'Outside WhatsApp’s 24h window — the message cannot be delivered.',
+  chat_id_unknown: 'Cannot identify this thread’s chat (escalated before this feature existed). Cannot send.',
+};
+const OP_CANNED_REPLIES = [
+  'I’m helping you now, one moment.',
+  'Thanks for your patience.',
+  'Could you confirm your full name?',
+  'I’m looping in the right team for this.',
+];
 
 /* ── Toasts ───────────────────────────────────────────────────────── */
 function toast(msg, type) {
@@ -565,21 +701,30 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
 
 /* ── Nav ──────────────────────────────────────────────────────────── */
 document.getElementById('sidebar-nav').addEventListener('click', (e) => {
-  const btn = e.target.closest('.nav-item');
+  const btn = e.target.closest('.nav-item[data-tab]');
   if (!btn) return;
+  const leavingOperator = state.activeTab === 'operator' && btn.dataset.tab !== 'operator';
   state.activeTab = btn.dataset.tab;
   state.expandedTenant = null;
   state.addTenantOpen = false;
   render();
-  if (state.activeTab === 'documents') {
+  if (leavingOperator && state.opPollTimer) { clearInterval(state.opPollTimer); state.opPollTimer = null; }
+  if (state.activeTab === 'overview') {
+    fetchOverview();
+  } else if (state.activeTab === 'documents') {
     if (!state.docsTenant && state.tenants.length) state.docsTenant = state.tenants[0].slug;
     if (state.docsTenant) fetchChunkFiles();
   } else if (state.activeTab === 'jobs') {
     fetchJobs();
+  } else if (state.activeTab === 'operator') {
+    fetchOpPending();
+    if (state.opPollTimer) clearInterval(state.opPollTimer);
+    state.opPollTimer = setInterval(fetchOpPending, 8000);
   }
 });
 document.querySelector('.sidebar-footer').addEventListener('click', (e) => {
   if (e.target.closest('[data-action="logout"]')) {
+    if (state.opPollTimer) clearInterval(state.opPollTimer);
     localStorage.removeItem(OPERATOR_KEY_STORAGE);
     location.reload();
   }
@@ -589,10 +734,30 @@ document.querySelector('.sidebar-footer').addEventListener('click', (e) => {
 function render() {
   document.querySelectorAll('.nav-item[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === state.activeTab));
   const main = document.getElementById('main-view');
-  if (state.activeTab === 'tenants') main.innerHTML = renderTenantsView();
+  main.classList.toggle('no-pad', state.activeTab === 'operator');
+
+  // Preserve focus/cursor across the full innerHTML replace below — a search
+  // input mid-keystroke must not lose the caret just because state changed.
+  const active = document.activeElement;
+  const focusId = active && active.id && main.contains(active) ? active.id : null;
+  const hasSelection = focusId && 'selectionStart' in active;
+  const selStart = hasSelection ? active.selectionStart : null;
+  const selEnd = hasSelection ? active.selectionEnd : null;
+
+  if (state.activeTab === 'overview') main.innerHTML = renderOverviewView();
+  else if (state.activeTab === 'tenants') main.innerHTML = renderTenantsView();
   else if (state.activeTab === 'documents') main.innerHTML = renderDocumentsView();
+  else if (state.activeTab === 'operator') main.innerHTML = renderOperatorView();
   else main.innerHTML = renderJobsView();
   bindViewEvents();
+
+  if (focusId) {
+    const el = document.getElementById(focusId);
+    if (el) {
+      el.focus();
+      if (selStart !== null) { try { el.setSelectionRange(selStart, selEnd); } catch {} }
+    }
+  }
   if (state.flashSlug) {
     const row = main.querySelector(`.tt-row[data-slug="${CSS.escape(state.flashSlug)}"]`);
     if (row) row.classList.add('flash');
@@ -600,11 +765,20 @@ function render() {
   }
 }
 
+function updateOperatorNavCount() {
+  const el = document.getElementById('operator-nav-count');
+  if (!el) return;
+  const n = state.pendingCount || 0;
+  el.textContent = n;
+  el.classList.toggle('hidden', n === 0);
+}
+
 /* ── Bootstrap ────────────────────────────────────────────────────── */
 async function bootstrap() {
   await fetchTenants();
   if (!state.docsTenant && state.tenants.length) state.docsTenant = state.tenants[0].slug;
   render();
+  fetchOverview();
 }
 
 async function fetchTenants() {
@@ -620,6 +794,28 @@ async function fetchTenants() {
   render();
 }
 
+async function fetchOverview() {
+  if (!state.tenants.length) await fetchTenants();
+  const [pending, docsAgg, jobs] = await Promise.all([
+    api('/operator/pending').then(r => r.length).catch(() => null),
+    Promise.all(state.tenants.map(t =>
+      api(`/admin/tenants/${encodeURIComponent(t.slug)}/chunks/files`).catch(() => [])
+    )).then(lists => {
+      const flat = lists.flat();
+      return { files: flat.length, chunks: flat.reduce((a, f) => a + f.chunk_count, 0) };
+    }),
+    Promise.all(state.tenants.map(async (t) => {
+      const jobs = await api(`/admin/index?tenant_slug=${encodeURIComponent(t.slug)}`).catch(() => []);
+      return jobs.map(j => Object.assign({ tenant: t.slug }, j));
+    })).then(results => results.flat().sort((a, b) => new Date(b.created_at) - new Date(a.created_at))),
+  ]);
+  state.pendingCount = pending;
+  state.docsAgg = docsAgg;
+  state.overviewJobs = jobs;
+  updateOperatorNavCount();
+  if (state.activeTab === 'overview') render();
+}
+
 /* ── Tenants view ─────────────────────────────────────────────────── */
 function planBadge(plan) { return `<span class="badge badge-plan-${plan}">${esc(plan)}</span>`; }
 function statusBadge(active) { return `<span class="badge badge-status-${active?'active':'inactive'}"><span class="dot" style="background:${active?'#4fd977':'#62666d'}"></span>${active?'active':'inactive'}</span>`; }
@@ -630,12 +826,124 @@ function webhookBadge(wh) {
   return `<span class="badge badge-wh-${key}"><span class="dot" style="background:${dotColor[key]}"></span>${labels[key]}</span>`;
 }
 
-function renderTenantsView() {
-  const activeCount = state.tenants.filter(t => t.active).length;
+/* ── Overview view ────────────────────────────────────────────────── */
+function renderOverviewView() {
+  const activeTenants = state.tenants.filter(t => t.active).length;
+  const docsAgg = state.docsAgg;
+  const jobs = state.overviewJobs;
+  const runningCount = jobs ? jobs.filter(j => j.status === 'RUNNING').length : null;
+  const failedCount = jobs ? jobs.filter(j => j.status === 'FAILED').length : null;
+  const pending = state.pendingCount;
+
+  const statCard = (opts) => `
+    <button type="button" class="stat-card ${opts.clickable !== false ? 'clickable' : ''}" ${opts.clickable !== false ? `data-action="goto-tab" data-tab="${opts.tab}"${opts.extraAttrs||''}` : ''}>
+      <div class="stat-top">
+        <span class="stat-label">${esc(opts.label)}</span>
+        <div class="stat-icon" style="background:${opts.iconBg};color:${opts.iconColor}">${opts.icon}</div>
+      </div>
+      <div class="stat-value">${opts.value}</div>
+      <div class="stat-sub">${opts.sub}</div>
+      ${opts.clickable !== false ? `<span class="stat-link">${esc(opts.linkText)} →</span>` : ''}
+    </button>`;
+
   return `
   <div class="view-header">
-    <div><h2 data-od-id="tenants-heading">Tenants</h2><p>${state.tenants.length} tenants · ${activeCount} active</p></div>
+    <div><h2 data-od-id="overview-heading">Overview</h2><p>Platform status at a glance.</p></div>
+  </div>
+  <div class="stat-grid">
+    ${statCard({
+      label: 'Tenants', tab: 'tenants', linkText: 'View tenants',
+      icon: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>',
+      iconBg: 'rgba(94,106,210,0.14)', iconColor: '#a7b0ff',
+      value: state.tenants.length, sub: `${activeTenants} active`,
+    })}
+    ${statCard({
+      label: 'Awaiting operator', tab: 'operator', linkText: 'Go to Operator',
+      icon: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
+      iconBg: 'rgba(234,179,8,0.14)', iconColor: '#f4cc4b',
+      value: pending === null ? '—' : pending, sub: 'conversations waiting',
+    })}
+    ${statCard({
+      label: 'Chunks indexed', tab: 'documents', linkText: 'View documents',
+      icon: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>',
+      iconBg: 'rgba(39,166,68,0.14)', iconColor: '#4fd977',
+      value: docsAgg ? docsAgg.chunks : '—', sub: docsAgg ? `across ${docsAgg.files} files` : 'loading…',
+    })}
+    ${statCard({
+      label: 'Jobs running', tab: 'jobs', linkText: 'View jobs',
+      extraAttrs: ' data-jobs-status-filter="RUNNING"',
+      icon: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>',
+      iconBg: 'rgba(220,38,38,0.14)', iconColor: '#ff8a8a',
+      value: runningCount === null ? '—' : runningCount, sub: failedCount === null ? 'loading…' : `${failedCount} failed recently`,
+    })}
+  </div>
+
+  <div class="quick-actions">
+    <button type="button" class="quick-action" data-action="goto-tab" data-tab="tenants" data-add-tenant="1">
+      <div class="qa-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></div>
+      <div><strong>New tenant</strong><span>Onboard a new clinic</span></div>
+    </button>
+    <button type="button" class="quick-action" data-action="goto-tab" data-tab="documents">
+      <div class="qa-icon">${ic('upload')}</div>
+      <div><strong>Upload a document</strong><span>Add material to the knowledge base</span></div>
+    </button>
+    <button type="button" class="quick-action" data-action="goto-tab" data-tab="operator">
+      <div class="qa-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></div>
+      <div><strong>Answer conversations</strong><span>${pending === null ? '—' : pending} waiting for a reply</span></div>
+    </button>
+  </div>
+
+  <div class="section-title">Recent jobs</div>
+  <div class="data-table-card" data-od-id="overview-recent-jobs">
+    <table class="data-table">
+      <thead><tr><th>File</th><th>Tenant</th><th>Status</th><th>Timestamp</th></tr></thead>
+      <tbody>
+        ${jobs === null ? `<tr><td colspan="4"><div class="empty-state">Loading…</div></td></tr>` : ''}
+        ${jobs && jobs.length === 0 ? `<tr><td colspan="4"><div class="empty-state">No jobs yet.</div></td></tr>` : ''}
+        ${jobs ? jobs.slice(0, 5).map(j => `
+        <tr>
+          <td class="file-name">${esc(j.filename)}</td>
+          <td class="mono" style="font-size:13px;color:var(--fg-2)">${esc(j.tenant)}</td>
+          <td>${jobBadge(j.status)}</td>
+          <td class="ts">${fmtTime(j.created_at)}</td>
+        </tr>`).join('') : ''}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function filteredTenants() {
+  let list = state.tenants;
+  if (state.tenantsPlanFilter !== 'all') list = list.filter(t => t.plan === state.tenantsPlanFilter);
+  if (state.tenantsStatusFilter === 'active') list = list.filter(t => t.active);
+  if (state.tenantsStatusFilter === 'inactive') list = list.filter(t => !t.active);
+  const q = state.tenantsSearch.trim().toLowerCase();
+  if (q) list = list.filter(t => t.slug.toLowerCase().includes(q) || (t.expertise_area || '').toLowerCase().includes(q));
+  return list;
+}
+
+function renderTenantsView() {
+  const activeCount = state.tenants.filter(t => t.active).length;
+  const shown = filteredTenants();
+  return `
+  <div class="view-header">
+    <div><h2 data-od-id="tenants-heading">Tenants</h2><p>${shown.length} of ${state.tenants.length} tenants · ${activeCount} active</p></div>
     <div class="toolbar">
+      <div class="search-box">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input type="text" id="tenants-search-input" placeholder="Search slug or expertise…" value="${esc(state.tenantsSearch)}" autocomplete="off">
+      </div>
+      <select class="field-select" id="tenants-plan-filter" data-od-id="tenants-plan-filter">
+        <option value="all" ${state.tenantsPlanFilter==='all'?'selected':''}>All plans</option>
+        <option value="free" ${state.tenantsPlanFilter==='free'?'selected':''}>Free</option>
+        <option value="basic" ${state.tenantsPlanFilter==='basic'?'selected':''}>Basic</option>
+        <option value="pro" ${state.tenantsPlanFilter==='pro'?'selected':''}>Pro</option>
+      </select>
+      <select class="field-select" id="tenants-status-filter" data-od-id="tenants-status-filter">
+        <option value="all" ${state.tenantsStatusFilter==='all'?'selected':''}>Any status</option>
+        <option value="active" ${state.tenantsStatusFilter==='active'?'selected':''}>Active</option>
+        <option value="inactive" ${state.tenantsStatusFilter==='inactive'?'selected':''}>Inactive</option>
+      </select>
       <button class="btn btn-primary" data-action="toggle-add-tenant" data-od-id="add-tenant-btn">${ic('plus')} Add tenant</button>
     </div>
   </div>
@@ -647,7 +955,8 @@ function renderTenantsView() {
     ${state.tenantsLoading ? `<div class="empty-state">Loading tenants…</div>` : ''}
     ${!state.tenantsLoading && state.tenantsError ? `<div class="empty-state">${esc(state.tenantsError)}<br><button class="btn btn-ghost btn-sm" data-action="retry-tenants">Retry</button></div>` : ''}
     ${!state.tenantsLoading && !state.tenantsError && state.tenants.length === 0 ? `<div class="empty-state">No tenants yet.<br><button class="btn btn-primary btn-sm" data-action="toggle-add-tenant">Create the first one</button></div>` : ''}
-    ${!state.tenantsLoading && !state.tenantsError ? state.tenants.map(t => renderTenantRow(t)).join('') : ''}
+    ${!state.tenantsLoading && !state.tenantsError && state.tenants.length > 0 && shown.length === 0 ? `<div class="empty-state">No tenant matches the filter.</div>` : ''}
+    ${!state.tenantsLoading && !state.tenantsError ? shown.map(t => renderTenantRow(t)).join('') : ''}
   </div>`;
 }
 
@@ -902,7 +1211,16 @@ function jobBadge(status) {
   return `<span class="badge badge-job-${s}"><span class="dot" style="background:${dotColor[s]||'#62666d'}"></span>${s}</span>`;
 }
 function renderJobsView() {
-  const sorted = state.jobs;
+  const all = state.jobs;
+  const counts = {
+    all: all.length,
+    PENDING: all.filter(j => j.status === 'PENDING').length,
+    RUNNING: all.filter(j => j.status === 'RUNNING').length,
+    DONE: all.filter(j => j.status === 'DONE').length,
+    FAILED: all.filter(j => j.status === 'FAILED').length,
+  };
+  const sorted = state.jobsStatusFilter === 'all' ? all : all.filter(j => j.status === state.jobsStatusFilter);
+  const chip = (value, label) => `<button class="filter-chip ${state.jobsStatusFilter===value?'active':''}" data-action="jobs-status-filter" data-value="${value}">${label} <span class="count">${counts[value]}</span></button>`;
   return `
   <div class="view-header">
     <div><h2 data-od-id="jobs-heading">Indexing jobs</h2><p>${sorted.length} job${sorted.length===1?'':'s'} shown</p></div>
@@ -915,6 +1233,9 @@ function renderJobsView() {
       </div>
       <button class="btn btn-icon" id="jobs-refresh-btn" title="Refresh">${ic('refresh', state.jobsLoading?'spinning':'')}</button>
     </div>
+  </div>
+  <div class="toolbar" style="margin-bottom:var(--space-4)">
+    ${chip('all','All')} ${chip('PENDING','Pending')} ${chip('RUNNING','Running')} ${chip('DONE','Done')} ${chip('FAILED','Failed')}
   </div>
   <div class="data-table-card" data-od-id="jobs-table">
     <table class="data-table">
@@ -943,6 +1264,7 @@ function bindViewEvents() {
   main.addEventListener('click', onMainClick);
   main.addEventListener('input', onMainInput);
   main.addEventListener('change', onMainChange);
+  main.addEventListener('submit', onMainSubmit);
 
   const dz = document.getElementById('dropzone');
   if (dz) {
@@ -1059,6 +1381,40 @@ function onMainClick(e) {
     case 'remove-staff':
       removeStaffMember(slug, Number(actionEl.dataset.staffId));
       break;
+    case 'jobs-status-filter':
+      state.jobsStatusFilter = actionEl.dataset.value;
+      render();
+      break;
+    case 'goto-tab': {
+      const tab = actionEl.dataset.tab;
+      state.activeTab = tab;
+      if (actionEl.dataset.jobsStatusFilter) state.jobsStatusFilter = actionEl.dataset.jobsStatusFilter;
+      if (actionEl.dataset.addTenant) state.addTenantOpen = true;
+      render();
+      if (tab === 'documents' && !state.docsTenant && state.tenants.length) { state.docsTenant = state.tenants[0].slug; fetchChunkFiles(); }
+      if (tab === 'jobs') fetchJobs();
+      if (tab === 'operator') {
+        fetchOpPending();
+        if (state.opPollTimer) clearInterval(state.opPollTimer);
+        state.opPollTimer = setInterval(fetchOpPending, 8000);
+      }
+      break;
+    }
+    case 'op-select-thread':
+      opSelectThread(actionEl.dataset.threadId);
+      break;
+    case 'op-end-control':
+      opEndControl();
+      break;
+    case 'op-use-canned':
+      document.getElementById('op-reply-text').value = actionEl.dataset.text;
+      document.getElementById('op-reply-text').focus();
+      break;
+    case 'op-filter': {
+      state.opFilter = actionEl.dataset.value;
+      render();
+      break;
+    }
   }
 }
 
@@ -1067,6 +1423,12 @@ function onMainInput(e) {
     const slug = e.target.dataset.slug;
     const btn = e.target.closest('.confirm-inline').querySelector('[data-action="delete-confirm"]');
     btn.disabled = e.target.value !== slug;
+  } else if (e.target.id === 'tenants-search-input') {
+    state.tenantsSearch = e.target.value;
+    render();
+  } else if (e.target.id === 'op-search-input') {
+    state.opSearch = e.target.value;
+    render();
   }
 }
 
@@ -1084,6 +1446,19 @@ function onMainChange(e) {
   } else if (e.target.id === 'replace-all-checkbox') {
     state.docsReplaceAll = e.target.checked;
     document.getElementById('replace-all-label').classList.toggle('active', state.docsReplaceAll);
+  } else if (e.target.id === 'tenants-plan-filter') {
+    state.tenantsPlanFilter = e.target.value;
+    render();
+  } else if (e.target.id === 'tenants-status-filter') {
+    state.tenantsStatusFilter = e.target.value;
+    render();
+  }
+}
+
+function onMainSubmit(e) {
+  if (e.target.id === 'op-reply-form') {
+    e.preventDefault();
+    opSendReply();
   }
 }
 
@@ -1394,6 +1769,191 @@ async function fetchJobs() {
   }
   state.jobsLoading = false;
   render();
+}
+
+/* ── Operator view (embedded, shares the same operator key/session) ─── */
+function opFilteredThreads() {
+  let list = state.opThreads;
+  if (state.opFilter === 'urgent') list = list.filter(opIsUrgent);
+  if (state.opFilter === 'mine') {
+    const me = (localStorage.getItem(OP_AUTHOR_STORAGE) || '').trim();
+    list = list.filter(t => t.attending && t.attending === me);
+  }
+  const q = state.opSearch.trim().toLowerCase();
+  if (q) list = list.filter(t => t.tenant_slug.toLowerCase().includes(q) || (t.user_message || '').toLowerCase().includes(q));
+  return list;
+}
+
+function opSenderChipClass(sender) { return sender === 'operator' ? 'operator' : sender === 'bot' ? 'bot' : 'user'; }
+function opSenderLabel(m) {
+  if (m.sender === 'operator') return m.author || 'Operator';
+  if (m.sender === 'bot') return 'Bot';
+  return 'User';
+}
+
+function renderOpThreadRow(t) {
+  const active = t.thread_id === state.opSelectedThreadId;
+  const win = fmtWaWindow(t.wa_window_remaining_seconds);
+  const urgent = opIsUrgent(t);
+  return `
+  <button type="button" class="op-thread-row ${active?'active':''}" data-action="op-select-thread" data-thread-id="${esc(t.thread_id)}">
+    <div class="op-row-top">
+      <span class="op-row-id"><span class="op-channel-dot ${esc(t.channel)}"></span>${esc(t.tenant_slug)} · ${esc(t.channel)}</span>
+      <span>${esc(fmtWait(t.interrupt_started_at))}</span>
+    </div>
+    <div class="op-row-preview">${esc(t.user_message || '(no text)')}</div>
+    <div class="op-row-meta">
+      ${t.attending ? `<span class="op-tag attending">Attending: ${esc(t.attending)}</span>` : ''}
+      ${win ? `<span class="op-tag ${urgent?'urgent':''}">${esc(win)}</span>` : ''}
+    </div>
+  </button>`;
+}
+
+function renderOpDetail(thread) {
+  const savedAuthor = localStorage.getItem(OP_AUTHOR_STORAGE) || '';
+  return `
+  <div class="op-detail-header">
+    <div>
+      <div class="title">${esc(thread.tenant_slug)}</div>
+      <div class="sub"><span class="op-channel-dot ${esc(thread.channel)}"></span>${esc(thread.channel)} · <span class="mono">${esc(thread.thread_id)}</span></div>
+    </div>
+    <button class="btn btn-danger-outline btn-sm" data-action="op-end-control">End human control</button>
+  </div>
+  <div class="op-messages" id="op-messages-scroll">
+    ${state.opLoadingDetail ? `<div class="empty-state">Loading…</div>` : (state.opMessages||[]).map(m => `
+    <div class="op-msg-row ${m.sender==='operator'?'self':'other'}">
+      <div class="op-msg-meta">
+        <span class="op-sender-chip ${opSenderChipClass(m.sender)}">${esc(opSenderLabel(m))}</span>
+        ${m.created_at ? `<span>${fmtTime(m.created_at)}</span>` : ''}
+      </div>
+      <div class="op-msg-bubble">${esc(m.content)}</div>
+    </div>`).join('')}
+  </div>
+  <div class="op-reply-area">
+    <div class="inline-error ${state.opReplyError?'show':''}">${ic('alert')}<span>${esc(state.opReplyError)}</span></div>
+    <div class="op-canned-row">
+      ${OP_CANNED_REPLIES.map(text => `<button type="button" class="op-canned-chip" data-action="op-use-canned" data-text="${esc(text)}">${esc(text)}</button>`).join('')}
+    </div>
+    <div class="op-author-row">
+      <label>Your name</label>
+      <input type="text" id="op-author-input" placeholder="María" value="${esc(savedAuthor)}">
+    </div>
+    <form class="op-reply-row" id="op-reply-form">
+      <input type="text" id="op-reply-text" placeholder="Type a reply…" autocomplete="off">
+      <button type="submit" class="btn btn-primary">Send</button>
+    </form>
+  </div>`;
+}
+
+function renderOperatorView() {
+  const threads = opFilteredThreads();
+  const me = (localStorage.getItem(OP_AUTHOR_STORAGE) || '').trim();
+  const counts = {
+    all: state.opThreads.length,
+    urgent: state.opThreads.filter(opIsUrgent).length,
+    mine: state.opThreads.filter(t => t.attending && t.attending === me).length,
+  };
+  const chip = (value, label) => `<button type="button" class="filter-chip ${state.opFilter===value?'active':''}" data-action="op-filter" data-value="${value}">${label} <span class="count">${counts[value]}</span></button>`;
+  const selected = state.opThreads.find(t => t.thread_id === state.opSelectedThreadId) || null;
+
+  return `
+  <div class="op-shell">
+    <div class="op-list-pane">
+      <div class="op-list-header">
+        <h1 data-od-id="operator-heading">Conversations</h1>
+        <div class="search-box">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input type="text" id="op-search-input" placeholder="Search tenant or message…" value="${esc(state.opSearch)}" autocomplete="off">
+        </div>
+        <div class="op-chip-row">
+          ${chip('all','All')} ${chip('urgent','Urgent')} ${chip('mine','Assigned to me')}
+        </div>
+      </div>
+      <div class="op-thread-list" data-od-id="operator-thread-list">
+        ${state.opThreadsLoading && !state.opThreads.length ? `<div class="empty-state">Loading…</div>` : ''}
+        ${!state.opThreadsLoading && !threads.length ? `<div class="empty-state">${state.opThreads.length ? 'No conversation matches the filter.' : 'No conversations waiting.'}</div>` : ''}
+        ${threads.map(t => renderOpThreadRow(t)).join('')}
+      </div>
+    </div>
+    <div class="op-detail-pane">
+      ${selected ? renderOpDetail(selected) : `<div class="op-detail-empty">Select a conversation from the list.</div>`}
+    </div>
+  </div>`;
+}
+
+async function fetchOpPending() {
+  state.opThreadsLoading = state.opThreads.length === 0;
+  if (state.activeTab === 'operator') render();
+  try {
+    state.opThreads = await api('/operator/pending');
+    state.pendingCount = state.opThreads.length;
+    updateOperatorNavCount();
+  } catch (err) {
+    if (err.status === 401 && state.opPollTimer) { clearInterval(state.opPollTimer); state.opPollTimer = null; }
+  }
+  state.opThreadsLoading = false;
+  if (state.activeTab === 'operator') render();
+}
+
+async function opSelectThread(threadId) {
+  state.opSelectedThreadId = threadId;
+  state.opLoadingDetail = true;
+  state.opReplyError = '';
+  render();
+  let data = null, failed = false;
+  try {
+    data = await api(`/operator/threads/${encodeURIComponent(threadId)}`);
+  } catch (err) {
+    failed = true;
+  }
+  // A different thread may have been clicked while this request was in
+  // flight — an out-of-order response must not overwrite what's now selected.
+  if (state.opSelectedThreadId !== threadId) return;
+  state.opMessages = failed ? [] : data.messages;
+  state.opLoadingDetail = false;
+  render();
+  const scroll = document.getElementById('op-messages-scroll');
+  if (scroll) scroll.scrollTop = scroll.scrollHeight;
+}
+
+async function opSendReply() {
+  const textInput = document.getElementById('op-reply-text');
+  const authorInput = document.getElementById('op-author-input');
+  const text = textInput.value.trim();
+  const author = authorInput.value.trim();
+  if (!text || !author) {
+    state.opReplyError = 'Enter your name and a message before sending.';
+    render();
+    return;
+  }
+  localStorage.setItem(OP_AUTHOR_STORAGE, author);
+  try {
+    await api(`/operator/threads/${encodeURIComponent(state.opSelectedThreadId)}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, author }),
+    });
+    state.opReplyError = '';
+    await opSelectThread(state.opSelectedThreadId);
+    await fetchOpPending();
+  } catch (err) {
+    state.opReplyError = OP_SEND_ERRORS[err.message] || err.message || 'Could not send the message.';
+    render();
+  }
+}
+
+async function opEndControl() {
+  if (!state.opSelectedThreadId) return;
+  try {
+    await api(`/operator/resume/${encodeURIComponent(state.opSelectedThreadId)}`, { method: 'POST' });
+    state.opSelectedThreadId = null;
+    state.opMessages = [];
+    render();
+    await fetchOpPending();
+  } catch (err) {
+    state.opReplyError = err.message || 'Could not end human control.';
+    render();
+  }
 }
 
 /* ── Init ─────────────────────────────────────────────────────────── */
