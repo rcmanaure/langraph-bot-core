@@ -51,4 +51,17 @@ Re-benchmarked real alternatives (same script, same 8-case set) that DO list `to
 | `openai/gpt-4.1-nano` | **8/8** | **0.81s** (max 1.17s) | Chosen |
 | `google/gemini-2.5-flash-lite` | 8/8 | 75.83s avg — one call hung 601s past the configured 60s timeout | Rejected: unacceptable tail latency |
 
-`triage_model` is now `openai/gpt-4.1-nano` ($0.05/$0.20 per 1M — slightly above nova-micro's nominal price, but zero observed fallback-retry calls closes most of that gap in practice). Updated in `app/config.py`, `.env`, `.env.example`.
+`triage_model` was set to `openai/gpt-4.1-nano` ($0.10/$0.40 per 1M — the real-time endpoint, not the `:batch` variant, which is async/24h-turnaround and unusable here) — superseded by the next update below within the same day.
+
+## Update (2026-08): triage swapped again, `gpt-4.1-nano` → `meta-llama/llama-3.1-8b-instruct`
+
+A follow-up review (3 parallel Haiku subagents, one per model category, each independently researching OpenRouter's catalog and real-code-benchmarking candidates) found `meta-llama/llama-3.1-8b-instruct` beating `gpt-4.1-nano` on every axis for triage. Verified independently (not taken on the subagent's word alone) with 24 real calls across 2 runs, 12 cases each:
+
+| Model | Accuracy | Avg latency | Max latency | Price (prompt/completion per 1M) |
+|---|---|---|---|---|
+| `openai/gpt-4.1-nano` (previous) | 8/8 | 0.81s | 1.17s | $0.10 / $0.40 |
+| `meta-llama/llama-3.1-8b-instruct` | **24/24** | **0.30-0.44s** | 0.96s | **$0.05 / $0.08** |
+
+Half the price, roughly 2x faster, no accuracy loss, confirmed `tool_choice` support via OpenRouter's models API. `triage_model` is now `meta-llama/llama-3.1-8b-instruct`. Updated in `app/config.py`, `.env`, `.env.example`.
+
+The same review round also benchmarked `generate` (chat) and `vision` model alternatives. Both subagents independently recommended `google/gemini-2.5-flash-lite` (cheaper/faster than the current `mistral-small-3.2-24b-instruct` and `qwen3-vl-32b-instruct` picks) — **not adopted for either.** A direct stress test (12 sequential real calls) came back clean, but an earlier triage-benchmark run against this same model hit one call that took 601 seconds — 10x past the configured 60-second client timeout — and returned normally (not a timeout exception), meaning our own timeout safety net didn't fire at all for that call. `generate()` runs on every single RAG turn with no independent timeout/fallback for a hang shaped like that (its existing fallback triggers on exception, not on a slow-but-successful response), so one silent 10-minute stall in production is a worse failure mode than the flakiness this whole ADR update chain has been fixing. Not ruled out permanently, but not adopted until that hang is understood or reproduced reliably enough to bound its risk.
