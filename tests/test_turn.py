@@ -14,7 +14,7 @@ import pytest
 
 from app.channels import turn as turn_module
 from app.channels.base import Inbound, MediaRef, MediaTooLarge
-from app.channels.turn import run_turn
+from app.channels.turn import run_turn, wait_for_pending_turns
 
 VISION_MODEL = "app.channels.turn.settings.openai_vision_model"
 EXTRACT = "app.channels.turn.extract_procedure_query"
@@ -724,3 +724,41 @@ async def test_documents_get_an_explanation_instead_of_silence(graph):
     assert adapter.sent == [turn_module.DOCUMENT_UNSUPPORTED]
     assert adapter.fetched == []
     graph.ainvoke.assert_not_awaited()
+
+
+# ── Graceful shutdown ─────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_wait_for_pending_turns_waits_for_an_in_flight_turn(graph):
+    """Found live: a container restart mid-turn silently dropped a real
+    WhatsApp reply -- vision extraction had finished, but the process was
+    killed before generate()/send() ran, with zero trace anywhere. This is
+    what app/main.py's shutdown handler calls to not repeat that."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow_ainvoke(*args, **kwargs):
+        started.set()
+        await release.wait()
+        return {"answer": "Respuesta lenta", "messages": []}
+
+    graph.ainvoke.side_effect = _slow_ainvoke
+    adapter = FakeAdapter()
+    task = asyncio.create_task(run_turn(adapter, make_inbound(text="hola"), graph))
+
+    await started.wait()
+    assert not task.done()
+
+    waiter = asyncio.create_task(wait_for_pending_turns(timeout=5))
+    await asyncio.sleep(0)  # let waiter start awaiting before the turn finishes
+    assert not waiter.done()
+
+    release.set()
+    await waiter
+    assert task.done()
+    assert adapter.sent == ["Respuesta lenta"]
+
+
+@pytest.mark.asyncio
+async def test_wait_for_pending_turns_is_a_noop_with_nothing_in_flight():
+    await wait_for_pending_turns(timeout=1)  # must not hang or raise

@@ -222,7 +222,6 @@ X-Operator-Key: <SECRET_KEY value, raw — not hashed>
 | `EMBEDDING_MODEL` | No | Embedding model (default: `openai/text-embedding-3-small`) |
 | `SECRET_KEY` | Yes | Used to derive the operator key |
 | `FERNET_KEY` | Yes | Fernet key for encrypting WhatsApp tokens at rest |
-| `CSRF_SECRET` | No | CSRF protection secret for the admin panel |
 | `OPERATOR_TOKEN` | No | If set, used for operator/admin auth instead of `SECRET_KEY` |
 | `TELEGRAM_BOT_TOKEN` | No | Global fallback bot token (per-tenant overrides this) |
 | `OBSERVABILITY_ENABLED` | No | Enable Phoenix tracing (default: `false`) |

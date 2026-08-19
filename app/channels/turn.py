@@ -25,6 +25,30 @@ from app.services.vision import VISION_UNCERTAIN, extract_procedure_query
 
 logger = logging.getLogger(__name__)
 
+# Found live: a `docker compose restart api` mid-turn silently dropped a
+# real WhatsApp turn -- vision extraction had already finished, but the
+# process was killed before generate()/send() ran, with no exception, no
+# checkpoint (durability="exit" only persists at the very end), and no
+# trace of it anywhere. Both channels dispatch run_turn() as a detached
+# background task (FastAPI's BackgroundTasks or asyncio.create_task, see
+# whatsapp.py/telegram.py) that ASGI shutdown doesn't automatically wait
+# for, so this module tracks every in-flight call itself and exposes
+# wait_for_pending_turns() for app/main.py's shutdown handler to await
+# before the process (and its DB/checkpointer pool) tears down.
+_PENDING_TURNS: set = set()
+
+
+async def wait_for_pending_turns(timeout: float = 60) -> None:
+    """Await in-flight run_turn() calls before shutdown -- see the note on
+    _PENDING_TURNS above for why this exists."""
+    pending = [t for t in _PENDING_TURNS if not t.done()]
+    if not pending:
+        return
+    logger.info("turn_shutdown_waiting count=%d", len(pending))
+    _done, still_pending = await asyncio.wait(pending, timeout=timeout)
+    if still_pending:
+        logger.warning("turn_shutdown_timeout count=%d", len(still_pending))
+
 # Every user-facing string of the turn, in one place. Previously duplicated
 # across telegram.py and whatsapp.py, where two of them had already diverged.
 AUDIO_TOO_LARGE = "Archivo de voz demasiado grande (máx 10MB)."
@@ -69,30 +93,37 @@ async def run_turn(adapter: ChannelAdapter, inbound: Inbound, graph) -> None:
     already returned 200, so an escaping exception would be invisible to the
     platform and silent to the user.
     """
-    # Ack first, unconditionally -- it's identical whether or not the thread
-    # is under human control (SilentAdapter delegates it unchanged), so it
-    # must not wait on a DB round trip to reach the user.
-    await _acknowledge(adapter, inbound)
+    task = asyncio.current_task()
+    if task is not None:
+        _PENDING_TURNS.add(task)
+    try:
+        # Ack first, unconditionally -- it's identical whether or not the
+        # thread is under human control (SilentAdapter delegates it
+        # unchanged), so it must not wait on a DB round trip to reach the
+        # user.
+        await _acknowledge(adapter, inbound)
 
-    under_control = await is_under_human_control(inbound.tenant_slug, inbound.channel, inbound.user_id)
-    if under_control:
-        # The bot goes silent for the rest of this turn -- media is still
-        # fetched/transcribed/extracted so the operator reads text, not a
-        # placeholder, but nothing reaches the user. See ADR-009.
-        adapter = SilentAdapter(adapter)
+        under_control = await is_under_human_control(inbound.tenant_slug, inbound.channel, inbound.user_id)
+        if under_control:
+            # The bot goes silent for the rest of this turn -- media is still
+            # fetched/transcribed/extracted so the operator reads text, not a
+            # placeholder, but nothing reaches the user. See ADR-009.
+            adapter = SilentAdapter(adapter)
 
-    text = await _resolve_text(adapter, inbound)
-    if text is None:
-        return  # nothing to answer, or the user was already told why
-    # Masked before the text becomes part of persisted graph state or a
-    # conversation audit record — see app/services/redaction.py.
-    text = redact_document_numbers(text)
+        text = await _resolve_text(adapter, inbound)
+        if text is None:
+            return  # nothing to answer, or the user was already told why
+        # Masked before the text becomes part of persisted graph state or a
+        # conversation audit record — see app/services/redaction.py.
+        text = redact_document_numbers(text)
 
-    if under_control:
-        await record_message(inbound.tenant_slug, inbound.thread_id, "user", text)
-        return  # the graph is never invoked while a thread is under human control
+        if under_control:
+            await record_message(inbound.tenant_slug, inbound.thread_id, "user", text)
+            return  # the graph is never invoked while a thread is under human control
 
-    await _reply(adapter, inbound, text, graph)
+        await _reply(adapter, inbound, text, graph)
+    finally:
+        _PENDING_TURNS.discard(task)
 
 
 async def _acknowledge(adapter: ChannelAdapter, inbound: Inbound) -> None:

@@ -71,6 +71,29 @@ LOCATION_RE = re.compile(
 # how the user actually phrased the question.
 _LOCATION_PROBE_QUERY = "dirección ubicación teléfono contacto cómo llegar"
 
+# Used by generate.py only (triage.py has its own separate word list --
+# _GREETING_PHRASE/_GREETING_CHAIN_RE there -- for a different purpose: an
+# opening-greeting-word check, not the whole "is this pure greeting/
+# farewell/thanks" vocabulary). Prefix-only match (unlike a whole-message
+# anchor) -- fires on "hola, cuanto cuesta X" where content follows the
+# greeting, not just a bare "hola". Lets generate() have the model open with
+# a short natural greeting instead of ignoring the "hola" outright. Word
+# list found incomplete live twice already: 2026-08-19 first pass missed
+# "saludos" entirely -- "saludos. cuanto cuesta X" got the price with no
+# opener. Widened the same day to cover common LATAM openers beyond
+# hola/buenas (qué tal, quihubo/quiubo, épale, aló, qué onda, qué más --
+# México/Colombia/Venezuela/general usage), tenants here are Spanish-
+# speaking LATAM businesses. Also loosened buen[oa]s? -> buen(?:[oa]s?)? so
+# a bare "buen día" (no trailing s, common Argentina/Uruguay usage) matches
+# too. Keep this list evidence-driven, not exhaustive-by-guessing.
+GREETING_PREFIX_RE = re.compile(
+    r"^\s*(?:hola+|holis|saludos?|qu[eé]\s+tal|qu[eé]\s+h[uú]bo|quih[uú]bo|quiub[oa]?|"
+    r"qu[eé]\s+m[aá]s|qu[eé]\s+onda|[eé]pale|epa|al[oó]|"
+    r"buen(?:[oa]s?)?(?:\s+(?:d[ií]as?|tardes|noches))?|hi+|hey+|hello+)"
+    r"[\s.,!¡?¿]+\S",
+    re.IGNORECASE,
+)
+
 
 def last_human_text(state: AgentState) -> str | None:
     """The literal text of the last human message, unanchored (contrast

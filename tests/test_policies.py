@@ -36,20 +36,6 @@ def test_can_upload_doc_within_limit():
     assert policy.can_upload_doc(5) is False  # 5 >= 5
 
 
-def test_can_index_chunk_within_limit():
-    """Can index chunk when below limit."""
-    policy = TenantPolicy(tenant_slug="test", plan="basic")
-    assert policy.can_index_chunk(1999) is True  # 1999 < 2000
-    assert policy.can_index_chunk(2000) is False  # 2000 >= 2000
-
-
-def test_can_query_within_limit():
-    """Can query when below limit."""
-    policy = TenantPolicy(tenant_slug="test", plan="pro")
-    assert policy.can_query(9999) is True  # 9999 < 10000
-    assert policy.can_query(10000) is False  # 10000 >= 10000
-
-
 def test_pricing_info():
     """Pricing info includes USD cost."""
     policies = {

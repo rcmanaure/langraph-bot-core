@@ -1,0 +1,355 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+:root {
+  --bg:      #08090a;
+  --surface: #191a1b;
+  --surface-2: #212224;
+  --fg:      #f7f8f8;
+  --fg-2:    #d0d6e0;
+  --muted:   #8a8f98;
+  --meta:    #62666d;
+  --border:  rgba(255, 255, 255, 0.08);
+  --border-soft: rgba(255, 255, 255, 0.05);
+  --accent:       {{accent}};
+  --accent-hover: #828fff;
+  --success: #27a644;
+  --warn:    #eab308;
+  --danger:  #dc2626;
+  --font: "Inter Variable", "Inter", -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Berkeley Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg-2); font-family: var(--font); font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+button { font-family: inherit; cursor: pointer; }
+input, textarea { font-family: inherit; font-size: inherit; color: var(--fg); }
+a { color: var(--accent-hover); } a:hover { color: var(--accent); }
+svg.icon { width: 15px; height: 15px; flex: none; }
+.mono { font-family: var(--font-mono); }
+
+.app-shell { height: 100vh; display: grid; grid-template-columns: 360px 1fr; }
+
+.list-pane { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
+.list-header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.list-header .top-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.list-header h1 { font-size: 15px; color: var(--fg); font-weight: 590; }
+.list-header .logout { font-size: 12px; color: var(--muted); background: none; border: none; text-decoration: underline; }
+.search-box { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; margin-bottom: 10px; }
+.search-box svg { color: var(--meta); }
+.search-box input { flex: 1; background: transparent; border: none; outline: none; font-size: 13px; }
+.search-box input::placeholder { color: var(--meta); }
+.chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 9999px; border: 1px solid var(--border); background: rgba(255,255,255,0.02); color: var(--muted); font-size: 11px; font-weight: 510; }
+.filter-chip.active { background: rgba(94,106,210,0.16); color: var(--fg); border-color: rgba(94,106,210,0.4); }
+.filter-chip .count { font-family: var(--font-mono); opacity: 0.75; }
+
+.thread-list { overflow-y: auto; flex: 1; }
+.thread-row { display: block; width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--border-soft); padding: 12px 16px; color: var(--fg-2); }
+.thread-row:hover { background: rgba(255,255,255,0.03); }
+.thread-row.active { background: rgba(94,106,210,0.08); border-left: 2px solid var(--accent); padding-left: 14px; }
+.thread-row .row-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 5px; }
+.thread-row .row-id { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+.channel-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.channel-dot.whatsapp { background: #27a644; }
+.channel-dot.telegram { background: #5e9bd2; }
+.row-wait { font-size: 11px; color: var(--meta); font-family: var(--font-mono); white-space: nowrap; }
+.thread-row .row-preview { font-size: 13px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-row .row-meta { margin-top: 7px; display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+.tag.attending { color: #f4cc4b; border-color: rgba(234,179,8,0.35); background: rgba(234,179,8,0.08); }
+.tag.urgent { color: #ff8a8a; border-color: rgba(220,38,38,0.35); background: rgba(220,38,38,0.08); }
+.empty-note { padding: 24px 16px; color: var(--meta); font-size: 13px; text-align: center; }
+
+.detail-pane { display: flex; flex-direction: column; min-height: 0; }
+.detail-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--meta); font-size: 13px; }
+.detail-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.detail-header .thread-title { font-size: 14px; color: var(--fg); font-weight: 590; }
+.detail-header .thread-sub { font-size: 12px; color: var(--muted); margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--border); background: rgba(255,255,255,0.02); color: var(--fg-2); font-size: 13px; font-weight: 510; }
+.btn:hover { border-color: rgba(94,106,210,0.4); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-danger-outline { color: #ff9d9d; border-color: rgba(220,38,38,0.35); background: rgba(220,38,38,0.06); }
+.btn-danger-outline:hover { background: rgba(220,38,38,0.14); }
+.btn:disabled { opacity: .45; cursor: default; }
+
+.messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.msg-row { display: flex; flex-direction: column; max-width: 68%; }
+.msg-row.self { align-self: flex-end; align-items: flex-end; }
+.msg-row.other { align-self: flex-start; align-items: flex-start; }
+.msg-meta { font-size: 11px; color: var(--meta); margin-bottom: 3px; display: flex; gap: 6px; align-items: center; }
+.sender-chip { font-size: 10px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 4px; }
+.sender-chip.user { background: rgba(255,255,255,0.06); color: var(--muted); }
+.sender-chip.bot { background: rgba(94,106,210,0.14); color: #a7b0ff; }
+.sender-chip.operator { background: rgba(39,166,68,0.14); color: #4fd977; }
+.msg-bubble { padding: 9px 13px; border-radius: 10px; font-size: 13px; line-height: 1.45; }
+.msg-row.other .msg-bubble { background: var(--surface); color: var(--fg-2); }
+.msg-row.self .msg-bubble { background: var(--accent); color: #fff; }
+
+.reply-area { border-top: 1px solid var(--border); padding: 14px 20px; background: var(--surface); }
+.reply-error { display: none; color: #ff8a8a; font-size: 12px; margin-bottom: 8px; }
+.reply-error.show { display: block; }
+.canned-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.canned-chip { font-size: 11px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border); background: rgba(255,255,255,0.02); color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
+.canned-chip:hover { color: var(--fg-2); border-color: rgba(94,106,210,0.4); }
+.author-row { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
+.author-row label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.author-row input { padding: 6px 9px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--fg); width: 160px; font-size: 13px; }
+.reply-row { display: flex; gap: 8px; }
+.reply-row input[type=text] { flex: 1; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); font-size: 13px; }
+.reply-row input[type=text]:focus { outline: none; border-color: var(--accent); }
+</style>
+</helmet>
+
+<div class="app-shell">
+  <div class="list-pane">
+    <div class="list-header">
+      <div class="top-row">
+        <h1>Conversaciones</h1>
+        <button class="logout" type="button">Salir</button>
+      </div>
+      <div class="search-box">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input type="text" placeholder="Buscar tenant o mensaje…" value="{{search}}" onInput="{{onSearchInput}}">
+      </div>
+      <div class="chip-row">
+        <button class="filter-chip {{filterAllClass}}" onClick="{{onFilterAll}}">Todas <span class="count">{{counts.all}}</span></button>
+        <button class="filter-chip {{filterUrgentClass}}" onClick="{{onFilterUrgent}}">Urgentes <span class="count">{{counts.urgent}}</span></button>
+        <button class="filter-chip {{filterMineClass}}" onClick="{{onFilterMine}}">Asignadas a mí <span class="count">{{counts.mine}}</span></button>
+      </div>
+    </div>
+    <div class="thread-list">
+      <sc-for list="{{threads}}" as="t" hint-placeholder-count="4">
+        <button class="thread-row {{t.rowClass}}" onClick="{{t.select}}">
+          <div class="row-top">
+            <span class="row-id"><span class="channel-dot {{t.channel}}"></span>{{t.tenant}} · {{t.channel}}</span>
+            <span class="row-wait">{{t.waitLabel}}</span>
+          </div>
+          <div class="row-preview">{{t.preview}}</div>
+          <div class="row-meta">
+            <sc-if value="{{t.hasAttending}}" hint-placeholder-val="{{false}}">
+              <span class="tag attending">{{t.attending}}</span>
+            </sc-if>
+            <sc-if value="{{t.hasWindow}}" hint-placeholder-val="{{false}}">
+              <span class="tag {{t.windowTagClass}}">{{t.windowLabel}}</span>
+            </sc-if>
+          </div>
+        </button>
+      </sc-for>
+      <sc-if value="{{threadsEmpty}}" hint-placeholder-val="{{false}}">
+        <div class="empty-note">Ninguna conversación coincide con el filtro.</div>
+      </sc-if>
+    </div>
+  </div>
+
+  <div class="detail-pane">
+    <sc-if value="{{hasSelection}}" hint-placeholder-val="{{false}}">
+      <div class="detail-header">
+        <div>
+          <div class="thread-title">{{selected.tenant}}</div>
+          <div class="thread-sub"><span class="channel-dot {{selected.channel}}"></span>{{selected.channel}} · {{selected.threadId}}</div>
+        </div>
+        <button class="btn btn-danger-outline" onClick="{{onEndControl}}">Terminar control humano</button>
+      </div>
+      <div class="messages">
+        <sc-for list="{{messages}}" as="m" hint-placeholder-count="4">
+          <div class="msg-row {{m.side}}">
+            <div class="msg-meta">
+              <span class="sender-chip {{m.sender}}">{{m.label}}</span>
+              <span>{{m.time}}</span>
+            </div>
+            <div class="msg-bubble">{{m.content}}</div>
+          </div>
+        </sc-for>
+      </div>
+      <div class="reply-area">
+        <div class="reply-error {{replyErrorClass}}">{{replyError}}</div>
+        <div class="canned-row">
+          <sc-for list="{{cannedReplies}}" as="c" hint-placeholder-count="4">
+            <button class="canned-chip" onClick="{{c.use}}">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;"><polyline points="9 10 4 15 9 20"></polyline><path d="M20 4v7a4 4 0 0 1-4 4H4"></path></svg>
+              {{c.text}}
+            </button>
+          </sc-for>
+        </div>
+        <div class="author-row">
+          <label>Tu nombre</label>
+          <input type="text" placeholder="María" value="{{author}}" onInput="{{onAuthorInput}}">
+        </div>
+        <form class="reply-row" onSubmit="{{onSendReply}}">
+          <input type="text" placeholder="Escribí una respuesta…" value="{{replyText}}" onInput="{{onReplyInput}}" autocomplete="off">
+          <button type="submit" class="btn btn-primary">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            Enviar
+          </button>
+        </form>
+      </div>
+    </sc-if>
+    <sc-if value="{{noSelection}}" hint-placeholder-val="{{true}}">
+      <div class="detail-empty">Elegí una conversación de la lista.</div>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"accent":{"editor":"color","default":"#5e6ad2"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      search: '',
+      urgentOnly: false,
+      mineOnly: false,
+      selectedId: null,
+      author: '',
+      replyText: '',
+      replyError: '',
+      threads: [
+        { id: 't1', tenant: 'acme-dental', channel: 'whatsapp', preview: 'Hola, quería consultar precio de blanqueamiento', waitMin: 4, windowSec: 74000, attending: null },
+        { id: 't2', tenant: 'vital-derma', channel: 'telegram', preview: '¿Tienen turno para mañana temprano?', waitMin: 22, windowSec: null, attending: 'Dr. Soto' },
+        { id: 't3', tenant: 'sonrisas-plus', channel: 'whatsapp', preview: 'No entendí bien la respuesta del bot sobre financiación', waitMin: 51, windowSec: 2280, attending: null },
+        { id: 't4', tenant: 'acme-dental', channel: 'whatsapp', preview: 'Necesito cancelar mi turno de hoy', waitMin: 2, windowSec: 61000, attending: 'Vos' },
+      ],
+      messagesById: {
+        t1: [
+          { sender: 'user', content: 'Hola, quería consultar precio de blanqueamiento', time: '09:41' },
+          { sender: 'bot', content: 'El blanqueamiento dental arranca en $45.000. ¿Querés que te derive con un asesor para coordinar turno?', time: '09:41' },
+          { sender: 'user', content: 'Sí, prefiero hablar con alguien', time: '09:42' },
+        ],
+        t2: [
+          { sender: 'user', content: '¿Tienen turno para mañana temprano?', time: '08:55' },
+          { sender: 'bot', content: 'Los turnos de mañana están disponibles desde las 9. ¿Confirmo alguno?', time: '08:56' },
+          { sender: 'operator', author: 'Dr. Soto', content: 'Hola, te puedo dar las 9:30. ¿Te sirve?', time: '09:10' },
+        ],
+        t3: [
+          { sender: 'user', content: 'No entendí bien la respuesta del bot sobre financiación', time: '08:30' },
+          { sender: 'bot', content: 'Ofrecemos financiación en 3, 6 y 12 cuotas sin interés con tarjeta de débito o crédito.', time: '08:30' },
+          { sender: 'user', content: 'Pero con qué bancos exactamente?', time: '08:31' },
+        ],
+        t4: [
+          { sender: 'user', content: 'Necesito cancelar mi turno de hoy', time: '09:58' },
+          { sender: 'operator', author: 'Vos', content: 'Hola! Ya lo cancelo, ¿querés reprogramar para otro día?', time: '09:59' },
+        ],
+      },
+      cannedReplies: [
+        'Ya te estoy ayudando, un momento.',
+        'Gracias por tu paciencia.',
+        '¿Podés confirmarme tu nombre completo?',
+        'Te derivo con el equipo correspondiente.',
+      ],
+    };
+  }
+
+  onSearchInput(e) { this.setState({ search: e.target.value }); }
+  setFilter(urgentOnly, mineOnly) { return () => this.setState({ urgentOnly, mineOnly }); }
+  select(id) { return () => this.setState({ selectedId: id, replyText: '', replyError: '' }); }
+  onAuthorInput(e) { this.setState({ author: e.target.value }); }
+  onReplyInput(e) { this.setState({ replyText: e.target.value }); }
+  useCanned(text) { return () => this.setState({ replyText: text }); }
+
+  sendReply(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const text = this.state.replyText.trim();
+    const author = this.state.author.trim();
+    if (!text || !author) { this.setState({ replyError: 'Escribí tu nombre y un mensaje antes de enviar.' }); return; }
+    const id = this.state.selectedId;
+    const cur = this.state.messagesById[id] || [];
+    const next = Object.assign({}, this.state.messagesById, { [id]: cur.concat([{ sender: 'operator', author, content: text, time: 'ahora' }]) });
+    this.setState({ messagesById: next, replyText: '', replyError: '' });
+  }
+
+  endControl() {
+    const id = this.state.selectedId;
+    this.setState({ threads: this.state.threads.filter((t) => t.id !== id), selectedId: null });
+  }
+
+  fmtWait(min) {
+    if (min < 60) return min + ' min esperando';
+    const h = Math.floor(min / 60), m = min % 60;
+    return h + 'h ' + m + 'min esperando';
+  }
+  fmtWindow(sec) {
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+    return h + 'h ' + m + 'min de ventana';
+  }
+
+  renderVals() {
+    const s = this.state;
+    const isUrgent = (t) => t.windowSec !== null && t.windowSec < 3600;
+
+    let visible = s.threads;
+    if (s.urgentOnly) visible = visible.filter(isUrgent);
+    if (s.mineOnly) visible = visible.filter((t) => t.attending === 'Vos');
+    const q = s.search.trim().toLowerCase();
+    if (q) visible = visible.filter((t) => t.tenant.toLowerCase().includes(q) || t.preview.toLowerCase().includes(q));
+
+    const threads = visible.map((t) => ({
+      id: t.id,
+      tenant: t.tenant,
+      channel: t.channel,
+      preview: t.preview,
+      waitLabel: this.fmtWait(t.waitMin),
+      hasAttending: !!t.attending,
+      attending: t.attending ? 'Atendiendo: ' + t.attending : '',
+      hasWindow: t.windowSec !== null,
+      windowLabel: t.windowSec !== null ? this.fmtWindow(t.windowSec) : '',
+      windowTagClass: isUrgent(t) ? 'urgent' : '',
+      rowClass: t.id === s.selectedId ? 'active' : '',
+      select: this.select(t.id),
+    }));
+
+    const selectedThread = s.threads.find((t) => t.id === s.selectedId) || null;
+    const messages = selectedThread ? (s.messagesById[selectedThread.id] || []).map((m) => ({
+      sender: m.sender,
+      side: m.sender === 'operator' ? 'self' : 'other',
+      label: m.sender === 'operator' ? (m.author || 'Operador') : (m.sender === 'bot' ? 'Bot' : 'Usuario'),
+      time: m.time,
+      content: m.content,
+    })) : [];
+
+    return {
+      accent: this.props.accent ?? '#5e6ad2',
+      search: s.search,
+      onSearchInput: this.onSearchInput.bind(this),
+      counts: {
+        all: s.threads.length,
+        urgent: s.threads.filter(isUrgent).length,
+        mine: s.threads.filter((t) => t.attending === 'Vos').length,
+      },
+      filterAllClass: (!s.urgentOnly && !s.mineOnly) ? 'active' : '',
+      filterUrgentClass: s.urgentOnly ? 'active' : '',
+      filterMineClass: s.mineOnly ? 'active' : '',
+      onFilterAll: this.setFilter(false, false),
+      onFilterUrgent: this.setFilter(true, false),
+      onFilterMine: this.setFilter(false, true),
+      threads,
+      threadsEmpty: threads.length === 0,
+
+      hasSelection: !!selectedThread,
+      noSelection: !selectedThread,
+      selected: selectedThread ? { tenant: selectedThread.tenant, channel: selectedThread.channel, threadId: selectedThread.id } : { tenant: '', channel: '', threadId: '' },
+      messages,
+      onEndControl: this.endControl.bind(this),
+
+      cannedReplies: s.cannedReplies.map((text) => ({ text, use: this.useCanned(text) })),
+      author: s.author,
+      onAuthorInput: this.onAuthorInput.bind(this),
+      replyText: s.replyText,
+      onReplyInput: this.onReplyInput.bind(this),
+      onSendReply: this.sendReply.bind(this),
+      replyError: s.replyError,
+      replyErrorClass: s.replyError ? 'show' : '',
+    };
+  }
+}
+</script>
+</body>
+</html>

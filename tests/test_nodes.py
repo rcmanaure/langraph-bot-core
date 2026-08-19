@@ -1,5 +1,4 @@
 """Unit tests for graph nodes — all LLM/DB calls are mocked."""
-import asyncio
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -112,14 +111,38 @@ def test_last_human_query_no_fallback_for_substantive_reply():
 # triage node
 # ---------------------------------------------------------------------------
 
+def _mock_triage_llm(decision=None, raw_content="", error=None):
+    """triage() makes exactly ONE model call —
+    `with_structured_output(TriageDecision, include_raw=True).ainvoke(...)` —
+    which returns `{"raw": AIMessage, "parsed": ..., "parsing_error": ...}`.
+
+    decision:    the model produced a valid tool call -> parsed is set.
+    raw_content: the model skipped the tool call (parsed is None, the
+                 documented langchain_core behavior) and left this text for
+                 triage()'s JSON-parse fallback to read.
+    error:       the call itself blew up -> triage() defaults to "rag".
+    """
+    from app.schemas.triage import TriageDecision
+
+    parsed = TriageDecision(decision=decision) if decision else None
+    runnable = AsyncMock()
+    if error is not None:
+        runnable.ainvoke = AsyncMock(side_effect=error)
+    else:
+        runnable.ainvoke = AsyncMock(
+            return_value={
+                "raw": AIMessage(content=raw_content),
+                "parsed": parsed,
+                "parsing_error": None if parsed else Exception("structured failed"),
+            }
+        )
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value = runnable
+    return mock_llm
+
 @pytest.mark.asyncio
 async def test_triage_returns_rag(base_state):
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    from app.schemas.triage import TriageDecision
-    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="rag"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+    mock_llm = _mock_triage_llm(decision="rag")
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -130,12 +153,7 @@ async def test_triage_returns_rag(base_state):
 @pytest.mark.asyncio
 async def test_triage_returns_human(base_state):
     base_state["messages"] = [HumanMessage(content="quiero hablar con un agente")]
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    from app.schemas.triage import TriageDecision
-    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="human"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+    mock_llm = _mock_triage_llm(decision="human")
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -145,11 +163,7 @@ async def test_triage_returns_human(base_state):
 
 @pytest.mark.asyncio
 async def test_triage_falls_back_to_rag_on_llm_error(base_state):
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(side_effect=Exception("LLM down"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    mock_llm.ainvoke = AsyncMock(side_effect=Exception("also down"))
+    mock_llm = _mock_triage_llm(error=Exception("LLM down"))
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -171,8 +185,12 @@ async def test_triage_no_human_message_defaults_rag(base_state):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "greeting",
-    ["hola", "Hola!", "buenas", "buenos días", "buenas tardes", "gracias",
-     "muchas gracias", "hasta luego", "chao", "adiós", "de nada"],
+    ["hola", "Hola!", "buenas", "buenos días", "buen día", "buenas tardes", "gracias",
+     "muchas gracias", "hasta luego", "chao", "adiós", "de nada",
+     # LATAM informal openers (México/Colombia/Venezuela/general), added
+     # 2026-08-19 after "saludos" alone was found missing from the word list.
+     "saludos", "qué tal", "que tal", "quihubo", "quiubo", "qué hubo",
+     "épale", "epa", "aló", "alo", "qué onda", "qué más"],
 )
 async def test_triage_regex_shortcut_pure_greeting_skips_llm(base_state, greeting):
     base_state["messages"] = [HumanMessage(content=greeting)]
@@ -187,18 +205,45 @@ async def test_triage_regex_shortcut_does_not_match_greeting_plus_question(base_
     # A greeting prefix with real content must still reach the LLM as "rag" —
     # the whole-message anchor must not fire on a partial match.
     base_state["messages"] = [HumanMessage(content="hola, cuanto cuesta una biopsia")]
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    from app.schemas.triage import TriageDecision
-    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="rag"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+    mock_llm = _mock_triage_llm(decision="rag")
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm) as mock_get_llm:
         result = await triage(base_state)
 
     mock_get_llm.assert_called_once()
     assert result == {"triage_decision": "rag"}
+
+
+# Found live (2026-08-19): a real "hola cuanto cuesta el examen de utero?"
+# misclassified as pure "greeting" by the triage LLM in ~20% of a 10-sample
+# check, despite the prompt's own "medical terms ALWAYS rag, never greeting"
+# rule -- silently dropping the user's actual question (generate()'s
+# greeting branch never looks at retrieved content at all). Deterministic
+# override, not more prompt tuning -- same rationale as LOCATION_RE's
+# off_topic override above.
+@pytest.mark.asyncio
+async def test_triage_overrides_llm_greeting_verdict_on_mixed_message(base_state):
+    base_state["messages"] = [HumanMessage(content="hola cuanto cuesta el examen de utero?")]
+    mock_llm = _mock_triage_llm(decision="greeting")
+
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
+        result = await triage(base_state)
+
+    assert result == {"triage_decision": "rag"}
+
+
+@pytest.mark.asyncio
+async def test_triage_does_not_override_a_genuine_chained_greeting(base_state):
+    # "hola buenas" is two greeting words back to back, still nothing
+    # else -- the override must not punish it for missing _GREETING_RE's
+    # single-phrase anchor.
+    base_state["messages"] = [HumanMessage(content="hola buenas")]
+    mock_llm = _mock_triage_llm(decision="greeting")
+
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
+        result = await triage(base_state)
+
+    assert result == {"triage_decision": "greeting"}
 
 
 @pytest.mark.asyncio
@@ -272,12 +317,7 @@ async def test_triage_bare_rejection_after_approximation_forces_rag(base_state):
 async def test_triage_bare_rejection_without_pending_approximation_uses_llm(base_state):
     base_state["messages"] = [HumanMessage(content="no")]
     base_state["awaiting_confirmation"] = False
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    from app.schemas.triage import TriageDecision
-    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="off_topic"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+    mock_llm = _mock_triage_llm(decision="off_topic")
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -288,13 +328,7 @@ async def test_triage_bare_rejection_without_pending_approximation_uses_llm(base
 @pytest.mark.asyncio
 async def test_triage_fallback_clean_json(base_state):
     """Fallback path: structured output fails, raw LLM returns clean JSON."""
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(side_effect=Exception("structured failed"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    raw_response = MagicMock()
-    raw_response.content = '{"decision": "rag"}'
-    mock_llm.ainvoke = AsyncMock(return_value=raw_response)
+    mock_llm = _mock_triage_llm(raw_content='{"decision": "rag"}')
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -305,13 +339,7 @@ async def test_triage_fallback_clean_json(base_state):
 @pytest.mark.asyncio
 async def test_triage_fallback_strips_markdown_fences_no_tag(base_state):
     """Fallback path: LLM wraps JSON in ``` fences without json tag."""
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(side_effect=Exception("structured failed"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    raw_response = MagicMock()
-    raw_response.content = '```\n{"decision": "catalog"}\n```'
-    mock_llm.ainvoke = AsyncMock(return_value=raw_response)
+    mock_llm = _mock_triage_llm(raw_content='```\n{"decision": "catalog"}\n```')
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -322,13 +350,7 @@ async def test_triage_fallback_strips_markdown_fences_no_tag(base_state):
 @pytest.mark.asyncio
 async def test_triage_fallback_strips_markdown_fences_json_tag(base_state):
     """Fallback path: LLM wraps JSON in ```json fences (core of the change)."""
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(side_effect=Exception("structured failed"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    raw_response = MagicMock()
-    raw_response.content = '```json\n{"decision": "human"}\n```'
-    mock_llm.ainvoke = AsyncMock(return_value=raw_response)
+    mock_llm = _mock_triage_llm(raw_content='```json\n{"decision": "human"}\n```')
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -339,13 +361,7 @@ async def test_triage_fallback_strips_markdown_fences_json_tag(base_state):
 @pytest.mark.asyncio
 async def test_triage_fallback_strips_markdown_fences_uppercase_tag(base_state):
     """Fallback path: LLM wraps JSON in ```JSON (uppercase) fences — should strip correctly."""
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(side_effect=Exception("structured failed"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    raw_response = MagicMock()
-    raw_response.content = '```JSON\n{"decision": "rag"}\n```'
-    mock_llm.ainvoke = AsyncMock(return_value=raw_response)
+    mock_llm = _mock_triage_llm(raw_content='```JSON\n{"decision": "rag"}\n```')
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -356,13 +372,7 @@ async def test_triage_fallback_strips_markdown_fences_uppercase_tag(base_state):
 @pytest.mark.asyncio
 async def test_triage_fallback_invalid_json_returns_rag(base_state):
     """Fallback path: LLM returns unparseable content → defaults to rag."""
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(side_effect=Exception("structured failed"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    raw_response = MagicMock()
-    raw_response.content = "sorry, I cannot determine the intent"
-    mock_llm.ainvoke = AsyncMock(return_value=raw_response)
+    mock_llm = _mock_triage_llm(raw_content="sorry, I cannot determine the intent")
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -373,13 +383,7 @@ async def test_triage_fallback_invalid_json_returns_rag(base_state):
 @pytest.mark.asyncio
 async def test_triage_fallback_unknown_decision_returns_rag(base_state):
     """Fallback path: LLM returns valid JSON but unknown enum value → rag."""
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(side_effect=Exception("structured failed"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    raw_response = MagicMock()
-    raw_response.content = '{"decision": "unknown_value"}'
-    mock_llm.ainvoke = AsyncMock(return_value=raw_response)
+    mock_llm = _mock_triage_llm(raw_content='{"decision": "unknown_value"}')
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -394,13 +398,7 @@ async def test_triage_fallback_unknown_decision_returns_rag(base_state):
 @pytest.mark.asyncio
 async def test_triage_fallback_valid_json_missing_decision_key(base_state):
     """Fallback path: valid JSON but no 'decision' key → KeyError → rag."""
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(side_effect=Exception("structured failed"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    raw_response = MagicMock()
-    raw_response.content = '{"intent": "rag"}'
-    mock_llm.ainvoke = AsyncMock(return_value=raw_response)
+    mock_llm = _mock_triage_llm(raw_content='{"intent": "rag"}')
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(base_state)
@@ -528,18 +526,6 @@ def _mock_runtime(get_result=None):
     return Runtime(store=store)
 
 
-def _mock_extraction_llm(new_topic=None):
-    from app.schemas.profile import ProfileExtraction
-
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(
-        return_value=ProfileExtraction(new_topic=new_topic)
-    )
-    mock_llm.with_structured_output.return_value = mock_structured
-    return mock_llm
-
-
 @pytest.mark.asyncio
 async def test_update_profile_noop_without_runtime(base_state):
     result = await update_profile(base_state, runtime=None)
@@ -558,171 +544,64 @@ async def test_update_profile_noop_when_blocked(base_state):
 
 
 @pytest.mark.asyncio
-async def test_update_profile_creates_new_profile_when_none_exists(base_state):
-    runtime = _mock_runtime(get_result=None)
-    mock_llm = _mock_extraction_llm(new_topic="precio biopsia")
+async def test_update_profile_noop_without_human_message(base_state):
+    base_state["messages"] = [AIMessage(content="hi")]
+    runtime = _mock_runtime()
 
-    with patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm):
-        result = await update_profile(base_state, runtime=runtime)
+    result = await update_profile(base_state, runtime=runtime)
+
+    assert result == {}
+    runtime.store.aget.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_profile_creates_new_profile_when_none_exists(base_state):
+    """No LLM call anymore — topics_of_interest is never extracted, only
+    carried forward, so a fresh profile gets an empty list."""
+    runtime = _mock_runtime(get_result=None)
+
+    result = await update_profile(base_state, runtime=runtime)
 
     assert result == {}
     namespace, key, saved = runtime.store.aput.await_args.args
     assert key == "profile"
-    assert saved["topics_of_interest"] == ["precio biopsia"]
+    assert saved["topics_of_interest"] == []
     assert saved["escalated_to_human_count"] == 0
+    assert saved["last_interaction_at"]
+    assert saved["schema_version"] == "1.0.0"
 
 
 @pytest.mark.asyncio
-async def test_update_profile_merges_new_topic_without_losing_existing(base_state):
+async def test_update_profile_carries_forward_existing_topics_untouched(base_state):
+    """topics_of_interest is no longer written to — an existing list from
+    before this change survives, but nothing is ever appended to it again."""
     existing = MagicMock()
-    existing.value = {"topics_of_interest": ["horario atención"]}
+    existing.value = {"topics_of_interest": ["horario atención", "precio biopsia"]}
     runtime = _mock_runtime(get_result=existing)
-    mock_llm = _mock_extraction_llm(new_topic="precio biopsia")
 
-    with patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm):
-        await update_profile(base_state, runtime=runtime)
+    await update_profile(base_state, runtime=runtime)
 
     _, _, saved = runtime.store.aput.await_args.args
-    assert saved["topics_of_interest"] == ["precio biopsia", "horario atención"]
+    assert saved["topics_of_interest"] == ["horario atención", "precio biopsia"]
 
 
 @pytest.mark.asyncio
 async def test_update_profile_increments_escalation_count(base_state):
     base_state["triage_decision"] = "human"
     runtime = _mock_runtime(get_result=None)
-    mock_llm = _mock_extraction_llm()
 
-    with patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm):
-        await update_profile(base_state, runtime=runtime)
+    await update_profile(base_state, runtime=runtime)
 
     _, _, saved = runtime.store.aput.await_args.args
     assert saved["escalated_to_human_count"] == 1
 
 
 @pytest.mark.asyncio
-async def test_update_profile_swallows_llm_failure(base_state):
+async def test_update_profile_swallows_store_failure(base_state):
     runtime = _mock_runtime(get_result=None)
-    mock_llm = MagicMock()
-    mock_llm.with_structured_output.side_effect = RuntimeError("boom")
+    runtime.store.aget.side_effect = RuntimeError("boom")
 
-    with patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm):
-        result = await update_profile(base_state, runtime=runtime)
-
-    assert result == {}
-    runtime.store.aput.assert_not_awaited()
-
-
-class _RateLimitError(Exception):
-    status_code = 429
-
-
-@pytest.mark.asyncio
-async def test_update_profile_retries_once_on_rate_limit_then_succeeds(base_state):
-    """Found live: generate() and update_profile() call the same model
-    back-to-back, routinely tripping OpenRouter's shared rate limit
-    (10/10 reproduced). One short retry should recover the common case."""
-    from app.schemas.profile import ProfileExtraction
-
-    runtime = _mock_runtime(get_result=None)
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(
-        side_effect=[_RateLimitError(), ProfileExtraction(new_topic="precio biopsia")]
-    )
-    mock_llm.with_structured_output.return_value = mock_structured
-
-    with (
-        patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm),
-        patch("app.graph.nodes.update_profile.asyncio.sleep", AsyncMock()) as mock_sleep,
-    ):
-        result = await update_profile(base_state, runtime=runtime)
-
-    assert result == {}
-    mock_sleep.assert_awaited_once()
-    assert mock_structured.ainvoke.await_count == 2
-    _, _, saved = runtime.store.aput.await_args.args
-    assert saved["topics_of_interest"] == ["precio biopsia"]
-
-
-@pytest.mark.asyncio
-async def test_update_profile_swallows_second_rate_limit_after_retry(base_state):
-    """The retry is one shot -- a second 429 falls through to the same
-    best-effort swallow every other failure gets, never raised to the caller."""
-    runtime = _mock_runtime(get_result=None)
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(side_effect=[_RateLimitError(), _RateLimitError()])
-    mock_llm.with_structured_output.return_value = mock_structured
-
-    with (
-        patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm),
-        patch("app.graph.nodes.update_profile.asyncio.sleep", AsyncMock()),
-    ):
-        result = await update_profile(base_state, runtime=runtime)
-
-    assert result == {}
-    runtime.store.aput.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_update_profile_retries_once_on_hang_then_succeeds(base_state):
-    """Found live: the same shared-model contention that trips a clean 429
-    sometimes just never returns instead -- no exception to retry on, and
-    the whole turn hung behind it until turn.py's own 45s timeout cut it
-    off. A bounded wait_for is what actually catches this case."""
-    from app.schemas.profile import ProfileExtraction
-
-    runtime = _mock_runtime(get_result=None)
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    calls = {"n": 0}
-
-    async def _side_effect(*args, **kwargs):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            # A never-resolved Future, not asyncio.sleep -- this test patches
-            # app.graph.nodes.update_profile.asyncio.sleep (the same real
-            # asyncio module the retry delay uses), so sleep() here would
-            # return instantly too and never actually hang.
-            await asyncio.Future()
-        return ProfileExtraction(new_topic="precio biopsia")
-
-    mock_structured.ainvoke = AsyncMock(side_effect=_side_effect)
-    mock_llm.with_structured_output.return_value = mock_structured
-
-    with (
-        patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm),
-        patch("app.graph.nodes.update_profile.asyncio.sleep", AsyncMock()),
-        patch("app.graph.nodes.update_profile._LLM_CALL_TIMEOUT_SECONDS", 0.05),
-    ):
-        result = await update_profile(base_state, runtime=runtime)
-
-    assert result == {}
-    assert calls["n"] == 2
-    _, _, saved = runtime.store.aput.await_args.args
-    assert saved["topics_of_interest"] == ["precio biopsia"]
-
-
-@pytest.mark.asyncio
-async def test_update_profile_swallows_persistent_hang_after_retry(base_state):
-    """A hang on the retry too falls through to the same best-effort
-    swallow every other failure gets, never raised to the caller."""
-    runtime = _mock_runtime(get_result=None)
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-
-    async def _always_hang(*args, **kwargs):
-        await asyncio.Future()  # never-resolved -- see the sleep-patching note above
-
-    mock_structured.ainvoke = AsyncMock(side_effect=_always_hang)
-    mock_llm.with_structured_output.return_value = mock_structured
-
-    with (
-        patch("app.graph.nodes.update_profile.get_chat_llm", return_value=mock_llm),
-        patch("app.graph.nodes.update_profile.asyncio.sleep", AsyncMock()),
-        patch("app.graph.nodes.update_profile._LLM_CALL_TIMEOUT_SECONDS", 0.05),
-    ):
-        result = await update_profile(base_state, runtime=runtime)
+    result = await update_profile(base_state, runtime=runtime)
 
     assert result == {}
     runtime.store.aput.assert_not_awaited()

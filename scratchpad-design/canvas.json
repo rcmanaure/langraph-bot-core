@@ -1,0 +1,11 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1400, "h": 900, "page": "page-1" },
+    { "file": "Operator.dc.html", "x": 0, "y": 0, "w": 1200, "h": 800, "page": "page-2" }
+  ],
+  "pages": [
+    { "id": "page-1", "name": "Admin" },
+    { "id": "page-2", "name": "Operator" }
+  ],
+  "launch": { "view": "canvas", "page": "page-1" }
+}

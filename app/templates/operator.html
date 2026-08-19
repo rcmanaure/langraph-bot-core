@@ -47,20 +47,33 @@ input, textarea { font-family: inherit; font-size: inherit; }
 /* ── App shell ─────────────────────────────────────────────────────── */
 .app-shell { height: 100%; display: grid; grid-template-columns: 360px 1fr; }
 .list-pane { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
-.list-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.list-header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.list-header .top-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .list-header h1 { font-size: 15px; color: var(--fg); }
 .list-header .logout { font-size: 12px; color: var(--muted); background: none; border: none; text-decoration: underline; }
+.search-box { display: flex; align-items: center; gap: 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; margin-bottom: 10px; }
+.search-box svg { color: var(--muted); flex: none; }
+.search-box input { flex: 1; background: transparent; border: none; outline: none; font-size: 13px; color: var(--fg); }
+.search-box input::placeholder { color: var(--muted); }
+.chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border); background: none; color: var(--muted); font-size: 11px; font-weight: 500; }
+.filter-chip.active { background: rgba(94,106,210,0.16); color: var(--fg); border-color: var(--accent); }
+.filter-chip .count { opacity: 0.75; }
 .thread-list { overflow-y: auto; flex: 1; }
 .thread-row { display: block; width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--border); padding: 12px 16px; color: var(--fg-2); }
 .thread-row:hover { background: var(--surface); }
 .thread-row.active { background: var(--surface-2); }
-.thread-row .row-top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.thread-row .row-top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 4px; align-items: center; }
+.thread-row .row-id { display: flex; align-items: center; gap: 6px; }
+.channel-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--muted); }
+.channel-dot.whatsapp { background: var(--success); }
+.channel-dot.telegram { background: #5e9bd2; }
 .thread-row .row-preview { font-size: 13px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thread-row .row-meta { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
 .tag { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
 .tag.attending { color: var(--warn); border-color: var(--warn); }
 .tag.window-low { color: var(--danger); border-color: var(--danger); }
-.empty-note { padding: 24px 16px; color: var(--muted); font-size: 13px; }
+.empty-note { padding: 24px 16px; color: var(--muted); font-size: 13px; text-align: center; }
 
 .detail-pane { display: flex; flex-direction: column; min-height: 0; }
 .detail-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); }
@@ -69,7 +82,11 @@ input, textarea { font-family: inherit; font-size: inherit; }
 .detail-header .thread-sub { font-size: 12px; color: var(--muted); }
 .messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
 .msg { max-width: 70%; padding: 8px 12px; border-radius: 10px; font-size: 13px; }
-.msg .msg-meta { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+.msg .msg-meta { font-size: 11px; color: var(--muted); margin-bottom: 3px; display: flex; align-items: center; gap: 6px; }
+.sender-chip { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 4px; }
+.sender-chip.user { background: rgba(255,255,255,0.06); color: var(--muted); }
+.sender-chip.bot { background: rgba(94,106,210,0.16); color: var(--accent-hover); }
+.sender-chip.operator { background: rgba(39,166,68,0.16); color: var(--success); }
 .msg-user, .msg-human { align-self: flex-start; background: var(--surface); }
 .msg-bot { align-self: flex-start; background: var(--surface-2); }
 .msg-operator { align-self: flex-end; background: var(--accent); color: #fff; }
@@ -77,6 +94,9 @@ input, textarea { font-family: inherit; font-size: inherit; }
 .reply-area { border-top: 1px solid var(--border); padding: 12px 16px; }
 .reply-error { display: none; color: var(--danger); font-size: 12px; margin-bottom: 8px; }
 .reply-error.show { display: block; }
+.canned-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.canned-chip { font-size: 11px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border); background: none; color: var(--muted); }
+.canned-chip:hover { color: var(--fg-2); border-color: var(--accent); }
 .reply-row { display: flex; gap: 8px; }
 .reply-row input[type=text] { flex: 1; padding: 9px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); }
 .author-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
@@ -104,8 +124,19 @@ input, textarea { font-family: inherit; font-size: inherit; }
 <div id="app-shell" class="app-shell hidden">
   <div class="list-pane">
     <div class="list-header">
-      <h1>Conversaciones esperando</h1>
-      <button class="logout" id="logout-btn">Salir</button>
+      <div class="top-row">
+        <h1>Conversaciones esperando</h1>
+        <button class="logout" id="logout-btn">Salir</button>
+      </div>
+      <div class="search-box">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input type="text" id="search-input" placeholder="Buscar tenant o mensaje…" autocomplete="off">
+      </div>
+      <div class="chip-row" id="filter-chips">
+        <button class="filter-chip active" data-filter="all">Todas <span class="count" id="count-all">0</span></button>
+        <button class="filter-chip" data-filter="urgent">Urgentes <span class="count" id="count-urgent">0</span></button>
+        <button class="filter-chip" data-filter="mine">Asignadas a mí <span class="count" id="count-mine">0</span></button>
+      </div>
     </div>
     <div class="thread-list" id="thread-list"></div>
   </div>
@@ -148,9 +179,17 @@ var state = {
   messages: [],
   loadingDetail: false,
   replyError: '',
+  search: '',
+  filter: 'all',
 };
 var pollTimer = null;
 var POLL_MS = 8000;
+var CANNED_REPLIES = [
+  'Ya te estoy ayudando, un momento.',
+  'Gracias por tu paciencia.',
+  '¿Podés confirmarme tu nombre completo?',
+  'Te derivo con el equipo correspondiente.',
+];
 
 /* ── DOM helpers -- text content only, never markup, for anything that
    came from a user, an operator's typed name, or a tenant record. This is
@@ -191,24 +230,51 @@ var SEND_ERRORS = {
   chat_id_unknown: 'No se puede identificar el chat de este hilo (escalado antes de esta función). No se puede enviar.',
 };
 
+/* ── Filtering ────────────────────────────────────────────────────── */
+function isUrgent(t) {
+  return t.wa_window_remaining_seconds !== null && t.wa_window_remaining_seconds !== undefined && t.wa_window_remaining_seconds < 3600;
+}
+function currentAuthor() {
+  return (localStorage.getItem(AUTHOR_STORAGE) || '').trim();
+}
+function filteredThreads() {
+  var list = state.threads;
+  if (state.filter === 'urgent') list = list.filter(isUrgent);
+  if (state.filter === 'mine') { var me = currentAuthor(); list = list.filter(function (t) { return t.attending && t.attending === me; }); }
+  var q = state.search.trim().toLowerCase();
+  if (q) list = list.filter(function (t) { return t.tenant_slug.toLowerCase().indexOf(q) !== -1 || (t.user_message || '').toLowerCase().indexOf(q) !== -1; });
+  return list;
+}
+function renderFilterCounts() {
+  var me = currentAuthor();
+  document.getElementById('count-all').textContent = state.threads.length;
+  document.getElementById('count-urgent').textContent = state.threads.filter(isUrgent).length;
+  document.getElementById('count-mine').textContent = state.threads.filter(function (t) { return t.attending && t.attending === me; }).length;
+}
+
 /* ── Rendering: thread list ───────────────────────────────────────── */
 function renderList() {
   var list = document.getElementById('thread-list');
   clear(list);
+  renderFilterCounts();
 
-  if (!state.threads.length) {
-    list.appendChild(el('div', { className: 'empty-note', text: 'No hay conversaciones esperando.' }));
+  var threads = filteredThreads();
+  if (!threads.length) {
+    list.appendChild(el('div', { className: 'empty-note', text: state.threads.length ? 'Ninguna conversación coincide con el filtro.' : 'No hay conversaciones esperando.' }));
     return;
   }
 
-  state.threads.forEach(function (t) {
+  threads.forEach(function (t) {
     var row = el('button', {
       className: 'thread-row' + (t.thread_id === state.selectedThreadId ? ' active' : ''),
       onClick: function () { selectThread(t.thread_id); },
     });
 
     var top = el('div', { className: 'row-top' });
-    top.appendChild(el('span', { text: t.tenant_slug + ' · ' + t.channel }));
+    var idWrap = el('span', { className: 'row-id' });
+    idWrap.appendChild(el('span', { className: 'channel-dot ' + t.channel }));
+    idWrap.appendChild(el('span', { text: t.tenant_slug + ' · ' + t.channel }));
+    top.appendChild(idWrap);
     top.appendChild(el('span', { text: fmtRelative(t.interrupt_started_at) }));
     row.appendChild(top);
 
@@ -220,7 +286,7 @@ function renderList() {
     }
     var win = fmtWindow(t.wa_window_remaining_seconds);
     if (win) {
-      var low = t.wa_window_remaining_seconds !== null && t.wa_window_remaining_seconds < 3600;
+      var low = isUrgent(t);
       meta.appendChild(el('span', { className: 'tag' + (low ? ' window-low' : ''), text: win }));
     }
     row.appendChild(meta);
@@ -269,8 +335,10 @@ function renderDetail() {
   } else {
     state.messages.forEach(function (m) {
       var bubble = el('div', { className: 'msg ' + senderClass(m.sender) });
-      var label = senderLabel(m) + (m.created_at ? ' · ' + fmtClock(m.created_at) : '');
-      bubble.appendChild(el('div', { className: 'msg-meta', text: label }));
+      var meta = el('div', { className: 'msg-meta' });
+      meta.appendChild(el('span', { className: 'sender-chip ' + m.sender, text: senderLabel(m) }));
+      if (m.created_at) meta.appendChild(el('span', { text: fmtClock(m.created_at) }));
+      bubble.appendChild(meta);
       bubble.appendChild(el('div', { className: 'msg-body', text: m.content }));
       msgs.appendChild(bubble);
     });
@@ -280,6 +348,15 @@ function renderDetail() {
   var replyArea = el('div', { className: 'reply-area' });
   var errBox = el('div', { className: 'reply-error' + (state.replyError ? ' show' : ''), text: state.replyError, attrs: { id: 'reply-error' } });
   replyArea.appendChild(errBox);
+
+  var cannedRow = el('div', { className: 'canned-row' });
+  CANNED_REPLIES.forEach(function (text) {
+    cannedRow.appendChild(el('button', {
+      className: 'canned-chip', text: text, attrs: { type: 'button' },
+      onClick: function () { document.getElementById('reply-text').value = text; document.getElementById('reply-text').focus(); },
+    }));
+  });
+  replyArea.appendChild(cannedRow);
 
   var authorRow = el('div', { className: 'author-row' });
   authorRow.appendChild(el('label', { text: 'Tu nombre' }));
@@ -421,6 +498,18 @@ document.getElementById('login-form').addEventListener('submit', async function 
 });
 
 document.getElementById('logout-btn').addEventListener('click', logout);
+
+document.getElementById('search-input').addEventListener('input', function (e) {
+  state.search = e.target.value;
+  renderList();
+});
+document.getElementById('filter-chips').addEventListener('click', function (e) {
+  var btn = e.target.closest('[data-filter]');
+  if (!btn) return;
+  state.filter = btn.dataset.filter;
+  document.querySelectorAll('#filter-chips .filter-chip').forEach(function (c) { c.classList.toggle('active', c === btn); });
+  renderList();
+});
 
 /* ── Boot ─────────────────────────────────────────────────────────── */
 (function boot() {

@@ -92,6 +92,24 @@ def _make_state(chunks, triage_decision="rag", user_text="consulta"):
     }
 
 
+def _mock_triage_llm(decision: str):
+    """triage() makes one call — with_structured_output(..., include_raw=True)
+    — whose runnable returns the {"raw", "parsed", "parsing_error"} envelope."""
+    from app.schemas.triage import TriageDecision
+
+    runnable = AsyncMock()
+    runnable.ainvoke = AsyncMock(
+        return_value={
+            "raw": AIMessage(content=""),
+            "parsed": TriageDecision(decision=decision),
+            "parsing_error": None,
+        }
+    )
+    llm = MagicMock()
+    llm.with_structured_output.return_value = runnable
+    return llm
+
+
 def _mock_llm(response_text: str):
     """LLM that returns a fixed answer and captures call_args."""
     llm = MagicMock()
@@ -372,20 +390,65 @@ async def test_greeting_no_llm_called():
         result = await generate(state)
 
     llm.ainvoke.assert_not_called()
-    assert "hola" in result["answer"].lower()
+    assert "gracias por comunicarte" in result["answer"].lower()
+
+
+@pytest.mark.asyncio
+async def test_mixed_greeting_and_question_gets_greeting_ack_note():
+    """"Hola, cuanto cuesta X" is classified "rag" (not "greeting", see
+    triage.py), so it never reaches the canned _GREETING_MSG — but the model
+    should still open naturally instead of ignoring the "hola" outright."""
+    state = _make_state(LUNG_CHUNKS, user_text="hola, cuanto cuesta una biopsia de pulmon")
+    llm = _mock_llm("SRP009 $90")
+
+    with patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value=TENANT_CTX)), \
+         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm):
+        await generate(state)
+
+    ctx = _captured_system(llm)
+    assert "El usuario abrió su mensaje con un saludo" in ctx
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "opener",
+    # "saludos" found missing live 2026-08-19 -- "saludos. cuanto cuesta el
+    # examen de hueso" got the price with no opener at all. Widened same day
+    # to common LATAM informal openers (México/Colombia/Venezuela/general).
+    ["saludos", "que tal", "quihubo", "quiubo", "epale", "alo", "que onda", "que mas", "buen dia"],
+)
+async def test_latam_greeting_prefix_gets_greeting_ack_note(opener):
+    state = _make_state(LUNG_CHUNKS, user_text=f"{opener}, cuanto cuesta una biopsia de pulmon")
+    llm = _mock_llm("SRP009 $90")
+
+    with patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value=TENANT_CTX)), \
+         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm):
+        await generate(state)
+
+    ctx = _captured_system(llm)
+    assert "El usuario abrió su mensaje con un saludo" in ctx
+
+
+@pytest.mark.asyncio
+async def test_bare_question_gets_no_greeting_ack_note():
+    """A question with no greeting prefix must not get the ack instruction."""
+    state = _make_state(LUNG_CHUNKS, user_text="cuanto cuesta una biopsia de pulmon")
+    llm = _mock_llm("SRP009 $90")
+
+    with patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value=TENANT_CTX)), \
+         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm):
+        await generate(state)
+
+    ctx = _captured_system(llm)
+    assert "abrió su mensaje con un saludo" not in ctx
 
 
 @pytest.mark.asyncio
 async def test_laboratorio_clinico_is_off_topic_triage():
     """Hemograma/química sanguínea → triage debe clasificar off_topic (no lo realizamos)."""
     state = _make_state([], user_text="cuánto cuesta un hemograma completo")
-    from app.schemas.triage import TriageDecision
 
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="off_topic"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+    mock_llm = _mock_triage_llm("off_topic")
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(state)
@@ -397,13 +460,8 @@ async def test_laboratorio_clinico_is_off_topic_triage():
 async def test_serologia_is_off_topic():
     """Serología no es histopatología → off_topic."""
     state = _make_state([], user_text="prueba de VIH, serología")
-    from app.schemas.triage import TriageDecision
 
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="off_topic"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+    mock_llm = _mock_triage_llm("off_topic")
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(state)
@@ -431,13 +489,8 @@ async def test_serologia_is_off_topic():
 async def test_medical_organ_queries_route_to_rag(query):
     """Cualquier consulta de órgano/procedimiento → triage='rag', nunca off_topic."""
     state = _make_state([], user_text=query)
-    from app.schemas.triage import TriageDecision
 
-    mock_llm = MagicMock()
-    mock_structured = AsyncMock()
-    mock_structured.ainvoke = AsyncMock(return_value=TriageDecision(decision="rag"))
-    mock_llm.with_structured_output.return_value = mock_structured
-    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content=""))
+    mock_llm = _mock_triage_llm("rag")
 
     with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
         result = await triage(state)

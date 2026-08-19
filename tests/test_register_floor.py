@@ -130,7 +130,16 @@ def _mock_chat_llm(reply_text: str, triage_decision: str):
     llm = MagicMock()
     llm.model_name = "test-model"
     structured = AsyncMock()
-    structured.ainvoke = AsyncMock(return_value=TriageDecision(decision=triage_decision))
+    structured.ainvoke = AsyncMock(
+        # triage() calls with_structured_output(..., include_raw=True), whose
+        # runnable returns the {"raw", "parsed", "parsing_error"} envelope
+        # from a single model call.
+        return_value={
+            "raw": AIMessage(content=""),
+            "parsed": TriageDecision(decision=triage_decision),
+            "parsing_error": None,
+        }
+    )
     llm.with_structured_output.return_value = structured
     llm.ainvoke = AsyncMock(return_value=AIMessage(content=reply_text))
     return llm
