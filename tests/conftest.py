@@ -37,6 +37,38 @@ def mock_under_human_control():
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def mock_triage_tenant_lookups():
+    """triage() unconditionally checks canned answers and the tenant's
+    prompt-pack vertical before calling the LLM (#47/#48). Same rationale as
+    mock_resolve_staff above: default every test to "no canned match, no
+    vertical" so tests that don't care don't need their own DB mock; tests
+    that do care (tests/test_nodes.py) patch these targets themselves,
+    which overrides this default within their own `with patch(...)` block."""
+    with (
+        patch("app.graph.nodes.triage.match_canned_answer", new_callable=AsyncMock, return_value=None),
+        patch("app.graph.nodes.triage.get_tenant_vertical", new_callable=AsyncMock, return_value=None),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_retrieve_tenant_lookups():
+    """retrieve() unconditionally looks up specialization/expansion context
+    and the closed-world catalog flag (#49) via asyncio.gather. Same
+    rationale as mock_resolve_staff above; tests/test_retrieve_node.py
+    patches these targets itself for the cases that care."""
+    with (
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", new_callable=AsyncMock, return_value=""),
+        patch(
+            "app.graph.nodes.retrieve.get_tenant_closed_world_context",
+            new_callable=AsyncMock,
+            return_value={"expertise_area": "", "catalog_is_closed": False},
+        ),
+    ):
+        yield
+
+
 @pytest.fixture
 def tenant_id() -> str:
     return "test-tenant"

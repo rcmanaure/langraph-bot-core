@@ -11,7 +11,8 @@ the exact same parsing -- no duplicated logic to drift out of sync.
 """
 
 import re
-import unicodedata
+
+from app.services.text_normalize import normalize_for_comparison
 
 _STOPWORDS = {
     "de", "la", "el", "los", "las", "y", "o", "u", "e", "del", "con", "en",
@@ -28,8 +29,7 @@ _CATEGORY_TYPE_OVERRIDE = {
 
 
 def _slug(text: str) -> str:
-    normalized = unicodedata.normalize("NFKD", text.lower())
-    return "".join(c for c in normalized if not unicodedata.combining(c))
+    return normalize_for_comparison(text)
 
 
 def _keywords_from(*texts: str, limit: int = 6) -> list[str]:

@@ -16,6 +16,7 @@ from app.messages import HUMAN_HANDOFF
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.services import human_control
 from app.services.llm import get_chat_llm
+from app.services.not_offered import record_denial
 from app.services.rag import cap_chunks_to_tokens, token_counter
 from app.state import AgentState
 
@@ -66,12 +67,14 @@ _FORMAT_HINT_STAFF = _REGISTER_FLOOR_STAFF + _ITEM_FORMAT_RULES + """
 
 _CATALOG_FORMAT_HINT_STAFF = _REGISTER_FLOOR_STAFF + _ITEM_FORMAT_RULES
 
-# Applies whenever a price is quoted (RAG or catalog) — not per-item, one
-# line at the end of the reply.
-_RESULTS_NOTE_RULE = (
-    'Si menciona algún precio, agregue al final una nota breve: '
-    '"_Resultados: 3 a 5 días hábiles._"'
-)
+def _build_results_note_rule(turnaround: str | None) -> str:
+    """Applies whenever a price is quoted (RAG or catalog) — one line at the
+    end of the reply naming the tenant's own results-turnaround time.
+    Per-tenant column, not a hardcoded default: a tenant that never set one
+    gets no invented turnaround, just an empty line here (see #46)."""
+    if not turnaround:
+        return ""
+    return f'Si menciona algún precio, agregue al final una nota breve: "_Resultados: {turnaround}._"\n'
 
 _RAG_SYSTEM = """\
 Es un asistente de {expertise}. Su tono es {tone_description}.{specialization_block}{greeting_note}
@@ -87,9 +90,8 @@ REGLAS (en orden de prioridad):
 1. AMBIGÜEDAD: Si lo que pide el usuario puede referirse a varios ítems distintos, haga UNA sola pregunta breve y amable de aclaración. No asuma. EXCEPCIÓN: si el usuario ya incluyó en su mensaje el detalle que distingue entre los ítems similares (ej. pidió "con anexos" o mencionó explícitamente lo que un ítem incluye y otro no — "trompas y ovarios" especifica CON anexos), eso NO es ambigüedad — el usuario ya eligió, responda directo con ESE ítem, no pregunte de nuevo algo que ya contestó.
 2. Si el contexto trae varios ítems cuyo nombre coincide con lo que pide el usuario, muéstrelos TODOS, sin filtrar por categoría o tipo.
 3. {negative_confirmation_rule}
-4. """ + _RESULTS_NOTE_RULE + """
-- NO invente precios ni servicios.
-{format_hint}
+4. NO invente precios ni servicios.
+{results_note_rule}{format_hint}
 Contexto:
 {context}
 """
@@ -98,21 +100,21 @@ _CATALOG_SYSTEM = """\
 Es un asistente de {expertise}.{greeting_note}
 Liste TODOS los ítems del catálogo a continuación, organizados por sección.
 No omita ningún ítem. Use los nombres y precios exactos del catálogo.{contact_hint}
-""" + _RESULTS_NOTE_RULE + """
-{format_hint}
+{results_note_rule}{format_hint}
 Catálogo:
 {context}
 """
 
 _OFF_TOPIC_MSG = "Lo siento, no puedo ayudarle con eso. Soy un asistente especializado en {expertise}."
 
-_GREETING_MSG = (
-    "Gracias por comunicarte con SP UNIDAD DE DIAGNOSTICO HISTOLOGICO,C.A. ¿Cómo podemos ayudarle?\n\n"
-    "No respondemos llamadas de whatsapp ni mensajes de voz, solo mensajeria texto WhatsApp, "
-    "si necesita comunicarse vía llamada llame al 04148050764.\n\n"
-    "Para cotización de estudios envíe la orden medica o una imagen de la muestra\n\n"
-    "Ubicación: https://maps.app.goo.gl/1R4Q6vDz7db2Sxa76"
-)
+# Vertical-neutral fallback — no tenant's business facts belong here (see
+# #46). Every real tenant is expected to set its own `greeting_message`
+# column instead; this only covers a tenant that hasn't.
+_GREETING_MSG = "Gracias por comunicarse con nosotros. ¿Cómo podemos ayudarle?"
+
+# Vertical-neutral fallback for a closed-world denial (#51/ADR-010). Fixed
+# text, zero model calls — tenants.not_offered_message overrides it.
+_NOT_OFFERED_MSG = "Lo sentimos, no ofrecemos eso."
 
 _FALLBACK = "Lo siento, no pude procesar su consulta en este momento. Por favor intente de nuevo."
 
@@ -220,7 +222,7 @@ async def _load_tenant(slug: str) -> dict:
         row = (await db.execute(
             text(
                 "SELECT expertise_area, tone_description, contact_url, specialization_context, "
-                "greeting_message FROM tenants WHERE slug = :s"
+                "greeting_message, results_turnaround, not_offered_message FROM tenants WHERE slug = :s"
             ),
             {"s": slug},
         )).first()
@@ -231,6 +233,8 @@ async def _load_tenant(slug: str) -> dict:
             "contact_hint": "",
             "specialization_context": "",
             "greeting_message": None,
+            "results_turnaround": None,
+            "not_offered_message": None,
         }
     expertise = row.expertise_area or "este negocio"
     contact_hint = (f"\nSi necesita más ayuda, contacte: {row.contact_url}" if row.contact_url else "")
@@ -240,6 +244,8 @@ async def _load_tenant(slug: str) -> dict:
         "tone_description": row.tone_description or DEFAULT_TONE_DESCRIPTION,
         "contact_hint": contact_hint,
         "specialization_context": row.specialization_context or "",
+        "results_turnaround": row.results_turnaround,
+        "not_offered_message": row.not_offered_message,
     }
 
 
@@ -275,6 +281,36 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         # triage call needed to classify the message in the first place.
         content = tenant_ctx.get("greeting_message") or _GREETING_MSG
         msg = AIMessage(content=content)
+        return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
+
+    if decision == "canned":
+        # Verbatim tenant-authored reply, matched in triage.py before any
+        # model call (#50) -- same zero-LLM short-circuit shape as the
+        # greeting branch above.
+        content = state.get("canned_answer", "")
+        msg = AIMessage(content=content)
+        return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
+
+    if not is_catalog and not is_staff and state.get("not_offered_verdict"):
+        # Closed-world denial (#51/ADR-010) -- retrieve() already verified
+        # both signals agree and expansion ran on expansion-grade text.
+        # Fixed reply, zero model calls, and its own audit outcome distinct
+        # from an escalation or a normal answered turn.
+        message = tenant_ctx.get("not_offered_message") or _NOT_OFFERED_MSG
+        nearest_items = [c["content"] for c in chunks[:3] if c.get("content")]
+        content = message
+        if nearest_items:
+            content += "\n\n" + "\n".join(f"- {item}" for item in nearest_items)
+        content += tenant_ctx["contact_hint"]
+        msg = AIMessage(content=content)
+
+        # Read from state, not re-derived from `chunks` here -- `chunks` is
+        # the post-token-cap list, which can drop rows retrieve() actually
+        # used to compute the verdict (found in /code-review).
+        await record_denial(
+            state["tenant_id"], state["thread_id"], last_human_text(state) or "",
+            state.get("not_offered_max_similarity"),
+        )
         return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
 
     if is_catalog and not chunks:
@@ -358,9 +394,10 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
     specialization_block = _build_specialization_block(specialization) if not is_catalog else ""
     if specialization:
         logger.debug("generate_specialization_applied tenant=%s len=%d", state["tenant_id"], len(specialization))
+    results_note_rule = _build_results_note_rule(tenant_ctx.get("results_turnaround"))
     system = template.format(
         context=context, format_hint=format_hint, match_instruction=match_instruction,
-        negative_confirmation_rule=negative_confirmation_rule,
+        negative_confirmation_rule=negative_confirmation_rule, results_note_rule=results_note_rule,
         specialization_block=specialization_block, greeting_note=greeting_note, **tenant_ctx,
     )
 

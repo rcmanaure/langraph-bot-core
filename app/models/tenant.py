@@ -36,6 +36,21 @@ class Tenant(Base):
     # Per-tenant override for the canned "greeting" triage reply (generate.py
     # _GREETING_MSG). NULL = fall back to the hardcoded default there.
     greeting_message = Column(Text, nullable=True)
+    # Appended to a priced reply ("Resultados: 3 a 5 días hábiles"). NULL =
+    # omit the note entirely -- no invented turnaround for a tenant that
+    # hasn't set one (see generate.py's _build_results_note_rule, #46).
+    results_turnaround = Column(Text, nullable=True)
+    # Selects a shared PromptPack (app/models/prompt_pack.py) -- vocabulary
+    # only, distinct from expertise_area (a display label). See ADR-011.
+    vertical = Column(String(50), nullable=True, server_default="medical_lab")
+    # Opt-in closed-world assumption (#49/ADR-010): a study/service absent
+    # from the indexed catalog is treated as genuinely not offered, not
+    # merely unfound. Default false -- an un-flagged tenant behaves exactly
+    # as it does today.
+    catalog_is_closed = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Fixed reply for a closed-world denial. NULL = fall back to a
+    # vertical-neutral constant (see generate.py, #51).
+    not_offered_message = Column(Text, nullable=True)
     example_questions = Column(JSON, nullable=True)
     web_search_enabled = Column(Boolean, default=False, server_default="false")
     doc_structure_summary = Column(Text, nullable=True)

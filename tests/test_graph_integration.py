@@ -111,6 +111,7 @@ async def test_full_rag_flow_retrieves_reranks_and_answers():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
         patch("app.services.rag.settings.rerank_enabled", True),
         # top_k_results must be SMALLER than the candidate count, or
@@ -173,6 +174,7 @@ async def test_retrieval_and_rerank_spans_are_emitted():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
         patch("app.services.rag._tracer", test_tracer),
         patch("app.services.rag.settings.rerank_enabled", True),
@@ -219,6 +221,7 @@ async def test_rerank_http_failure_falls_back_but_graph_still_completes():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
         patch("app.services.rag.settings.rerank_enabled", True),
         patch("app.services.rag.settings.top_k_results", 1),
@@ -259,6 +262,146 @@ async def test_off_topic_skips_retrieve_and_rerank_entirely():
 
 
 @pytest.mark.asyncio
+async def test_non_default_vertical_prompt_pack_reaches_triage_prompt():
+    """A tenant with a non-default vertical produces a triage prompt
+    containing that vertical's pack vocabulary, through the real compiled
+    graph (#48)."""
+    graph = build_graph(checkpointer=None)
+    state = _initial_state("cuanto cuesta la membresia")
+    llm = _mock_chat_llm("respuesta", triage_decision="rag")
+    db = _mock_db_session()
+
+    with (
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_tenant_vertical", AsyncMock(return_value="gym")),
+        patch("app.graph.nodes.triage.get_rag_examples", AsyncMock(return_value=["rutina", "clases grupales"])),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
+    ):
+        await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
+
+    triage_system = llm.with_structured_output.return_value.ainvoke.await_args.args[0][0].content
+    assert "rutina" in triage_system
+    assert "clases grupales" in triage_system
+
+
+@pytest.mark.asyncio
+async def test_canned_answer_short_circuits_with_zero_llm_retrieve_rerank_calls():
+    """A message matching a tenant's canned trigger returns the exact reply
+    text through the real compiled graph, with zero LLM/retrieve/rerank
+    calls (#50)."""
+    graph = build_graph(checkpointer=None)
+    state = _initial_state("cual es su horario")
+    llm = _mock_chat_llm("should not be used", triage_decision="rag")
+
+    with (
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
+        patch("app.services.rerank.httpx.AsyncClient") as mock_rerank_client,
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm) as mock_get_triage_llm,
+        patch("app.graph.nodes.triage.match_canned_answer", AsyncMock(return_value="Lunes a viernes 9-5")),
+        patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=_mock_db_session())),
+    ):
+        result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
+
+    mock_retrieve.assert_not_called()
+    mock_rerank_client.assert_not_called()
+    mock_get_triage_llm.assert_not_called()
+    llm.ainvoke.assert_not_called()
+    assert result["answer"] == "Lunes a viernes 9-5"
+
+
+def _closed_world_tenant_row():
+    return MagicMock(
+        expertise_area="diagnóstico histológico", contact_url=None, greeting_message=None,
+        tone_description=None, specialization_context="jerga médica de laboratorio",
+        results_turnaround=None, not_offered_message=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_closed_world_denial_fires_through_the_compiled_graph():
+    """A catalog_is_closed tenant with both signals missing gets the fixed
+    not-offered reply through the real graph, not an escalation, and never
+    calls the chat LLM (#51/ADR-010). Also doubles as the "confident OCR
+    extraction triggers the same denial" case: a vision-extracted query
+    reaches the graph as a plain string identical to typed text (see
+    app/channels/turn.py — an UNCERTAIN extraction never reaches
+    graph.ainvoke at all, per test_turn.py::test_uncertain_extraction_asks_
+    the_user_to_type), so no separate code path exists to test here."""
+    graph = build_graph(checkpointer=None)
+    state = _initial_state("hacen biopsia de riñon")
+    llm = _mock_chat_llm("should not be used", triage_decision="rag")
+    # Two separate sessions: retrieve.py's own lexical-membership query
+    # (_lexical_catalog_miss) needs .first() -> None (a miss); generate.py's
+    # _load_tenant() needs .first() -> the tenant row. Sharing one mock
+    # session between both would make one of the two calls read the other's
+    # intended result.
+    retrieve_db = _mock_db_session()
+    retrieve_db.execute = AsyncMock(return_value=MagicMock(first=MagicMock(return_value=None)))
+    generate_db = _mock_db_session(first_row=_closed_world_tenant_row())
+
+    with (
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[{"content": "x", "similarity": 0.1}])),
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[{"content": "x", "similarity": 0.1}])),
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=retrieve_db)),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="jerga médica")),
+        patch(
+            "app.graph.nodes.retrieve.get_tenant_closed_world_context",
+            AsyncMock(return_value={"expertise_area": "diagnóstico histológico", "catalog_is_closed": True}),
+        ),
+        patch("app.graph.nodes.retrieve._rewrite_query", AsyncMock(return_value=("hacen biopsia de riñon", True))),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
+        patch("app.graph.nodes.triage.match_canned_answer", AsyncMock(return_value=None)),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=generate_db)),
+        patch("app.graph.nodes.generate.record_denial", AsyncMock()) as mock_record,
+    ):
+        result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
+
+    llm.ainvoke.assert_not_called()
+    assert HUMAN_HANDOFF not in result["answer"]
+    assert "Lo sentimos, no ofrecemos eso." in result["answer"]
+    mock_record.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_closed_world_signal_disagreement_still_escalates():
+    """Only the similarity signal misses (lexical finds a match) -> the two
+    signals disagree -> escalates exactly as today, no denial."""
+    graph = build_graph(checkpointer=None)
+    state = _initial_state("hacen biopsia de riñon")
+    llm = _mock_chat_llm("respuesta", triage_decision="rag")
+    retrieve_db = _mock_db_session()
+    # .first() returns a truthy row here -- lexical signal finds a match,
+    # disagreeing with the low-similarity signal below.
+    retrieve_db.execute = AsyncMock(return_value=MagicMock(first=MagicMock(return_value=object())))
+    generate_db = _mock_db_session(first_row=_closed_world_tenant_row())
+
+    with (
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[{"content": "x", "similarity": 0.1}])),
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[{"content": "x", "similarity": 0.1}])),
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=retrieve_db)),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="jerga médica")),
+        patch(
+            "app.graph.nodes.retrieve.get_tenant_closed_world_context",
+            AsyncMock(return_value={"expertise_area": "diagnóstico histológico", "catalog_is_closed": True}),
+        ),
+        patch("app.graph.nodes.retrieve._rewrite_query", AsyncMock(return_value=("hacen biopsia de riñon", True))),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
+        patch("app.graph.nodes.triage.match_canned_answer", AsyncMock(return_value=None)),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=generate_db)),
+        patch("app.graph.nodes.generate.record_denial", AsyncMock()) as mock_record,
+    ):
+        result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
+
+    assert HUMAN_HANDOFF in result["answer"]
+    assert "Lo sentimos, no ofrecemos eso." not in result["answer"]
+    mock_record.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_greeting_skips_retrieve_and_second_llm_call():
     graph = build_graph(checkpointer=None)
     state = _initial_state("hola buenas")
@@ -278,7 +421,7 @@ async def test_greeting_skips_retrieve_and_second_llm_call():
     # same include_raw=True structured call instead of a second concurrent
     # llm.ainvoke(), so nothing on this path touches .ainvoke at all.
     llm.ainvoke.assert_not_called()
-    assert "gracias por comunicarte" in result["answer"].lower()
+    assert "gracias por comunicarse" in result["answer"].lower()
 
 
 @pytest.mark.asyncio
@@ -377,6 +520,7 @@ async def test_low_similarity_pool_escalates_through_the_compiled_graph():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
         patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
@@ -422,6 +566,7 @@ async def test_rejection_after_approximation_escalates_across_two_turns():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
         patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),

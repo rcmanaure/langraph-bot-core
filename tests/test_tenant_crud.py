@@ -198,6 +198,94 @@ async def test_patch_specialization_context_over_max_length_returns_422():
 
 
 @pytest.mark.asyncio
+async def test_patch_results_turnaround_round_trips():
+    """PATCH with results_turnaround persists it and returns it (#46)."""
+    app = make_app()
+    t = _tenant()
+    sess = _session(execute=AsyncMock(return_value=_orm_result(t)))
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)), \
+         patch("app.routes.admin.set_webhook", new_callable=AsyncMock, return_value=None), \
+         patch("app.routes.admin.delete_webhook", new_callable=AsyncMock):
+        r = await req(app, "patch", "/admin/tenants/acme",
+                      json={"results_turnaround": "3 a 5 días hábiles"})
+    assert r.status_code == 200
+    assert r.json()["results_turnaround"] == "3 a 5 días hábiles"
+    assert t.results_turnaround == "3 a 5 días hábiles"
+
+
+@pytest.mark.asyncio
+async def test_patch_results_turnaround_null_clears_to_none():
+    """Nullable column (like greeting_message) — clearing must write NULL, so
+    generate.py omits the note entirely rather than showing an empty string."""
+    app = make_app()
+    t = _tenant()
+    t.results_turnaround = "vieja nota"
+    sess = _session(execute=AsyncMock(return_value=_orm_result(t)))
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)), \
+         patch("app.routes.admin.set_webhook", new_callable=AsyncMock, return_value=None), \
+         patch("app.routes.admin.delete_webhook", new_callable=AsyncMock):
+        r = await req(app, "patch", "/admin/tenants/acme",
+                      json={"results_turnaround": None})
+    assert r.status_code == 200
+    assert r.json()["results_turnaround"] is None
+    assert t.results_turnaround is None
+
+
+@pytest.mark.asyncio
+async def test_patch_catalog_is_closed_and_not_offered_message_round_trip():
+    """PATCH with catalog_is_closed/not_offered_message persists and returns
+    both (#51)."""
+    app = make_app()
+    t = _tenant()
+    sess = _session(execute=AsyncMock(return_value=_orm_result(t)))
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)), \
+         patch("app.routes.admin.set_webhook", new_callable=AsyncMock, return_value=None), \
+         patch("app.routes.admin.delete_webhook", new_callable=AsyncMock):
+        r = await req(app, "patch", "/admin/tenants/acme",
+                      json={"catalog_is_closed": True, "not_offered_message": "No lo hacemos."})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["catalog_is_closed"] is True
+    assert body["not_offered_message"] == "No lo hacemos."
+    assert t.catalog_is_closed is True
+    assert t.not_offered_message == "No lo hacemos."
+
+
+@pytest.mark.asyncio
+async def test_patch_catalog_is_closed_null_coerces_to_false_not_integrity_error():
+    """Column is NOT NULL -- an explicit `null` payload (the same shape the
+    admin UI's `|| null` clear pattern sends for nullable fields) must
+    coerce to False, not attempt a NULL write and surface a misleading 409
+    (found in /code-review)."""
+    app = make_app()
+    t = _tenant()
+    t.catalog_is_closed = True
+    sess = _session(execute=AsyncMock(return_value=_orm_result(t)))
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)), \
+         patch("app.routes.admin.set_webhook", new_callable=AsyncMock, return_value=None), \
+         patch("app.routes.admin.delete_webhook", new_callable=AsyncMock):
+        r = await req(app, "patch", "/admin/tenants/acme", json={"catalog_is_closed": None})
+    assert r.status_code == 200
+    assert r.json()["catalog_is_closed"] is False
+    assert t.catalog_is_closed is False
+
+
+@pytest.mark.asyncio
+async def test_patch_not_offered_message_null_clears_to_none():
+    app = make_app()
+    t = _tenant()
+    t.not_offered_message = "vieja"
+    sess = _session(execute=AsyncMock(return_value=_orm_result(t)))
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)), \
+         patch("app.routes.admin.set_webhook", new_callable=AsyncMock, return_value=None), \
+         patch("app.routes.admin.delete_webhook", new_callable=AsyncMock):
+        r = await req(app, "patch", "/admin/tenants/acme", json={"not_offered_message": None})
+    assert r.status_code == 200
+    assert r.json()["not_offered_message"] is None
+    assert t.not_offered_message is None
+
+
+@pytest.mark.asyncio
 async def test_patch_response_never_contains_credentials():
     """Response MUST NOT expose bot_token, webhook_secret, or any WA credential."""
     app = make_app()

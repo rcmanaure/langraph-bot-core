@@ -33,13 +33,13 @@ def _route_after_validate(state: AgentState) -> str:
 
 def _route_triage(state: AgentState) -> str:
     # retrieve()+rerank_chunks() are LLM/DB round trips that only pay off when
-    # generate() actually reads retrieved_chunks — off_topic/greeting return a
-    # canned reply without looking at chunks, and human hands off before
-    # generate() runs at all, so those three skip straight past retrieve.
+    # generate() actually reads retrieved_chunks — off_topic/greeting/canned
+    # return a fixed reply without looking at chunks, and human hands off
+    # before generate() runs at all, so those four skip straight past retrieve.
     d = state.get("triage_decision", "rag")
     if d == "human":
         return "interrupt_node"
-    if d in ("off_topic", "greeting"):
+    if d in ("off_topic", "greeting", "canned"):
         return "generate"
     return "retrieve"  # "rag" or "catalog"
 

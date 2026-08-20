@@ -16,9 +16,10 @@ from app.auth import verify_operator_key
 from app.channels.telegram import delete_webhook, get_webhook_info, set_webhook
 from app.config import settings
 from app.db import AsyncSessionLocal
-from app.models import IndexJob, IndexJobStatus, StaffMember, Tenant
+from app.models import CannedAnswer, IndexJob, IndexJobStatus, StaffMember, Tenant
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.policies import TenantPolicy
+from app.services import canned
 from app.services.indexer import run_index_job
 
 _bg_tasks: set[asyncio.Task] = set()
@@ -41,7 +42,8 @@ async def list_tenants(_: None = Depends(verify_operator_key)):
         rows = await db.execute(
             text("""
                 SELECT id, slug, expertise_area, tone_description, specialization_context,
-                       contact_url, greeting_message, plan, active, created_at
+                       contact_url, greeting_message, results_turnaround, catalog_is_closed,
+                       not_offered_message, plan, active, created_at
                   FROM tenants ORDER BY created_at DESC
             """)
         )
@@ -63,6 +65,9 @@ class TenantCreate(BaseModel):
     specialization_context: str = Field("", max_length=8000)
     contact_url: str = ""
     greeting_message: str | None = None
+    results_turnaround: str | None = None
+    catalog_is_closed: bool = False
+    not_offered_message: str | None = None
     plan: str = "free"
 
 
@@ -84,11 +89,11 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
                 INSERT INTO tenants
                     (slug, api_key_hash, webhook_secret, bot_token, plan,
                      expertise_area, tone_description, specialization_context, contact_url,
-                     greeting_message, active)
+                     greeting_message, results_turnaround, catalog_is_closed, not_offered_message, active)
                 VALUES
                     (:slug, :api_key_hash, :webhook_secret, :bot_token, :plan,
                      :expertise_area, :tone_description, :specialization_context, :contact_url,
-                     :greeting_message, true)
+                     :greeting_message, :results_turnaround, :catalog_is_closed, :not_offered_message, true)
             """),
             {
                 "slug": body.slug,
@@ -101,6 +106,9 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
                 "specialization_context": body.specialization_context,
                 "contact_url": body.contact_url,
                 "greeting_message": body.greeting_message,
+                "results_turnaround": body.results_turnaround,
+                "catalog_is_closed": body.catalog_is_closed,
+                "not_offered_message": body.not_offered_message,
             },
         )
         await db.commit()
@@ -115,6 +123,9 @@ class TenantPatch(BaseModel):
     specialization_context: str | None = Field(None, max_length=8000)
     contact_url: str | None = None
     greeting_message: str | None = None
+    results_turnaround: str | None = None
+    catalog_is_closed: bool | None = None
+    not_offered_message: str | None = None
     active: bool | None = None
     # Credential fields — only updated when non-empty string is provided
     bot_token: str | None = None
@@ -155,6 +166,21 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
             # the meaningful "use the hardcoded fallback" state (see
             # generate.py), so clearing to empty should write NULL, not "".
             t.greeting_message = body.greeting_message or None
+        if "results_turnaround" in fields:
+            # Nullable, same rationale as greeting_message above -- NULL is
+            # the meaningful "omit the note" state, not "".
+            t.results_turnaround = body.results_turnaround or None
+        if "catalog_is_closed" in fields:
+            # Column is NOT NULL (unlike the nullable fields around it) --
+            # an explicit `null` in the payload must not attempt a NULL
+            # write (same class of bug specialization_context's clear-to-""
+            # guard above fixes; found in /code-review). None coerces to
+            # False, the column's own default.
+            t.catalog_is_closed = bool(body.catalog_is_closed)
+        if "not_offered_message" in fields:
+            # Nullable -- NULL falls back to generate.py's vertical-neutral
+            # _NOT_OFFERED_MSG constant (#51).
+            t.not_offered_message = body.not_offered_message or None
         if "active" in fields:
             t.active = body.active
         if "webhook_secret" in fields and body.webhook_secret:
@@ -207,6 +233,9 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
         "specialization_context": t.specialization_context,
         "contact_url": t.contact_url,
         "greeting_message": t.greeting_message,
+        "results_turnaround": t.results_turnaround,
+        "catalog_is_closed": t.catalog_is_closed,
+        "not_offered_message": t.not_offered_message,
         "active": t.active,
         "webhook_registered": webhook_registered,
     }
@@ -388,6 +417,108 @@ async def remove_staff(slug: str, staff_id: int, _: None = Depends(verify_operat
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="Staff member not found")
         await db.commit()
+
+
+# ── Canned answers ───────────────────────────────────────────────────────────
+# Tenant-authored, keyword-triggered verbatim replies for static non-priced
+# questions -- matched in triage.py before any model call (see CONTEXT.md's
+# "Canned answer" and #47/#50). Cached with a TTL (app/services/canned.py);
+# every write below invalidates that cache so the change is live immediately.
+
+class CannedAnswerCreate(BaseModel):
+    keywords: list[str] = Field(min_length=1)
+    match_mode: Literal["any", "all"] = "any"
+    answer: str = Field(min_length=1)
+
+
+class CannedAnswerPatch(BaseModel):
+    keywords: list[str] | None = Field(None, min_length=1)
+    match_mode: Literal["any", "all"] | None = None
+    answer: str | None = Field(None, min_length=1)
+
+
+@router.get("/tenants/{slug}/canned-answers")
+async def list_canned_answers(slug: str, _: None = Depends(verify_operator_key)):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        rows = await db.execute(
+            select(CannedAnswer).where(CannedAnswer.tenant_id == tenant_id).order_by(CannedAnswer.id)
+        )
+        return [
+            {"id": r.id, "keywords": r.keywords, "match_mode": r.match_mode, "answer": r.answer}
+            for r in rows.scalars().all()
+        ]
+
+
+@router.post("/tenants/{slug}/canned-answers", status_code=201)
+async def create_canned_answer(slug: str, body: CannedAnswerCreate, _: None = Depends(verify_operator_key)):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        row = CannedAnswer(
+            tenant_id=tenant_id, keywords=body.keywords, match_mode=body.match_mode, answer=body.answer,
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+
+    canned.invalidate(slug)
+    return {"id": row.id, "keywords": row.keywords, "match_mode": row.match_mode, "answer": row.answer}
+
+
+@router.patch("/tenants/{slug}/canned-answers/{answer_id}")
+async def patch_canned_answer(
+    slug: str, answer_id: int, body: CannedAnswerPatch, _: None = Depends(verify_operator_key),
+):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        # Scoped by tenant_id, not just answer_id — same guard as staff
+        # removal above: one tenant's numeric id must not reach another's row.
+        row = (await db.execute(
+            select(CannedAnswer).where(CannedAnswer.id == answer_id, CannedAnswer.tenant_id == tenant_id)
+        )).scalar_one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Canned answer not found")
+
+        fields = body.model_fields_set
+        if "keywords" in fields:
+            row.keywords = body.keywords
+        if "match_mode" in fields:
+            row.match_mode = body.match_mode
+        if "answer" in fields:
+            row.answer = body.answer
+
+        await db.commit()
+        await db.refresh(row)
+
+    canned.invalidate(slug)
+    return {"id": row.id, "keywords": row.keywords, "match_mode": row.match_mode, "answer": row.answer}
+
+
+@router.delete("/tenants/{slug}/canned-answers/{answer_id}", status_code=204)
+async def delete_canned_answer(slug: str, answer_id: int, _: None = Depends(verify_operator_key)):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        result = await db.execute(
+            text("DELETE FROM canned_answers WHERE id = :id AND tenant_id = :tid"),
+            {"id": answer_id, "tid": tenant_id},
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Canned answer not found")
+        await db.commit()
+
+    canned.invalidate(slug)
 
 
 # ── API key rotation ─────────────────────────────────────────────────────────

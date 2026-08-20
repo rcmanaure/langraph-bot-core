@@ -27,3 +27,24 @@ class AgentState(TypedDict):
     # it explicitly (never omits the key) so it cannot survive past the one
     # turn it describes. See ADR-009 / #38.
     awaiting_confirmation: NotRequired[bool]
+    # Closed-world not-offered verdict (#49/ADR-010): True only when the
+    # tenant is catalog_is_closed AND both signals (lexical catalog miss,
+    # similarity floor miss) agree AND query expansion actually ran on
+    # expansion-grade tenant text. Computed once in retrieve() (which
+    # already holds the expanded query and chunk pool) and read by
+    # generate() — see retrieve.py's not_offered_verdict(). Always set
+    # explicitly by retrieve() (never omitted), same discipline as
+    # awaiting_confirmation above, so a prior turn's True can't leak
+    # forward once retrieve() re-runs for a new question.
+    not_offered_verdict: NotRequired[bool]
+    # Max similarity across the retrieved pool at the moment retrieve()
+    # computed not_offered_verdict — captured before cap_chunks_to_tokens
+    # runs so generate()'s audit write (#51) reports the exact value that
+    # drove the verdict, not a value re-derived from a possibly-shorter
+    # capped chunk list.
+    not_offered_max_similarity: NotRequired[float | None]
+    # Set by triage() alongside triage_decision="canned" (#50) — the matched
+    # tenant-authored reply text, read verbatim by generate()'s canned
+    # branch. Only meaningful when triage_decision == "canned" for THIS
+    # turn; never read otherwise.
+    canned_answer: NotRequired[str]

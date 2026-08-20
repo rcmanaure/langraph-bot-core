@@ -7,7 +7,6 @@ import json
 import logging
 import re
 import shutil
-import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -21,6 +20,7 @@ from app.config import settings
 from app.db import AsyncSessionLocal
 from app.schemas.vision import VisionExtraction, VisionVerification
 from app.services.llm import get_vision_llm
+from app.services.text_normalize import normalize_for_comparison
 
 logger = logging.getLogger(__name__)
 
@@ -142,12 +142,12 @@ def _strip_fences(content: str) -> str:
 
 
 def _normalize_for_comparison(text_value: str) -> str:
-    """Lowercase + accent-strip (NFKD, drop combining marks) so two
-    independent vision samples that read the SAME term but differ only in
-    accent marks (e.g. "anatomia patologica" vs "anatomía patológica" — real
-    /qa 2026-07-24 finding) aren't misclassified as a consensus disagreement."""
-    normalized = unicodedata.normalize("NFKD", text_value.strip().lower())
-    return "".join(c for c in normalized if not unicodedata.combining(c))
+    """Lowercase + accent-strip so two independent vision samples that read
+    the SAME term but differ only in accent marks (e.g. "anatomia patologica"
+    vs "anatomía patológica" — real /qa 2026-07-24 finding) aren't
+    misclassified as a consensus disagreement. Shared with md_catalog.py via
+    app.services.text_normalize."""
+    return normalize_for_comparison(text_value)
 
 
 def _extraction_display_text(extraction: VisionExtraction) -> str:

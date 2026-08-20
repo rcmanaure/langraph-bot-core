@@ -242,6 +242,32 @@ async def test_create_tenant_specialization_context_persisted():
 
 
 @pytest.mark.asyncio
+async def test_create_tenant_results_turnaround_persisted():
+    """results_turnaround in the create payload reaches the INSERT (#46)."""
+    app = make_app()
+    ctx = _make_db_for_create(existing_row=None)
+    payload = {**VALID_TENANT, "slug": "lab-client-3", "results_turnaround": "3 a 5 días hábiles"}
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=ctx):
+        r = await _request(app, "post", "/admin/tenants", json=payload)
+    assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_create_tenant_catalog_is_closed_and_not_offered_message_persisted():
+    """catalog_is_closed/not_offered_message in the create payload reach the
+    INSERT (#51)."""
+    app = make_app()
+    ctx = _make_db_for_create(existing_row=None)
+    payload = {
+        **VALID_TENANT, "slug": "lab-client-4",
+        "catalog_is_closed": True, "not_offered_message": "No realizamos ese estudio.",
+    }
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=ctx):
+        r = await _request(app, "post", "/admin/tenants", json=payload)
+    assert r.status_code == 201
+
+
+@pytest.mark.asyncio
 async def test_create_tenant_specialization_context_over_max_length_returns_422():
     """Server-side enforcement — a direct API client can't bypass the
     admin.html textarea's client-side maxlength."""

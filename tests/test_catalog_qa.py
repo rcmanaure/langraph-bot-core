@@ -390,7 +390,7 @@ async def test_greeting_no_llm_called():
         result = await generate(state)
 
     llm.ainvoke.assert_not_called()
-    assert "gracias por comunicarte" in result["answer"].lower()
+    assert "gracias por comunicarse" in result["answer"].lower()
 
 
 @pytest.mark.asyncio

@@ -178,6 +178,74 @@ async def test_triage_no_human_message_defaults_rag(base_state):
     assert result == {"triage_decision": "rag"}
 
 
+@pytest.mark.asyncio
+async def test_triage_canned_answer_shortcut_skips_llm(base_state):
+    """A message matching a tenant's canned trigger short-circuits to
+    triage_decision="canned" + the matched text, no LLM call (#50)."""
+    base_state["messages"] = [HumanMessage(content="cual es su horario")]
+
+    with (
+        patch("app.graph.nodes.triage.match_canned_answer", AsyncMock(return_value="Lunes a viernes 9-5")),
+        patch("app.graph.nodes.triage.get_triage_llm") as mock_get_llm,
+    ):
+        result = await triage(base_state)
+
+    mock_get_llm.assert_not_called()
+    assert result == {"triage_decision": "canned", "canned_answer": "Lunes a viernes 9-5"}
+
+
+@pytest.mark.asyncio
+async def test_triage_no_canned_match_falls_through_to_llm(base_state):
+    """No canned trigger matches -> unaffected, existing LLM classification
+    path runs exactly as before (#50's "tenant with no canned answers is
+    entirely unaffected" requirement)."""
+    mock_llm = _mock_triage_llm(decision="rag")
+
+    with (
+        patch("app.graph.nodes.triage.match_canned_answer", AsyncMock(return_value=None)),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm),
+    ):
+        result = await triage(base_state)
+
+    assert result == {"triage_decision": "rag"}
+
+
+@pytest.mark.asyncio
+async def test_triage_prompt_includes_pack_vocabulary_when_set(base_state):
+    """A tenant with a non-default vertical's pack content appears in the
+    prompt reaching the triage LLM (#48)."""
+    mock_llm = _mock_triage_llm(decision="rag")
+
+    with (
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm),
+        patch("app.graph.nodes.triage.get_tenant_vertical", AsyncMock(return_value="gym")),
+        patch("app.graph.nodes.triage.get_rag_examples", AsyncMock(return_value=["rutina", "membresía"])),
+    ):
+        await triage(base_state)
+
+    system_content = mock_llm.with_structured_output.return_value.ainvoke.await_args.args[0][0].content
+    assert "rutina" in system_content
+    assert "membresía" in system_content
+
+
+@pytest.mark.asyncio
+async def test_triage_prompt_unchanged_when_no_pack_vocabulary(base_state):
+    """No vertical/pack configured -> byte-identical prompt to before this
+    feature (regression guard, per #48's "zero regression risk" requirement)."""
+    from app.graph.nodes.triage import _TRIAGE_PROMPT
+
+    mock_llm = _mock_triage_llm(decision="rag")
+
+    with (
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm),
+        patch("app.graph.nodes.triage.get_tenant_vertical", AsyncMock(return_value=None)),
+    ):
+        await triage(base_state)
+
+    system_content = mock_llm.with_structured_output.return_value.ainvoke.await_args.args[0][0].content
+    assert system_content == _TRIAGE_PROMPT
+
+
 # Regression: ECC:regex-vs-llm-structured-text finding — triage() called the
 # LLM on every message including pure greetings the prompt itself lists as
 # canonical examples. Found by /ecc:regex-vs-llm-structured-text review on
@@ -669,6 +737,204 @@ async def test_generate_omits_specialization_block_when_absent(base_state):
 
     system_content = mock_llm.ainvoke.await_args.args[0][0].content
     assert "Contexto de especialización" not in system_content
+
+
+@pytest.mark.asyncio
+async def test_generate_greeting_falls_back_to_generic_vertical_neutral_message(base_state):
+    """A tenant with no greeting_message override gets the code-level
+    default — which must name no specific tenant's business facts (#46)."""
+    base_state["triage_decision"] = "greeting"
+    runtime = _mock_runtime(get_result=None)
+
+    with patch(
+        "app.graph.nodes.generate._load_tenant",
+        AsyncMock(return_value={
+            "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
+            "greeting_message": None,
+        }),
+    ):
+        result = await generate(base_state, runtime=runtime)
+
+    assert "SP UNIDAD" not in result["answer"]
+    assert "04148050764" not in result["answer"]
+    assert result["answer"] == "Gracias por comunicarse con nosotros. ¿Cómo podemos ayudarle?"
+
+
+@pytest.mark.asyncio
+async def test_generate_canned_decision_returns_verbatim_text_no_llm_call(base_state):
+    """decision="canned" returns state["canned_answer"] verbatim with zero
+    LLM calls, same short-circuit shape as the greeting branch (#50)."""
+    base_state["triage_decision"] = "canned"
+    base_state["canned_answer"] = "Lunes a viernes 9-5"
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock()
+
+    with (
+        patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value={
+            "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
+        })),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+    ):
+        result = await generate(base_state, runtime=runtime)
+
+    mock_llm.ainvoke.assert_not_called()
+    assert result["answer"] == "Lunes a viernes 9-5"
+    assert result["awaiting_confirmation"] is False
+
+
+@pytest.mark.asyncio
+async def test_generate_not_offered_verdict_denies_with_zero_llm_call_and_audits(base_state):
+    """not_offered_verdict=True -> fixed denial reply, up to 3 nearest
+    chunks, contact line, zero LLM calls, and an audit write (#51/ADR-010)."""
+    base_state["not_offered_verdict"] = True
+    base_state["not_offered_max_similarity"] = 0.2
+    base_state["retrieved_chunks"] = [
+        {"content": "Biopsia de mama", "similarity": 0.2},
+        {"content": "Biopsia de piel", "similarity": 0.1},
+        {"content": "Citología cervical", "similarity": 0.05},
+        {"content": "Protocolo X", "similarity": 0.05},
+    ]
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock()
+
+    with (
+        patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value={
+            "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION,
+            "contact_hint": "\nContacte: +58 000", "not_offered_message": None,
+        })),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.generate.record_denial", AsyncMock()) as mock_record,
+    ):
+        result = await generate(base_state, runtime=runtime)
+
+    mock_llm.ainvoke.assert_not_called()
+    assert "Lo sentimos, no ofrecemos eso." in result["answer"]
+    assert "Biopsia de mama" in result["answer"]
+    assert "Biopsia de piel" in result["answer"]
+    assert "Citología cervical" in result["answer"]
+    assert "Protocolo X" not in result["answer"]  # only up to 3 nearest items
+    assert "Contacte: +58 000" in result["answer"]
+    assert result["awaiting_confirmation"] is False
+    mock_record.assert_awaited_once()
+    call_args = mock_record.await_args.args
+    assert call_args[0] == base_state["tenant_id"]
+    assert call_args[3] == 0.2  # max similarity across the pool
+
+
+@pytest.mark.asyncio
+async def test_generate_not_offered_message_override_used_when_set(base_state):
+    base_state["not_offered_verdict"] = True
+    runtime = _mock_runtime(get_result=None)
+
+    with (
+        patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value={
+            "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION,
+            "contact_hint": "", "not_offered_message": "No realizamos ese estudio.",
+        })),
+        patch("app.graph.nodes.generate.record_denial", AsyncMock()),
+    ):
+        result = await generate(base_state, runtime=runtime)
+
+    assert "No realizamos ese estudio." in result["answer"]
+    assert "Lo sentimos, no ofrecemos eso." not in result["answer"]
+
+
+@pytest.mark.asyncio
+async def test_generate_verdict_false_takes_normal_rag_path(base_state):
+    """not_offered_verdict absent/False -> completely unaffected, existing
+    RAG generation path runs (regression guard for tenants that never opt
+    into catalog_is_closed)."""
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_llm.model_name = "test-model"
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="respuesta normal"))
+
+    with (
+        patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value={
+            "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
+        })),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.generate.record_denial", AsyncMock()) as mock_record,
+    ):
+        result = await generate(base_state, runtime=runtime)
+
+    mock_llm.ainvoke.assert_awaited_once()
+    mock_record.assert_not_called()
+    assert result["answer"] == "respuesta normal"
+
+
+@pytest.mark.asyncio
+async def test_generate_staff_never_denies_even_with_verdict_true(base_state):
+    """A staff member IS the business -- a closed-world denial to staff
+    makes no sense, same exclusion as the escalation signals."""
+    base_state["not_offered_verdict"] = True
+    base_state["is_staff"] = True
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_llm.model_name = "test-model"
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="respuesta staff"))
+
+    with (
+        patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value={
+            "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
+        })),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.generate.record_denial", AsyncMock()) as mock_record,
+    ):
+        result = await generate(base_state, runtime=runtime)
+
+    mock_record.assert_not_called()
+    assert result["answer"] == "respuesta staff"
+
+
+@pytest.mark.asyncio
+async def test_generate_includes_results_turnaround_when_set(base_state):
+    """Per-tenant results_turnaround appears in the priced-reply note (#46)."""
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_llm.model_name = "test-model"
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="ok"))
+
+    with (
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch(
+            "app.graph.nodes.generate._load_tenant",
+            AsyncMock(return_value={
+                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
+                "results_turnaround": "3 a 5 días hábiles",
+            }),
+        ),
+    ):
+        await generate(base_state, runtime=runtime)
+
+    system_content = mock_llm.ainvoke.await_args.args[0][0].content
+    assert "_Resultados: 3 a 5 días hábiles._" in system_content
+
+
+@pytest.mark.asyncio
+async def test_generate_omits_results_turnaround_when_unset(base_state):
+    """No results_turnaround column set -> no invented turnaround note, and
+    existing mocks without the key must not KeyError (regression guard)."""
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_llm.model_name = "test-model"
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="ok"))
+
+    with (
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch(
+            "app.graph.nodes.generate._load_tenant",
+            AsyncMock(return_value={
+                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
+            }),
+        ),
+    ):
+        await generate(base_state, runtime=runtime)
+
+    system_content = mock_llm.ainvoke.await_args.args[0][0].content
+    assert "Resultados:" not in system_content
 
 
 # ---------------------------------------------------------------------------

@@ -7,8 +7,11 @@ from langchain_core.messages import SystemMessage, trim_messages
 from app.config import settings
 from app.graph.nodes.retrieve import LOCATION_RE, is_bare_rejection, last_human_text
 from app.schemas.triage import TriageDecision
+from app.services.canned import match_canned_answer
 from app.services.llm import get_triage_llm
+from app.services.prompt_pack import get_rag_examples
 from app.services.rag import token_counter
+from app.services.tenant_context import get_tenant_vertical
 from app.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -47,6 +50,22 @@ Examples of "off_topic": "quien ganó el partido", "como programo en python", "c
 When in doubt between rag/off_topic → "rag". Default is "rag".
 Reply ONLY with JSON: {"decision": "<category>"}
 """
+
+
+def _build_triage_prompt(extra_rag_examples: list[str]) -> str:
+    """Appends pack-supplied vocabulary (app/services/prompt_pack.py) after
+    the fixed classification prompt — vocabulary only, never a new rule or
+    instruction (see ADR-007/ADR-011): the appended block can only ever be a
+    comma-separated example list, so a pack row can't smuggle in an
+    instruction that changes how triage classifies or how generate.py's
+    register floor behaves. No-op (returns _TRIAGE_PROMPT unchanged) for a
+    tenant with no vertical/pack, so this is byte-identical to before the
+    pack mechanism existed — see tests/test_evals.py, which imports
+    _TRIAGE_PROMPT directly and must keep working unmodified."""
+    if not extra_rag_examples:
+        return _TRIAGE_PROMPT
+    extra = ", ".join(extra_rag_examples)
+    return _TRIAGE_PROMPT + f'\nVocabulario adicional de "rag" para este rubro: {extra}\n'
 
 # Shared by both regexes below. Widened 2026-08-19 to cover common LATAM
 # openers beyond hola/buenas (qué tal, quihubo/quiubo, épale, aló, qué
@@ -118,6 +137,11 @@ async def triage(state: AgentState) -> dict:
         logger.info("triage_regex_greeting_shortcut")
         return {"triage_decision": "greeting"}
 
+    canned = await match_canned_answer(state["tenant_id"], last_human)
+    if canned is not None:
+        logger.info("triage_canned_answer_shortcut")
+        return {"triage_decision": "canned", "canned_answer": canned}
+
     if LOCATION_RE.search(last_human):
         logger.info("triage_regex_location_shortcut")
         return {"triage_decision": "rag"}
@@ -131,8 +155,11 @@ async def triage(state: AgentState) -> dict:
         include_system=True,
     )
 
+    vertical = await get_tenant_vertical(state["tenant_id"])
+    extra_rag_examples = await get_rag_examples(vertical)
+
     llm = get_triage_llm()
-    payload = [SystemMessage(content=_TRIAGE_PROMPT)] + trimmed
+    payload = [SystemMessage(content=_build_triage_prompt(extra_rag_examples))] + trimmed
 
     # ONE model call, both tiers. This used to fire the structured
     # (function-calling) call and a plain raw call concurrently via
