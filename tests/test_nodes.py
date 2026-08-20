@@ -178,6 +178,42 @@ async def test_triage_no_human_message_defaults_rag(base_state):
     assert result == {"triage_decision": "rag"}
 
 
+@pytest.mark.asyncio
+async def test_triage_prompt_includes_pack_vocabulary_when_set(base_state):
+    """A tenant with a non-default vertical's pack content appears in the
+    prompt reaching the triage LLM (#48)."""
+    mock_llm = _mock_triage_llm(decision="rag")
+
+    with (
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm),
+        patch("app.graph.nodes.triage.get_tenant_vertical", AsyncMock(return_value="gym")),
+        patch("app.graph.nodes.triage.get_rag_examples", AsyncMock(return_value=["rutina", "membresía"])),
+    ):
+        await triage(base_state)
+
+    system_content = mock_llm.with_structured_output.return_value.ainvoke.await_args.args[0][0].content
+    assert "rutina" in system_content
+    assert "membresía" in system_content
+
+
+@pytest.mark.asyncio
+async def test_triage_prompt_unchanged_when_no_pack_vocabulary(base_state):
+    """No vertical/pack configured -> byte-identical prompt to before this
+    feature (regression guard, per #48's "zero regression risk" requirement)."""
+    from app.graph.nodes.triage import _TRIAGE_PROMPT
+
+    mock_llm = _mock_triage_llm(decision="rag")
+
+    with (
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm),
+        patch("app.graph.nodes.triage.get_tenant_vertical", AsyncMock(return_value=None)),
+    ):
+        await triage(base_state)
+
+    system_content = mock_llm.with_structured_output.return_value.ainvoke.await_args.args[0][0].content
+    assert system_content == _TRIAGE_PROMPT
+
+
 # Regression: ECC:regex-vs-llm-structured-text finding — triage() called the
 # LLM on every message including pure greetings the prompt itself lists as
 # canonical examples. Found by /ecc:regex-vs-llm-structured-text review on

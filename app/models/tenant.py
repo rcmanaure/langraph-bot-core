@@ -40,6 +40,9 @@ class Tenant(Base):
     # omit the note entirely -- no invented turnaround for a tenant that
     # hasn't set one (see generate.py's _build_results_note_rule, #46).
     results_turnaround = Column(Text, nullable=True)
+    # Selects a shared PromptPack (app/models/prompt_pack.py) -- vocabulary
+    # only, distinct from expertise_area (a display label). See ADR-011.
+    vertical = Column(String(50), nullable=True, server_default="medical_lab")
     example_questions = Column(JSON, nullable=True)
     web_search_enabled = Column(Boolean, default=False, server_default="false")
     doc_structure_summary = Column(Text, nullable=True)

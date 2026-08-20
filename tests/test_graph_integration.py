@@ -259,6 +259,31 @@ async def test_off_topic_skips_retrieve_and_rerank_entirely():
 
 
 @pytest.mark.asyncio
+async def test_non_default_vertical_prompt_pack_reaches_triage_prompt():
+    """A tenant with a non-default vertical produces a triage prompt
+    containing that vertical's pack vocabulary, through the real compiled
+    graph (#48)."""
+    graph = build_graph(checkpointer=None)
+    state = _initial_state("cuanto cuesta la membresia")
+    llm = _mock_chat_llm("respuesta", triage_decision="rag")
+    db = _mock_db_session()
+
+    with (
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
+        patch("app.graph.nodes.triage.get_tenant_vertical", AsyncMock(return_value="gym")),
+        patch("app.graph.nodes.triage.get_rag_examples", AsyncMock(return_value=["rutina", "clases grupales"])),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
+        patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=db)),
+    ):
+        await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
+
+    triage_system = llm.with_structured_output.return_value.ainvoke.await_args.args[0][0].content
+    assert "rutina" in triage_system
+    assert "clases grupales" in triage_system
+
+
+@pytest.mark.asyncio
 async def test_greeting_skips_retrieve_and_second_llm_call():
     graph = build_graph(checkpointer=None)
     state = _initial_state("hola buenas")

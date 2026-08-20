@@ -35,3 +35,20 @@ async def get_tenant_specialization(slug: str) -> str:
     except Exception as exc:
         logger.warning("tenant_specialization_lookup_failed slug=%s err=%s", slug, exc)
         return ""
+
+
+async def get_tenant_vertical(slug: str) -> str | None:
+    """Selects the tenant's prompt pack (app/services/prompt_pack.py) — see
+    CONTEXT.md's "Vertical" and ADR-011. Never raises, same rationale as
+    get_tenant_specialization above: a DB hiccup degrades to "no pack",
+    never breaks triage."""
+    try:
+        async with AsyncSessionLocal() as db:
+            row = (await db.execute(
+                text("SELECT vertical FROM tenants WHERE slug = :s"),
+                {"s": slug},
+            )).first()
+        return row.vertical if row else None
+    except Exception as exc:
+        logger.warning("tenant_vertical_lookup_failed slug=%s err=%s", slug, exc)
+        return None
