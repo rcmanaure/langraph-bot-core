@@ -17,7 +17,7 @@ from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.services import human_control
 from app.services.llm import get_chat_llm
 from app.services.not_offered import record_denial
-from app.services.rag import cap_chunks_to_tokens, token_counter
+from app.services.rag import cap_chunks_to_tokens
 from app.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -418,9 +418,9 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
 
     trimmed = trim_messages(
         state["messages"],
-        max_tokens=settings.history_max_tokens,
+        max_tokens=settings.history_max_messages,
         strategy="last",
-        token_counter=token_counter,
+        token_counter=len,
         allow_partial=False,
         include_system=True,
     )

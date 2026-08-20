@@ -565,7 +565,7 @@ async def test_generate_uses_fallback_llm_on_primary_failure():
     with patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value=TENANT_CTX)), \
          patch("app.graph.nodes.generate.get_chat_llm", side_effect=llm_factory), \
          patch("app.graph.nodes.generate.settings") as mock_settings:
-        mock_settings.history_max_tokens = 8000
+        mock_settings.history_max_messages = 7
         mock_settings.openai_fallback_model = "deepseek/fallback"
         mock_settings.retrieval_max_tokens = 3000
         result = await generate(state)

@@ -73,7 +73,7 @@ async def match_not_offered_term(tenant_slug: str, message: str) -> bool:
         keywords = [normalize_for_comparison(k) for k in (row["keywords"] or []) if k]
         if not keywords:
             continue
-        hits = (re.search(rf"\b{re.escape(kw)}\b", normalized_message) is not None for kw in keywords)
+        hits = (re.search(rf"(?<!\w){re.escape(kw)}(?!\w)", normalized_message) is not None for kw in keywords)
         matched = all(hits) if row["match_mode"] == "all" else any(hits)
         if matched:
             return True

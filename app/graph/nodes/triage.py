@@ -16,7 +16,6 @@ from app.services.canned import match_canned_answer
 from app.services.llm import get_triage_llm
 from app.services.not_offered_terms import match_not_offered_term
 from app.services.prompt_pack import get_rag_examples
-from app.services.rag import token_counter
 from app.services.tenant_context import get_tenant_vertical
 from app.state import AgentState
 
@@ -169,9 +168,9 @@ async def triage(state: AgentState) -> dict:
 
     trimmed = trim_messages(
         state["messages"],
-        max_tokens=settings.history_max_tokens,
+        max_tokens=settings.history_max_messages,
         strategy="last",
-        token_counter=token_counter,
+        token_counter=len,
         allow_partial=False,
         include_system=True,
     )
