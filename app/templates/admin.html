@@ -373,6 +373,17 @@ details.collapsible .details-body { padding: 0 var(--space-4) var(--space-4); }
 .staff-row:first-child { border-top: none; }
 .staff-row .mono { flex: 1; color: var(--fg-2); }
 
+/* ── Canned answers ───────────────────────────────────────────────── */
+.canned-list { display: flex; flex-direction: column; margin-top: var(--space-2); }
+.canned-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) 0; border-top: 1px solid var(--border); }
+.canned-row:first-child { border-top: none; }
+.canned-body { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.canned-kw-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.kw-chip { font-size: 11px; padding: 3px 9px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: rgba(255,255,255,0.02); color: var(--muted); font-family: var(--font-mono); }
+.mm-badge { font-size: 10px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 4px; background: rgba(94,106,210,0.14); color: #a7b0ff; }
+.canned-answer-text { font-size: var(--text-sm); color: var(--fg-2); line-height: 1.5; }
+.canned-actions { display: flex; gap: 6px; flex: none; }
+
 /* ── Add tenant form ──────────────────────────────────────────────── */
 .add-form { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-5); margin-top: var(--space-5); animation: expandIn var(--motion-base) var(--ease-standard); }
 .add-form h3 { font-size: var(--text-base); font-weight: 590; color: var(--fg); margin-bottom: var(--space-4); }
@@ -581,6 +592,7 @@ async function verifyKey(key) {
 const state = {
   activeTab: 'overview',
   tenants: [],
+  verticals: [],
   tenantsLoading: false,
   tenantsError: '',
   tenantsSearch: '',
@@ -607,6 +619,14 @@ const state = {
   staffError: {},
   staffAdding: {},
   staffAddError: {},
+
+  canned: {},
+  cannedLoading: {},
+  cannedError: {},
+  cannedFormOpen: {},
+  cannedEditingId: {},
+  cannedFormError: {},
+  cannedSaving: {},
 
   docsTenant: '',
   docsFile: null,
@@ -775,10 +795,26 @@ function updateOperatorNavCount() {
 
 /* ── Bootstrap ────────────────────────────────────────────────────── */
 async function bootstrap() {
-  await fetchTenants();
+  await Promise.all([fetchTenants(), fetchVerticals()]);
   if (!state.docsTenant && state.tenants.length) state.docsTenant = state.tenants[0].slug;
   render();
   fetchOverview();
+}
+
+async function fetchVerticals() {
+  try {
+    state.verticals = await api('/admin/verticals');
+  } catch {
+    state.verticals = [];
+  }
+}
+
+// Known packs plus whatever the tenant already has (so a legacy/manual
+// value never silently disappears from its own dropdown), blank-first.
+function verticalOptions(current) {
+  const set = new Set(state.verticals);
+  if (current) set.add(current);
+  return [''].concat([...set].sort());
 }
 
 async function fetchTenants() {
@@ -1009,6 +1045,11 @@ function renderExpandPanel(t) {
   <div class="panel-section">
     <div class="panel-section-title">Configuration</div>
     <div class="field-grid">
+      <div class="field full"><label>Vertical <span class="hint">selects a shared prompt-vocabulary pack from <code class="mono">prompt_packs</code> — blank means no pack. Every tenant defaults to <code class="mono">medical_lab</code> at the database level until this is set explicitly (#48)</span></label>
+        <select class="mono" data-field="vertical">
+          ${verticalOptions(t.vertical).map(v => `<option value="${esc(v)}" ${v===(t.vertical||'')?'selected':''}>${v ? esc(v) : '— no pack —'}</option>`).join('')}
+        </select>
+      </div>
       <div class="field"><label>Plan</label>
         <select data-field="plan">
           ${['free','basic','pro'].map(p=>`<option value="${p}" ${t.plan===p?'selected':''}>${p}</option>`).join('')}
@@ -1048,6 +1089,9 @@ function renderExpandPanel(t) {
   </details>
   <div class="panel-section" data-od-id="staff-section-${esc(t.slug)}">
     ${renderStaffSection(t)}
+  </div>
+  <div class="panel-section" data-od-id="canned-section-${esc(t.slug)}">
+    ${renderCannedSection(t)}
   </div>
   <div class="panel-actions">
     ${saveErr ? `<div class="inline-error show">${ic('alert')}<span>${esc(saveErr)}</span></div>` : ''}
@@ -1118,6 +1162,56 @@ function renderStaffSection(t) {
   <button class="btn btn-ghost btn-sm" data-action="add-staff" data-slug="${esc(t.slug)}" data-od-id="add-staff-${esc(t.slug)}" ${adding?'disabled':''}>${adding?'Adding…':'Add staff member'}</button>`;
 }
 
+function renderCannedSection(t) {
+  const list = state.canned[t.slug] || [];
+  const loading = state.cannedLoading[t.slug];
+  const err = state.cannedError[t.slug];
+  const formOpen = state.cannedFormOpen[t.slug];
+  const editingId = state.cannedEditingId[t.slug];
+  const editing = editingId ? list.find(c => c.id === editingId) : null;
+  const formErr = state.cannedFormError[t.slug];
+  const saving = state.cannedSaving[t.slug];
+  return `
+  <div class="panel-section-title">Canned answers <span class="hint">keyword-triggered verbatim replies, matched before any model call</span></div>
+  ${loading ? `<div class="empty-state">Loading canned answers…</div>` : ''}
+  ${!loading && err ? `<div class="empty-state">${esc(err)}</div>` : ''}
+  ${!loading && !err && list.length === 0 ? `<div class="empty-state">No canned answers yet.</div>` : ''}
+  ${!loading && !err && list.length ? `<div class="canned-list" data-od-id="canned-list-${esc(t.slug)}">${list.map(c => `
+    <div class="canned-row" data-od-id="canned-row-${c.id}">
+      <div class="canned-body">
+        <div class="canned-kw-row">
+          <span class="mm-badge">${esc((c.match_mode || 'any').toUpperCase())}</span>
+          ${c.keywords.map(k => `<span class="kw-chip">${esc(k)}</span>`).join('')}
+        </div>
+        <div class="canned-answer-text">${esc(c.answer)}</div>
+      </div>
+      <div class="canned-actions">
+        <button class="btn btn-ghost btn-sm" data-action="canned-edit" data-slug="${esc(t.slug)}" data-id="${c.id}" data-od-id="canned-edit-${c.id}">Edit</button>
+        <button class="btn btn-danger-outline btn-sm" data-action="canned-remove" data-slug="${esc(t.slug)}" data-id="${c.id}" data-od-id="canned-remove-${c.id}">Remove</button>
+      </div>
+    </div>`).join('')}</div>` : ''}
+  ${formOpen ? `
+  <div class="add-form" data-od-id="canned-form-${esc(t.slug)}" style="margin-top:var(--space-4)">
+    <h3>${editing ? 'Edit canned answer' : 'New canned answer'}</h3>
+    ${formErr ? `<div class="inline-error show">${ic('alert')}<span>${esc(formErr)}</span></div>` : ''}
+    <div class="field-grid" style="grid-template-columns:1fr 140px">
+      <div class="field"><label>Keywords <span class="hint">comma-separated</span></label><input type="text" class="mono" data-field="canned-keywords" value="${esc((editing?.keywords || []).join(', '))}" placeholder="horario, hora, atienden" ${saving?'disabled':''}></div>
+      <div class="field"><label>Match mode</label>
+        <select data-field="canned-match-mode" ${saving?'disabled':''}>
+          <option value="any" ${!editing || editing.match_mode==='any'?'selected':''}>any</option>
+          <option value="all" ${editing && editing.match_mode==='all'?'selected':''}>all</option>
+        </select>
+      </div>
+    </div>
+    <div class="field full" style="margin-top:var(--space-4)"><label>Answer</label><textarea data-field="canned-answer" placeholder="Atendemos de lunes a viernes, 8:00 a 17:00." ${saving?'disabled':''}>${esc(editing?.answer || '')}</textarea></div>
+    <div class="panel-actions" style="padding-top:var(--space-4)">
+      <button class="btn btn-ghost btn-sm" data-action="canned-cancel-form" data-slug="${esc(t.slug)}" ${saving?'disabled':''}>Cancel</button>
+      <button class="btn btn-primary btn-sm" data-action="canned-save" data-slug="${esc(t.slug)}" data-od-id="canned-save-${esc(t.slug)}" ${saving?'disabled':''}>${saving ? (editing?'Saving…':'Adding…') : (editing?'Save':'Add')}</button>
+    </div>
+  </div>` : `
+  <button class="btn btn-ghost btn-sm" style="margin-top:var(--space-3)" data-action="canned-add-open" data-slug="${esc(t.slug)}" data-od-id="canned-add-btn-${esc(t.slug)}">${ic('plus')} Add canned answer</button>`}`;
+}
+
 function renderAddTenantForm() {
   if (state.addTenantResult) {
     const r = state.addTenantResult;
@@ -1147,6 +1241,11 @@ function renderAddTenantForm() {
       <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea id="new-specialization-context" maxlength="8000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer..." ${state.addTenantSaving?'disabled':''}></textarea></div>
       <div class="field full"><label>Greeting message <span class="hint">exact canned reply to a bare "hola" — blank uses the default. *bold* and _italic_ work on both WhatsApp and Telegram</span></label><textarea id="new-greeting-message" placeholder="Gracias por comunicarte con..." ${state.addTenantSaving?'disabled':''}></textarea></div>
       <div class="field full"><label>Results turnaround <span class="hint">appended to any priced reply — blank omits the note entirely</span></label><input type="text" id="new-results-turnaround" placeholder="3 a 5 días hábiles" ${state.addTenantSaving?'disabled':''}></div>
+      <div class="field full"><label>Vertical <span class="hint">selects a shared prompt-vocabulary pack from prompt_packs — blank means no pack, not medical_lab</span></label>
+        <select class="mono" id="new-vertical" ${state.addTenantSaving?'disabled':''}>
+          ${verticalOptions('').map(v => `<option value="${esc(v)}">${v ? esc(v) : '— no pack —'}</option>`).join('')}
+        </select>
+      </div>
     </div>
     <div class="panel-actions">
       <button class="btn btn-ghost" data-action="toggle-add-tenant" ${state.addTenantSaving?'disabled':''}>Cancel</button>
@@ -1313,6 +1412,7 @@ function onMainClick(e) {
       state.expandedTenant = opening ? rowSlug : null;
       render();
       if (opening && !state.staff[rowSlug]) fetchStaff(rowSlug);
+      if (opening && !state.canned[rowSlug]) fetchCanned(rowSlug);
       break;
     }
     case 'collapse':
@@ -1389,6 +1489,30 @@ function onMainClick(e) {
       break;
     case 'remove-staff':
       removeStaffMember(slug, Number(actionEl.dataset.staffId));
+      break;
+    case 'canned-add-open':
+      state.cannedFormOpen[slug] = true;
+      state.cannedEditingId[slug] = null;
+      delete state.cannedFormError[slug];
+      render();
+      break;
+    case 'canned-edit':
+      state.cannedFormOpen[slug] = true;
+      state.cannedEditingId[slug] = Number(actionEl.dataset.id);
+      delete state.cannedFormError[slug];
+      render();
+      break;
+    case 'canned-cancel-form':
+      state.cannedFormOpen[slug] = false;
+      state.cannedEditingId[slug] = null;
+      delete state.cannedFormError[slug];
+      render();
+      break;
+    case 'canned-save':
+      saveCannedAnswer(slug);
+      break;
+    case 'canned-remove':
+      removeCannedAnswer(slug, Number(actionEl.dataset.id));
       break;
     case 'jobs-status-filter':
       state.jobsStatusFilter = actionEl.dataset.value;
@@ -1504,6 +1628,7 @@ async function saveTenant(slug) {
     results_turnaround: get('results_turnaround').value.trim(),
     catalog_is_closed: get('catalog_is_closed').checked,
     not_offered_message: get('not_offered_message').value.trim(),
+    vertical: get('vertical').value.trim(),
     active: get('active').checked,
   };
   const botToken = get('bot_token').value.trim();
@@ -1534,6 +1659,7 @@ async function saveTenant(slug) {
       contact_url: data.contact_url, tone_description: data.tone_description, active: data.active,
       greeting_message: data.greeting_message, results_turnaround: data.results_turnaround,
       catalog_is_closed: data.catalog_is_closed, not_offered_message: data.not_offered_message,
+      vertical: data.vertical,
     });
     state.saveLoading.delete(slug);
     state.expandedTenant = null;
@@ -1560,6 +1686,7 @@ async function createTenant() {
   const contact = document.getElementById('new-contact').value.trim();
   const greeting = document.getElementById('new-greeting-message').value.trim();
   const resultsTurnaround = document.getElementById('new-results-turnaround').value.trim();
+  const vertical = document.getElementById('new-vertical').value.trim();
   if (!slug || !botToken || !webhookSecret) {
     state.addTenantError = 'Slug, bot token, and webhook secret are required.';
     render();
@@ -1577,6 +1704,7 @@ async function createTenant() {
         expertise_area: expertise, specialization_context: specialization, contact_url: contact,
         greeting_message: greeting || null,
         results_turnaround: resultsTurnaround || null,
+        vertical: vertical || null,
       }),
     });
     state.addTenantResult = { slug: data.slug, api_key: data.api_key };
@@ -1618,6 +1746,7 @@ async function deleteTenant(slug) {
     delete state.regenState[slug];
     delete state.deleteState[slug];
     delete state.staff[slug];
+    delete state.canned[slug];
     state.expandedTenant = null;
     render();
     toast(`Tenant "${slug}" deleted.`, 'success');
@@ -1677,6 +1806,78 @@ async function removeStaffMember(slug, staffId) {
     state.staff[slug] = (state.staff[slug] || []).filter(s => s.id !== staffId);
     render();
     toast('Staff member removed.', 'success');
+  } catch (err) {
+    toast(`Remove failed: ${err.message}`, 'error');
+  }
+}
+
+/* ── Canned answers actions ───────────────────────────────────────── */
+async function fetchCanned(slug) {
+  state.cannedLoading[slug] = true;
+  state.cannedError[slug] = '';
+  render();
+  try {
+    state.canned[slug] = await api(`/admin/tenants/${encodeURIComponent(slug)}/canned-answers`);
+  } catch (err) {
+    state.cannedError[slug] = err.message;
+    state.canned[slug] = [];
+  }
+  state.cannedLoading[slug] = false;
+  render();
+}
+
+async function saveCannedAnswer(slug) {
+  const panel = document.querySelector(`[data-od-id="canned-form-${CSS.escape(slug)}"]`);
+  const keywords = panel.querySelector('[data-field="canned-keywords"]').value
+    .split(',').map(k => k.trim()).filter(Boolean);
+  const matchMode = panel.querySelector('[data-field="canned-match-mode"]').value;
+  const answer = panel.querySelector('[data-field="canned-answer"]').value.trim();
+  if (keywords.length === 0) {
+    state.cannedFormError[slug] = 'Add at least one keyword.';
+    render();
+    return;
+  }
+  if (!answer) {
+    state.cannedFormError[slug] = 'Answer is required.';
+    render();
+    return;
+  }
+
+  const editingId = state.cannedEditingId[slug];
+  state.cannedSaving[slug] = true;
+  delete state.cannedFormError[slug];
+  render();
+  try {
+    if (editingId) {
+      await api(`/admin/tenants/${encodeURIComponent(slug)}/canned-answers/${editingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords, match_mode: matchMode, answer }),
+      });
+    } else {
+      await api(`/admin/tenants/${encodeURIComponent(slug)}/canned-answers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords, match_mode: matchMode, answer }),
+      });
+    }
+    await fetchCanned(slug);
+    state.cannedFormOpen[slug] = false;
+    state.cannedEditingId[slug] = null;
+    toast(editingId ? 'Canned answer updated.' : 'Canned answer added.', 'success');
+  } catch (err) {
+    state.cannedFormError[slug] = err.message;
+  }
+  state.cannedSaving[slug] = false;
+  render();
+}
+
+async function removeCannedAnswer(slug, id) {
+  try {
+    await api(`/admin/tenants/${encodeURIComponent(slug)}/canned-answers/${id}`, { method: 'DELETE' });
+    state.canned[slug] = (state.canned[slug] || []).filter(c => c.id !== id);
+    render();
+    toast('Canned answer removed.', 'success');
   } catch (err) {
     toast(`Remove failed: ${err.message}`, 'error');
   }

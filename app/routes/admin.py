@@ -43,11 +43,20 @@ async def list_tenants(_: None = Depends(verify_operator_key)):
             text("""
                 SELECT id, slug, expertise_area, tone_description, specialization_context,
                        contact_url, greeting_message, results_turnaround, catalog_is_closed,
-                       not_offered_message, plan, active, created_at
+                       not_offered_message, plan, active, vertical, created_at
                   FROM tenants ORDER BY created_at DESC
             """)
         )
         return [dict(r._mapping) for r in rows.fetchall()]
+
+
+@router.get("/verticals")
+async def list_verticals(_: None = Depends(verify_operator_key)):
+    """Known vertical values -- backs the admin UI's Vertical dropdown so it
+    reflects actual prompt_packs rows instead of a hardcoded guess (#48)."""
+    async with AsyncSessionLocal() as db:
+        rows = await db.execute(text("SELECT vertical FROM prompt_packs ORDER BY vertical"))
+        return [r[0] for r in rows.fetchall()]
 
 
 class TenantCreate(BaseModel):
@@ -69,6 +78,12 @@ class TenantCreate(BaseModel):
     catalog_is_closed: bool = False
     not_offered_message: str | None = None
     plan: str = "free"
+    # Nullable, defaults to None -- NOT the column's server_default of
+    # 'medical_lab'. That server_default exists only to backfill sp-labs
+    # (today's only tenant); a new tenant created through this API always
+    # gets an explicit value here, so it never silently inherits sp-labs's
+    # vocabulary pack by omission (#48).
+    vertical: str | None = None
 
 
 @router.post("/tenants", status_code=201)
@@ -89,11 +104,13 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
                 INSERT INTO tenants
                     (slug, api_key_hash, webhook_secret, bot_token, plan,
                      expertise_area, tone_description, specialization_context, contact_url,
-                     greeting_message, results_turnaround, catalog_is_closed, not_offered_message, active)
+                     greeting_message, results_turnaround, catalog_is_closed, not_offered_message,
+                     vertical, active)
                 VALUES
                     (:slug, :api_key_hash, :webhook_secret, :bot_token, :plan,
                      :expertise_area, :tone_description, :specialization_context, :contact_url,
-                     :greeting_message, :results_turnaround, :catalog_is_closed, :not_offered_message, true)
+                     :greeting_message, :results_turnaround, :catalog_is_closed, :not_offered_message,
+                     :vertical, true)
             """),
             {
                 "slug": body.slug,
@@ -109,6 +126,7 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
                 "results_turnaround": body.results_turnaround,
                 "catalog_is_closed": body.catalog_is_closed,
                 "not_offered_message": body.not_offered_message,
+                "vertical": body.vertical or None,
             },
         )
         await db.commit()
@@ -126,6 +144,7 @@ class TenantPatch(BaseModel):
     results_turnaround: str | None = None
     catalog_is_closed: bool | None = None
     not_offered_message: str | None = None
+    vertical: str | None = None
     active: bool | None = None
     # Credential fields — only updated when non-empty string is provided
     bot_token: str | None = None
@@ -181,6 +200,11 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
             # Nullable -- NULL falls back to generate.py's vertical-neutral
             # _NOT_OFFERED_MSG constant (#51).
             t.not_offered_message = body.not_offered_message or None
+        if "vertical" in fields:
+            # Nullable, same clear-to-NULL rationale as greeting_message
+            # above -- NULL means "no prompt pack" (get_rag_examples degrades
+            # to []), not the string "medical_lab" (#48).
+            t.vertical = body.vertical or None
         if "active" in fields:
             t.active = body.active
         if "webhook_secret" in fields and body.webhook_secret:
@@ -236,6 +260,7 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
         "results_turnaround": t.results_turnaround,
         "catalog_is_closed": t.catalog_is_closed,
         "not_offered_message": t.not_offered_message,
+        "vertical": t.vertical,
         "active": t.active,
         "webhook_registered": webhook_registered,
     }
