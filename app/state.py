@@ -27,3 +27,13 @@ class AgentState(TypedDict):
     # it explicitly (never omits the key) so it cannot survive past the one
     # turn it describes. See ADR-009 / #38.
     awaiting_confirmation: NotRequired[bool]
+    # Closed-world not-offered verdict (#49/ADR-010): True only when the
+    # tenant is catalog_is_closed AND both signals (lexical catalog miss,
+    # similarity floor miss) agree AND query expansion actually ran on
+    # expansion-grade tenant text. Computed once in retrieve() (which
+    # already holds the expanded query and chunk pool) and read by
+    # generate() — see retrieve.py's not_offered_verdict(). Always set
+    # explicitly by retrieve() (never omitted), same discipline as
+    # awaiting_confirmation above, so a prior turn's True can't leak
+    # forward once retrieve() re-runs for a new question.
+    not_offered_verdict: NotRequired[bool]

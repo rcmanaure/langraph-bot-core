@@ -43,7 +43,7 @@ async def test_retrieve_no_human_message_skips_db_entirely():
         result = await retrieve(state)
 
     mock_session_local.assert_not_called()
-    assert result == {"retrieved_chunks": []}
+    assert result == {"retrieved_chunks": [], "not_offered_verdict": False}
 
 
 @pytest.mark.asyncio
@@ -56,6 +56,7 @@ async def test_retrieve_chains_hybrid_search_rerank_and_token_cap():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=raw_chunks)) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=reranked)) as mock_rerank,
         patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=capped)) as mock_cap,
@@ -75,7 +76,7 @@ async def test_retrieve_chains_hybrid_search_rerank_and_token_cap():
     # cap_chunks_to_tokens must receive rerank_chunks' output (not the raw
     # hybrid-search results) and the configured token budget.
     mock_cap.assert_called_once_with(reranked, settings.retrieval_max_tokens)
-    assert result == {"retrieved_chunks": capped}
+    assert result == {"retrieved_chunks": capped, "not_offered_verdict": False}
 
 
 @pytest.mark.asyncio
@@ -103,6 +104,7 @@ async def test_retrieve_location_question_inserts_address_chunk_cut_by_rerank():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(side_effect=_fake_retrieve_chunks)),
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=reranked)),
     ):
@@ -122,6 +124,7 @@ async def test_retrieve_location_question_does_not_duplicate_an_already_survivin
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[address_chunk])),
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=reranked)),
     ):
@@ -137,6 +140,7 @@ async def test_retrieve_non_location_question_never_runs_the_location_probe():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
     ):
@@ -157,6 +161,7 @@ async def test_retrieve_uses_previous_question_on_bare_confirmation():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
         patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
@@ -179,6 +184,7 @@ async def test_retrieve_uses_previous_question_on_bare_rejection():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
         patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
@@ -200,6 +206,7 @@ async def test_retrieve_does_not_anchor_a_negative_word_inside_a_real_question()
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
         patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
@@ -224,6 +231,7 @@ async def test_retrieve_two_bare_rejections_in_a_row_anchor_to_the_original_ques
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
         patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
@@ -242,6 +250,7 @@ async def test_retrieve_lone_rejection_has_nothing_to_anchor_to():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
         patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
@@ -266,6 +275,7 @@ async def test_retrieve_rewrites_query_when_specialization_set():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="Patología")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.get_chat_llm", return_value=mock_llm),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
@@ -292,6 +302,7 @@ async def test_retrieve_rewrite_echoing_raw_query_does_not_duplicate_it():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="Patología")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.get_chat_llm", return_value=mock_llm),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
@@ -313,6 +324,7 @@ async def test_retrieve_rewrite_failure_falls_back_to_raw_query():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="Patología")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.get_chat_llm", return_value=mock_llm),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
@@ -343,6 +355,7 @@ async def test_retrieve_rewrite_timeout_falls_back_to_raw_query():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="Patología")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.graph.nodes.retrieve.get_chat_llm", return_value=mock_llm),
         patch("app.graph.nodes.retrieve._REWRITE_TIMEOUT_SECONDS", 0.05),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
@@ -376,3 +389,152 @@ def test_cache_key_differs_by_tenant_for_same_question():
     state_b = _state(tenant_id="other-tenant")
 
     assert cache_key(state_a) != cache_key(state_b)
+
+
+# ---------------------------------------------------------------------------
+# Closed-world not-offered verdict (#49/ADR-010) — plumbing only, no reply
+# change yet (that's #51). Covers: both signals miss, only one misses,
+# expansion timeout, expansion exception, expansion succeeds with nothing to
+# add.
+# ---------------------------------------------------------------------------
+
+def _mock_db_with_lexical_result(found: bool):
+    """found=True -> an item-type chunk lexically matches (no miss).
+    found=False -> no match (a miss)."""
+    result = MagicMock()
+    result.first.return_value = object() if found else None
+    db = _mock_db()
+    db.execute = AsyncMock(return_value=result)
+    return db
+
+
+async def _run_retrieve_closed_world(
+    similarities, lexical_found, catalog_is_closed=True,
+    specialization="jerga médica", expertise_area="", rewrite_result=("cuanto cuesta la biopsia", True),
+):
+    state = _state()
+    chunks = [{"content": "x", "similarity": s} for s in similarities] if similarities else []
+    db = _mock_db_with_lexical_result(lexical_found)
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value=specialization)),
+        patch(
+            "app.graph.nodes.retrieve.get_tenant_closed_world_context",
+            AsyncMock(return_value={"expertise_area": expertise_area, "catalog_is_closed": catalog_is_closed}),
+        ),
+        patch("app.graph.nodes.retrieve._rewrite_query", AsyncMock(return_value=rewrite_result)),
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=chunks)),
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=chunks)),
+    ):
+        return await retrieve(state)
+
+
+@pytest.mark.asyncio
+async def test_closed_world_verdict_true_when_both_signals_miss():
+    result = await _run_retrieve_closed_world(similarities=[0.1], lexical_found=False)
+    assert result["not_offered_verdict"] is True
+
+
+@pytest.mark.asyncio
+async def test_closed_world_verdict_false_when_only_similarity_misses():
+    """Lexical signal finds a match -> disagreement -> no denial (escalates
+    as today, per the two-signal rule)."""
+    result = await _run_retrieve_closed_world(similarities=[0.1], lexical_found=True)
+    assert result["not_offered_verdict"] is False
+
+
+@pytest.mark.asyncio
+async def test_closed_world_verdict_false_when_only_lexical_misses():
+    """Similarity is confirmed (above handoff_threshold) -> disagreement ->
+    no denial, even with a lexical miss."""
+    result = await _run_retrieve_closed_world(similarities=[0.9], lexical_found=False)
+    assert result["not_offered_verdict"] is False
+
+
+@pytest.mark.asyncio
+async def test_closed_world_verdict_false_when_tenant_not_closed():
+    """catalog_is_closed=False -> verdict never computed, both signals would
+    otherwise agree."""
+    result = await _run_retrieve_closed_world(similarities=[0.1], lexical_found=False, catalog_is_closed=False)
+    assert result["not_offered_verdict"] is False
+
+
+@pytest.mark.asyncio
+async def test_closed_world_verdict_false_when_expansion_timed_out():
+    """_rewrite_query's timeout path returns ran=False -- must block denial
+    even though both signals would otherwise agree, since the expanded
+    query never actually got a chance to find a synonym match."""
+    result = await _run_retrieve_closed_world(
+        similarities=[0.1], lexical_found=False, rewrite_result=("cuanto cuesta la biopsia", False),
+    )
+    assert result["not_offered_verdict"] is False
+
+
+@pytest.mark.asyncio
+async def test_closed_world_verdict_false_when_expansion_raised():
+    """Same as the timeout case -- an exception inside _rewrite_query is
+    already collapsed to ran=False by that function itself; this confirms
+    retrieve() honors that flag rather than re-deciding on its own."""
+    result = await _run_retrieve_closed_world(
+        similarities=[0.1], lexical_found=False, rewrite_result=("cuanto cuesta la biopsia", False),
+    )
+    assert result["not_offered_verdict"] is False
+
+
+@pytest.mark.asyncio
+async def test_closed_world_verdict_true_when_expansion_ran_but_added_nothing():
+    """Expansion completing with nothing to add (ran=True, query unchanged)
+    is NOT the same as never running -- the model looked, per ADR-010, so a
+    genuine two-signal miss still denies."""
+    result = await _run_retrieve_closed_world(
+        similarities=[0.1], lexical_found=False, rewrite_result=("cuanto cuesta la biopsia", True),
+    )
+    assert result["not_offered_verdict"] is True
+
+
+@pytest.mark.asyncio
+async def test_closed_world_verdict_false_when_not_expansion_grade():
+    """Neither specialization_context nor expertise_area set -> expansion
+    never even attempted (specialization is falsy, same skip as today) ->
+    not expansion-grade -> no denial regardless of what the signals say."""
+    result = await _run_retrieve_closed_world(
+        similarities=[0.1], lexical_found=False, specialization="", expertise_area="",
+    )
+    assert result["not_offered_verdict"] is False
+
+
+@pytest.mark.asyncio
+async def test_closed_world_verdict_uses_expertise_area_fallback_for_expansion_grade():
+    """specialization_context empty but expertise_area set, tenant is
+    catalog_is_closed -> the ADR-010 fallback chain kicks in, expansion runs
+    against expertise_area, and it counts as expansion-grade."""
+    result = await _run_retrieve_closed_world(
+        similarities=[0.1], lexical_found=False, specialization="", expertise_area="laboratorio clínico",
+    )
+    assert result["not_offered_verdict"] is True
+
+
+@pytest.mark.asyncio
+async def test_non_closed_tenant_expansion_gating_unchanged_when_specialization_empty():
+    """A non-closed tenant with empty specialization_context still skips
+    expansion entirely, even if expertise_area is set -- the fallback chain
+    is scoped to catalog_is_closed tenants only (#49's "no visible behavior
+    change" requirement for the other ~100% of tenants)."""
+    state = _state()
+    db = _mock_db_with_lexical_result(True)
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch(
+            "app.graph.nodes.retrieve.get_tenant_closed_world_context",
+            AsyncMock(return_value={"expertise_area": "laboratorio clínico", "catalog_is_closed": False}),
+        ),
+        patch("app.graph.nodes.retrieve._rewrite_query", AsyncMock()) as mock_rewrite,
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])),
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
+    ):
+        await retrieve(state)
+
+    mock_rewrite.assert_not_called()

@@ -3,6 +3,7 @@ import logging
 import re
 
 from langchain_core.messages import HumanMessage
+from sqlalchemy import text as sql_text
 
 from app.config import settings
 from app.db import AsyncSessionLocal
@@ -10,7 +11,7 @@ from app.schemas.retrieve import RewrittenQuery
 from app.services.llm import get_chat_llm
 from app.services.rag import cap_chunks_to_tokens, retrieve_chunks
 from app.services.rerank import rerank_chunks
-from app.services.tenant_context import get_tenant_specialization
+from app.services.tenant_context import get_tenant_closed_world_context, get_tenant_specialization
 from app.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,12 @@ LOCATION_RE = re.compile(
 # whatever chunk a tenant tagged with contact/address content, regardless of
 # how the user actually phrased the question.
 _LOCATION_PROBE_QUERY = "dirección ubicación teléfono contacto cómo llegar"
+
+# Last-resort expansion input for a catalog_is_closed tenant with neither
+# specialization_context nor expertise_area set (ADR-010) — contributes no
+# real synonyms, so it feeds retrieval only and can never itself make the
+# closed-world gate's expansion_grade True.
+_GENERIC_EXPANSION_FALLBACK = "negocio de productos o servicios"
 
 # Used by generate.py only (triage.py has its own separate word list --
 # _GREETING_PHRASE/_GREETING_CHAIN_RE there -- for a different purpose: an
@@ -157,14 +164,22 @@ Consulta del usuario: {query}
 """
 
 
-async def _rewrite_query(query: str, specialization: str) -> str:
+async def _rewrite_query(query: str, specialization: str) -> tuple[str, bool]:
     """LLM-based query expansion using the tenant's free-text specialization
     context — no hardcoded per-vertical glossary/synonym dict. Same
     primary/fallback shape as triage.py's structured-output call: any
     failure falls back to the raw query untouched, never blocks retrieval.
     Result is CONCATENATED to the original query, never replaces it, so a
     bad/hallucinated rewrite only adds noise instead of erasing the user's
-    actual words from the retrieval input."""
+    actual words from the retrieval input.
+
+    Returns (query, ran) — ran is True only for a call that actually
+    completed (even if it added nothing), False for a timeout or exception.
+    Needed by the closed-world denial gate (#49/ADR-010): "expansion added
+    nothing" and "expansion never ran" look identical from the returned
+    query alone, but only the former is safe to treat as "the model looked
+    and found nothing" — the latter must block a denial and fall through to
+    escalation instead."""
     llm = get_chat_llm()
     prompt = _REWRITE_PROMPT.format(specialization=specialization, query=query)
     try:
@@ -186,28 +201,59 @@ async def _rewrite_query(query: str, specialization: str) -> str:
         # instead of adding new terms (found live during /qa — a real
         # response, "cuanto cuesta X cuanto cuesta X").
         if not addition or addition.lower() == query.lower():
-            return query
-        return f"{query} {addition}"
+            return query, True
+        return f"{query} {addition}", True
     except Exception as exc:
         logger.warning("retrieve_rewrite_failed=%s using raw query", exc)
-        return query
+        return query, False
 
 
 async def retrieve(state: AgentState) -> dict:
     query = _last_human_query(state)
     if not query:
-        return {"retrieved_chunks": []}
+        return {"retrieved_chunks": [], "not_offered_verdict": False}
 
     # Vertical-agnostic: skipped entirely (zero extra cost/latency) for
     # tenants without a specialization_context — same no-op-when-empty rule
     # already used by generate.py/vision.py for this field.
     specialization = await get_tenant_specialization(state["tenant_id"])
-    if specialization:
-        query = await _rewrite_query(query, specialization)
+
+    # Second small lookup, only meaningful for a catalog_is_closed tenant —
+    # see get_tenant_closed_world_context's docstring for why this isn't
+    # folded into the specialization lookup above.
+    closed_world_ctx = await get_tenant_closed_world_context(state["tenant_id"])
+
+    # Expansion input, and whether it's "expansion-grade" for the
+    # closed-world gate below (ADR-010): specialization_context, falling
+    # back to expertise_area, falling back to a generic constant — the
+    # fallback tiers only kick in for a catalog_is_closed tenant, so a
+    # non-closed tenant's expansion gating (and thus its retrieved chunks)
+    # is byte-identical to before this feature existed.
+    expansion_input = specialization
+    expansion_grade = bool(specialization)
+    if closed_world_ctx["catalog_is_closed"] and not expansion_input:
+        if closed_world_ctx["expertise_area"]:
+            expansion_input = closed_world_ctx["expertise_area"]
+            expansion_grade = True
+        else:
+            expansion_input = _GENERIC_EXPANSION_FALLBACK
+            expansion_grade = False
+
+    expansion_ran = False
+    if expansion_input:
+        query, expansion_ran = await _rewrite_query(query, expansion_input)
 
     async with AsyncSessionLocal() as db:
         chunks = await retrieve_chunks(db, query, state["tenant_id"])
         chunks = await rerank_chunks(query, chunks, settings.top_k_results)
+
+        not_offered_verdict = False
+        if closed_world_ctx["catalog_is_closed"] and expansion_ran and expansion_grade:
+            similarities = [c["similarity"] for c in chunks if "similarity" in c]
+            similarity_miss = bool(similarities) and max(similarities) < settings.handoff_threshold
+            if similarity_miss:
+                not_offered_verdict = await _lexical_catalog_miss(db, state["tenant_id"], query)
+
         if LOCATION_RE.search(last_human_text(state) or ""):
             # After rerank, not before -- rerank is exactly the step that
             # cuts this chunk out for a compound query (see the module docs
@@ -215,7 +261,32 @@ async def retrieve(state: AgentState) -> dict:
             # let the same blended judgment discard it again.
             chunks = await _ensure_location_chunk(db, state["tenant_id"], chunks)
 
-    return {"retrieved_chunks": cap_chunks_to_tokens(chunks, settings.retrieval_max_tokens)}
+    return {
+        "retrieved_chunks": cap_chunks_to_tokens(chunks, settings.retrieval_max_tokens),
+        "not_offered_verdict": not_offered_verdict,
+    }
+
+
+# Item-type chunks only -- excludes faq/policy/service, which describe the
+# business rather than a specific offerable item, so their presence/absence
+# says nothing about whether a given study is offered (see ADR-010).
+_ITEM_CHUNK_TYPES = ("biopsy", "cytology", "protocol")
+
+
+async def _lexical_catalog_miss(db, namespace: str, query: str) -> bool:
+    """True when NO item-type chunk lexically matches the (expanded) query —
+    signal 1 of the closed-world denial's two-signal rule (#49/ADR-010).
+    Reuses the same content_tsv GIN index rag.py's hybrid search already
+    relies on; no new store."""
+    result = await db.execute(
+        sql_text(
+            "SELECT 1 FROM document_chunks "
+            "WHERE namespace = :ns AND chunk_type = ANY(:types) "
+            "AND content_tsv @@ websearch_to_tsquery('spanish', :q) LIMIT 1"
+        ),
+        {"ns": namespace, "types": list(_ITEM_CHUNK_TYPES), "q": query},
+    )
+    return result.first() is None
 
 
 async def _ensure_location_chunk(db, namespace: str, chunks: list[dict]) -> list[dict]:

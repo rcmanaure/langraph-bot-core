@@ -111,6 +111,7 @@ async def test_full_rag_flow_retrieves_reranks_and_answers():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
         patch("app.services.rag.settings.rerank_enabled", True),
         # top_k_results must be SMALLER than the candidate count, or
@@ -173,6 +174,7 @@ async def test_retrieval_and_rerank_spans_are_emitted():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
         patch("app.services.rag._tracer", test_tracer),
         patch("app.services.rag.settings.rerank_enabled", True),
@@ -219,6 +221,7 @@ async def test_rerank_http_failure_falls_back_but_graph_still_completes():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
         patch("app.services.rag.settings.rerank_enabled", True),
         patch("app.services.rag.settings.top_k_results", 1),
@@ -402,6 +405,7 @@ async def test_low_similarity_pool_escalates_through_the_compiled_graph():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
         patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
@@ -447,6 +451,7 @@ async def test_rejection_after_approximation_escalates_across_two_turns():
     with (
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=db)),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
         patch("app.services.rag.get_embeddings", return_value=_mock_embeddings()),
         patch("app.graph.nodes.triage.get_triage_llm", return_value=llm),
         patch("app.graph.nodes.generate.get_chat_llm", return_value=llm),
