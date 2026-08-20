@@ -171,7 +171,12 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
             # the meaningful "omit the note" state, not "".
             t.results_turnaround = body.results_turnaround or None
         if "catalog_is_closed" in fields:
-            t.catalog_is_closed = body.catalog_is_closed
+            # Column is NOT NULL (unlike the nullable fields around it) --
+            # an explicit `null` in the payload must not attempt a NULL
+            # write (same class of bug specialization_context's clear-to-""
+            # guard above fixes; found in /code-review). None coerces to
+            # False, the column's own default.
+            t.catalog_is_closed = bool(body.catalog_is_closed)
         if "not_offered_message" in fields:
             # Nullable -- NULL falls back to generate.py's vertical-neutral
             # _NOT_OFFERED_MSG constant (#51).

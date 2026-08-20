@@ -11,6 +11,12 @@ tenant. Nullable, no default -- NULL means "omit the note", not an invented
 generic turnaround, so a tenant without a meaningful one (or two labs with
 different turnarounds) aren't forced into the same line. Same
 short-label-vs-long-content split as greeting_message (0016).
+
+Backfills sp-labs (the only tenant whose priced replies carried the
+hardcoded note today) so this column's NULL default doesn't silently drop
+that note from production replies the moment this ships -- found in
+/code-review. Every other/future tenant stays NULL (no note) until an
+operator sets one.
 """
 
 from typing import Sequence, Union
@@ -27,6 +33,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.add_column("tenants", sa.Column("results_turnaround", sa.Text(), nullable=True))
+    op.execute(
+        "UPDATE tenants SET results_turnaround = '3 a 5 días hábiles' "
+        "WHERE slug = 'sp-labs' AND results_turnaround IS NULL"
+    )
 
 
 def downgrade() -> None:

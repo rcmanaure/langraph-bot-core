@@ -304,10 +304,12 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         content += tenant_ctx["contact_hint"]
         msg = AIMessage(content=content)
 
-        similarities = [c["similarity"] for c in chunks if "similarity" in c]
+        # Read from state, not re-derived from `chunks` here -- `chunks` is
+        # the post-token-cap list, which can drop rows retrieve() actually
+        # used to compute the verdict (found in /code-review).
         await record_denial(
             state["tenant_id"], state["thread_id"], last_human_text(state) or "",
-            max(similarities) if similarities else None,
+            state.get("not_offered_max_similarity"),
         )
         return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
 

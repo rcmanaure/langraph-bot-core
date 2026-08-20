@@ -37,6 +37,12 @@ class AgentState(TypedDict):
     # awaiting_confirmation above, so a prior turn's True can't leak
     # forward once retrieve() re-runs for a new question.
     not_offered_verdict: NotRequired[bool]
+    # Max similarity across the retrieved pool at the moment retrieve()
+    # computed not_offered_verdict — captured before cap_chunks_to_tokens
+    # runs so generate()'s audit write (#51) reports the exact value that
+    # drove the verdict, not a value re-derived from a possibly-shorter
+    # capped chunk list.
+    not_offered_max_similarity: NotRequired[float | None]
     # Set by triage() alongside triage_decision="canned" (#50) — the matched
     # tenant-authored reply text, read verbatim by generate()'s canned
     # branch. Only meaningful when triage_decision == "canned" for THIS

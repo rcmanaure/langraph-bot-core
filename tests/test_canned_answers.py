@@ -218,6 +218,19 @@ async def test_get_canned_answers_caches_within_ttl():
 
 
 @pytest.mark.asyncio
+async def test_get_canned_answers_query_is_deterministically_ordered():
+    """Without ORDER BY, Postgres gives no ordering guarantee, so
+    match_canned_answer()'s "first matching row" could flip between turns
+    for a tenant with an ambiguous multi-row match (found in /code-review)."""
+    sess = _session(execute=AsyncMock(return_value=_fetch_result([])))
+    with patch("app.services.canned.AsyncSessionLocal", return_value=_ctx(sess)):
+        await canned.get_canned_answers("acme")
+
+    executed_sql = str(sess.execute.await_args.args[0])
+    assert "ORDER BY" in executed_sql.upper()
+
+
+@pytest.mark.asyncio
 async def test_invalidate_forces_refetch_without_waiting_out_ttl():
     """The operator-facing guarantee (#47): editing a row is visible on the
     very next lookup, not after the TTL expires."""
@@ -272,6 +285,18 @@ async def test_match_returns_answer_for_any_mode_single_keyword_hit():
     with patch("app.services.canned.AsyncSessionLocal", return_value=_ctx(sess)):
         result = await canned.match_canned_answer("acme", "cual es su horario de atencion")
     assert result == "Lunes a viernes 9-5"
+
+
+@pytest.mark.asyncio
+async def test_match_does_not_fire_on_a_keyword_embedded_in_another_word():
+    """Word-boundary match, not raw substring -- "hora" must not fire on
+    "ahora" (found in /code-review)."""
+    sess = _session(execute=AsyncMock(
+        return_value=_fetch_result([_row(1, ["hora"], "any", "9-5")])
+    ))
+    with patch("app.services.canned.AsyncSessionLocal", return_value=_ctx(sess)):
+        result = await canned.match_canned_answer("acme", "podemos hablar ahora?")
+    assert result is None
 
 
 @pytest.mark.asyncio

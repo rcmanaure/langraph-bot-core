@@ -9,6 +9,7 @@ the old one" failure mode this feature exists to close).
 """
 
 import logging
+import re
 import time
 
 from sqlalchemy import text
@@ -31,6 +32,10 @@ def invalidate(tenant_slug: str) -> None:
 
 
 async def get_canned_answers(tenant_slug: str) -> list[dict]:
+    # ORDER BY id -- match_canned_answer() below returns the FIRST matching
+    # row, and Postgres gives no ordering guarantee without one, which would
+    # make an ambiguous two-keyword-set match nondeterministic across turns
+    # (found in /code-review). Same order the admin list endpoint already uses.
     now = time.monotonic()
     cached = _cache.get(tenant_slug)
     if cached and now - cached[0] < _TTL_SECONDS:
@@ -47,7 +52,7 @@ async def get_canned_answers(tenant_slug: str) -> list[dict]:
                 text(
                     "SELECT ca.id, ca.keywords, ca.match_mode, ca.answer "
                     "FROM canned_answers ca JOIN tenants t ON t.id = ca.tenant_id "
-                    "WHERE t.slug = :slug"
+                    "WHERE t.slug = :slug ORDER BY ca.id"
                 ),
                 {"slug": tenant_slug},
             )).fetchall()
@@ -67,8 +72,10 @@ async def match_canned_answer(tenant_slug: str, message: str) -> str | None:
     """First tenant row whose trigger matches `message`, or None. Normalized
     at match time (app.services.text_normalize), not at write time, so a
     normalizer improvement applies retroactively without a backfill.
-    Substring match, not whole-word — a keyword like "horario" should match
-    "cual es su horario de atencion", not just an exact single-word message."""
+    Word-boundary match, not raw substring — a keyword like "hora" must
+    match "a que hora abren" but not "hablar ahora" (found in /code-review);
+    still matches a multi-word phrase like "clases grupales" as a unit,
+    since \\b anchors on both ends of the whole keyword string."""
     answers = await get_canned_answers(tenant_slug)
     if not answers:
         return None
@@ -78,7 +85,7 @@ async def match_canned_answer(tenant_slug: str, message: str) -> str | None:
         keywords = [normalize_for_comparison(k) for k in (row["keywords"] or []) if k]
         if not keywords:
             continue
-        hits = (kw in normalized_message for kw in keywords)
+        hits = (re.search(rf"\b{re.escape(kw)}\b", normalized_message) is not None for kw in keywords)
         matched = all(hits) if row["match_mode"] == "all" else any(hits)
         if matched:
             return row["answer"]

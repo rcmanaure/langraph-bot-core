@@ -788,6 +788,7 @@ async def test_generate_not_offered_verdict_denies_with_zero_llm_call_and_audits
     """not_offered_verdict=True -> fixed denial reply, up to 3 nearest
     chunks, contact line, zero LLM calls, and an audit write (#51/ADR-010)."""
     base_state["not_offered_verdict"] = True
+    base_state["not_offered_max_similarity"] = 0.2
     base_state["retrieved_chunks"] = [
         {"content": "Biopsia de mama", "similarity": 0.2},
         {"content": "Biopsia de piel", "similarity": 0.1},

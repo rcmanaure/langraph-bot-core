@@ -43,7 +43,7 @@ async def test_retrieve_no_human_message_skips_db_entirely():
         result = await retrieve(state)
 
     mock_session_local.assert_not_called()
-    assert result == {"retrieved_chunks": [], "not_offered_verdict": False}
+    assert result == {"retrieved_chunks": [], "not_offered_verdict": False, "not_offered_max_similarity": None}
 
 
 @pytest.mark.asyncio
@@ -76,7 +76,7 @@ async def test_retrieve_chains_hybrid_search_rerank_and_token_cap():
     # cap_chunks_to_tokens must receive rerank_chunks' output (not the raw
     # hybrid-search results) and the configured token budget.
     mock_cap.assert_called_once_with(reranked, settings.retrieval_max_tokens)
-    assert result == {"retrieved_chunks": capped, "not_offered_verdict": False}
+    assert result == {"retrieved_chunks": capped, "not_offered_verdict": False, "not_offered_max_similarity": None}
 
 
 @pytest.mark.asyncio

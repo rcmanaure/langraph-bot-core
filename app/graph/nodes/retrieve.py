@@ -211,17 +211,19 @@ async def _rewrite_query(query: str, specialization: str) -> tuple[str, bool]:
 async def retrieve(state: AgentState) -> dict:
     query = _last_human_query(state)
     if not query:
-        return {"retrieved_chunks": [], "not_offered_verdict": False}
+        return {"retrieved_chunks": [], "not_offered_verdict": False, "not_offered_max_similarity": None}
 
     # Vertical-agnostic: skipped entirely (zero extra cost/latency) for
     # tenants without a specialization_context — same no-op-when-empty rule
     # already used by generate.py/vision.py for this field.
-    specialization = await get_tenant_specialization(state["tenant_id"])
-
-    # Second small lookup, only meaningful for a catalog_is_closed tenant —
-    # see get_tenant_closed_world_context's docstring for why this isn't
-    # folded into the specialization lookup above.
-    closed_world_ctx = await get_tenant_closed_world_context(state["tenant_id"])
+    #
+    # Run concurrently with the closed-world lookup below -- the two queries
+    # are independent (found in /code-review: awaiting them sequentially
+    # added a second full round trip's latency to every turn for no reason).
+    specialization, closed_world_ctx = await asyncio.gather(
+        get_tenant_specialization(state["tenant_id"]),
+        get_tenant_closed_world_context(state["tenant_id"]),
+    )
 
     # Expansion input, and whether it's "expansion-grade" for the
     # closed-world gate below (ADR-010): specialization_context, falling
@@ -248,9 +250,16 @@ async def retrieve(state: AgentState) -> dict:
         chunks = await rerank_chunks(query, chunks, settings.top_k_results)
 
         not_offered_verdict = False
+        # Captured here (pre-token-cap) rather than recomputed later from
+        # state["retrieved_chunks"] -- generate.py used to re-derive this
+        # from the ALREADY-CAPPED chunk list for its audit write, which can
+        # disagree with the value that actually drove the verdict below if
+        # cap_chunks_to_tokens dropped chunks (found in /code-review).
+        max_similarity = None
         if closed_world_ctx["catalog_is_closed"] and expansion_ran and expansion_grade:
             similarities = [c["similarity"] for c in chunks if "similarity" in c]
-            similarity_miss = bool(similarities) and max(similarities) < settings.handoff_threshold
+            max_similarity = max(similarities) if similarities else None
+            similarity_miss = max_similarity is not None and max_similarity < settings.handoff_threshold
             if similarity_miss:
                 not_offered_verdict = await _lexical_catalog_miss(db, state["tenant_id"], query)
 
@@ -264,6 +273,7 @@ async def retrieve(state: AgentState) -> dict:
     return {
         "retrieved_chunks": cap_chunks_to_tokens(chunks, settings.retrieval_max_tokens),
         "not_offered_verdict": not_offered_verdict,
+        "not_offered_max_similarity": max_similarity,
     }
 
 

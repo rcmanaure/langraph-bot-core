@@ -252,6 +252,25 @@ async def test_patch_catalog_is_closed_and_not_offered_message_round_trip():
 
 
 @pytest.mark.asyncio
+async def test_patch_catalog_is_closed_null_coerces_to_false_not_integrity_error():
+    """Column is NOT NULL -- an explicit `null` payload (the same shape the
+    admin UI's `|| null` clear pattern sends for nullable fields) must
+    coerce to False, not attempt a NULL write and surface a misleading 409
+    (found in /code-review)."""
+    app = make_app()
+    t = _tenant()
+    t.catalog_is_closed = True
+    sess = _session(execute=AsyncMock(return_value=_orm_result(t)))
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)), \
+         patch("app.routes.admin.set_webhook", new_callable=AsyncMock, return_value=None), \
+         patch("app.routes.admin.delete_webhook", new_callable=AsyncMock):
+        r = await req(app, "patch", "/admin/tenants/acme", json={"catalog_is_closed": None})
+    assert r.status_code == 200
+    assert r.json()["catalog_is_closed"] is False
+    assert t.catalog_is_closed is False
+
+
+@pytest.mark.asyncio
 async def test_patch_not_offered_message_null_clears_to_none():
     app = make_app()
     t = _tenant()
