@@ -1,4 +1,5 @@
 from app.models.base import Base
+from app.models.canned_answer import CannedAnswer
 from app.models.conversation_audit import ConversationAudit
 from app.models.document_chunk import DocumentChunk
 from app.models.embedding_cache import EmbeddingCache
@@ -21,4 +22,5 @@ __all__ = [
     "VisionCache",
     "StaffMember",
     "HumanControlMessage",
+    "CannedAnswer",
 ]

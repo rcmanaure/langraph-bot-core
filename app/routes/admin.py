@@ -16,9 +16,10 @@ from app.auth import verify_operator_key
 from app.channels.telegram import delete_webhook, get_webhook_info, set_webhook
 from app.config import settings
 from app.db import AsyncSessionLocal
-from app.models import IndexJob, IndexJobStatus, StaffMember, Tenant
+from app.models import CannedAnswer, IndexJob, IndexJobStatus, StaffMember, Tenant
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.policies import TenantPolicy
+from app.services import canned
 from app.services.indexer import run_index_job
 
 _bg_tasks: set[asyncio.Task] = set()
@@ -396,6 +397,108 @@ async def remove_staff(slug: str, staff_id: int, _: None = Depends(verify_operat
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="Staff member not found")
         await db.commit()
+
+
+# ── Canned answers ───────────────────────────────────────────────────────────
+# Tenant-authored, keyword-triggered verbatim replies for static non-priced
+# questions -- matched in triage.py before any model call (see CONTEXT.md's
+# "Canned answer" and #47/#50). Cached with a TTL (app/services/canned.py);
+# every write below invalidates that cache so the change is live immediately.
+
+class CannedAnswerCreate(BaseModel):
+    keywords: list[str] = Field(min_length=1)
+    match_mode: Literal["any", "all"] = "any"
+    answer: str = Field(min_length=1)
+
+
+class CannedAnswerPatch(BaseModel):
+    keywords: list[str] | None = Field(None, min_length=1)
+    match_mode: Literal["any", "all"] | None = None
+    answer: str | None = Field(None, min_length=1)
+
+
+@router.get("/tenants/{slug}/canned-answers")
+async def list_canned_answers(slug: str, _: None = Depends(verify_operator_key)):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        rows = await db.execute(
+            select(CannedAnswer).where(CannedAnswer.tenant_id == tenant_id).order_by(CannedAnswer.id)
+        )
+        return [
+            {"id": r.id, "keywords": r.keywords, "match_mode": r.match_mode, "answer": r.answer}
+            for r in rows.scalars().all()
+        ]
+
+
+@router.post("/tenants/{slug}/canned-answers", status_code=201)
+async def create_canned_answer(slug: str, body: CannedAnswerCreate, _: None = Depends(verify_operator_key)):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        row = CannedAnswer(
+            tenant_id=tenant_id, keywords=body.keywords, match_mode=body.match_mode, answer=body.answer,
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+
+    canned.invalidate(slug)
+    return {"id": row.id, "keywords": row.keywords, "match_mode": row.match_mode, "answer": row.answer}
+
+
+@router.patch("/tenants/{slug}/canned-answers/{answer_id}")
+async def patch_canned_answer(
+    slug: str, answer_id: int, body: CannedAnswerPatch, _: None = Depends(verify_operator_key),
+):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        # Scoped by tenant_id, not just answer_id — same guard as staff
+        # removal above: one tenant's numeric id must not reach another's row.
+        row = (await db.execute(
+            select(CannedAnswer).where(CannedAnswer.id == answer_id, CannedAnswer.tenant_id == tenant_id)
+        )).scalar_one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Canned answer not found")
+
+        fields = body.model_fields_set
+        if "keywords" in fields:
+            row.keywords = body.keywords
+        if "match_mode" in fields:
+            row.match_mode = body.match_mode
+        if "answer" in fields:
+            row.answer = body.answer
+
+        await db.commit()
+        await db.refresh(row)
+
+    canned.invalidate(slug)
+    return {"id": row.id, "keywords": row.keywords, "match_mode": row.match_mode, "answer": row.answer}
+
+
+@router.delete("/tenants/{slug}/canned-answers/{answer_id}", status_code=204)
+async def delete_canned_answer(slug: str, answer_id: int, _: None = Depends(verify_operator_key)):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        result = await db.execute(
+            text("DELETE FROM canned_answers WHERE id = :id AND tenant_id = :tid"),
+            {"id": answer_id, "tid": tenant_id},
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Canned answer not found")
+        await db.commit()
+
+    canned.invalidate(slug)
 
 
 # ── API key rotation ─────────────────────────────────────────────────────────
