@@ -249,3 +249,76 @@ async def test_get_canned_answers_refetches_after_ttl_expires():
         await canned.get_canned_answers("acme")
 
     sess2.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_canned_answers_db_failure_degrades_to_empty_list():
+    """A DB hiccup must never break the triage turn that calls this on every
+    non-shortcut message -- degrades to "no canned answers" instead."""
+    with patch("app.services.canned.AsyncSessionLocal", side_effect=ConnectionError("db down")):
+        result = await canned.get_canned_answers("acme")
+    assert result == []
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# app/services/canned.py — match_canned_answer (#50)
+# ═════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.asyncio
+async def test_match_returns_answer_for_any_mode_single_keyword_hit():
+    sess = _session(execute=AsyncMock(
+        return_value=_fetch_result([_row(1, ["horario"], "any", "Lunes a viernes 9-5")])
+    ))
+    with patch("app.services.canned.AsyncSessionLocal", return_value=_ctx(sess)):
+        result = await canned.match_canned_answer("acme", "cual es su horario de atencion")
+    assert result == "Lunes a viernes 9-5"
+
+
+@pytest.mark.asyncio
+async def test_match_ignores_accents_and_case():
+    sess = _session(execute=AsyncMock(
+        return_value=_fetch_result([_row(1, ["ubicación"], "any", "Av. Siempre Viva 742")])
+    ))
+    with patch("app.services.canned.AsyncSessionLocal", return_value=_ctx(sess)):
+        result = await canned.match_canned_answer("acme", "CUAL ES SU UBICACION")
+    assert result == "Av. Siempre Viva 742"
+
+
+@pytest.mark.asyncio
+async def test_match_any_mode_requires_only_one_keyword():
+    sess = _session(execute=AsyncMock(
+        return_value=_fetch_result([_row(1, ["horario", "hora"], "any", "9-5")])
+    ))
+    with patch("app.services.canned.AsyncSessionLocal", return_value=_ctx(sess)):
+        result = await canned.match_canned_answer("acme", "a que hora abren")
+    assert result == "9-5"
+
+
+@pytest.mark.asyncio
+async def test_match_all_mode_requires_every_keyword():
+    sess = _session(execute=AsyncMock(
+        return_value=_fetch_result([_row(1, ["tarjeta", "credito"], "all", "Aceptamos tarjeta de crédito")])
+    ))
+    with patch("app.services.canned.AsyncSessionLocal", return_value=_ctx(sess)):
+        no_match = await canned.match_canned_answer("acme", "aceptan tarjeta de debito")
+        full_match = await canned.match_canned_answer("acme", "aceptan tarjeta de credito")
+    assert no_match is None
+    assert full_match == "Aceptamos tarjeta de crédito"
+
+
+@pytest.mark.asyncio
+async def test_match_returns_none_when_no_trigger_matches():
+    sess = _session(execute=AsyncMock(
+        return_value=_fetch_result([_row(1, ["horario"], "any", "9-5")])
+    ))
+    with patch("app.services.canned.AsyncSessionLocal", return_value=_ctx(sess)):
+        result = await canned.match_canned_answer("acme", "cuanto cuesta la biopsia de pulmon")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_match_returns_none_for_tenant_with_no_canned_answers():
+    sess = _session(execute=AsyncMock(return_value=_fetch_result([])))
+    with patch("app.services.canned.AsyncSessionLocal", return_value=_ctx(sess)):
+        result = await canned.match_canned_answer("acme", "cualquier cosa")
+    assert result is None

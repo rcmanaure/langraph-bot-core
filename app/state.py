@@ -37,3 +37,8 @@ class AgentState(TypedDict):
     # awaiting_confirmation above, so a prior turn's True can't leak
     # forward once retrieve() re-runs for a new question.
     not_offered_verdict: NotRequired[bool]
+    # Set by triage() alongside triage_decision="canned" (#50) — the matched
+    # tenant-authored reply text, read verbatim by generate()'s canned
+    # branch. Only meaningful when triage_decision == "canned" for THIS
+    # turn; never read otherwise.
+    canned_answer: NotRequired[str]

@@ -287,6 +287,31 @@ async def test_non_default_vertical_prompt_pack_reaches_triage_prompt():
 
 
 @pytest.mark.asyncio
+async def test_canned_answer_short_circuits_with_zero_llm_retrieve_rerank_calls():
+    """A message matching a tenant's canned trigger returns the exact reply
+    text through the real compiled graph, with zero LLM/retrieve/rerank
+    calls (#50)."""
+    graph = build_graph(checkpointer=None)
+    state = _initial_state("cual es su horario")
+    llm = _mock_chat_llm("should not be used", triage_decision="rag")
+
+    with (
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock()) as mock_retrieve,
+        patch("app.services.rerank.httpx.AsyncClient") as mock_rerank_client,
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=llm) as mock_get_triage_llm,
+        patch("app.graph.nodes.triage.match_canned_answer", AsyncMock(return_value="Lunes a viernes 9-5")),
+        patch("app.graph.nodes.generate.AsyncSessionLocal", MagicMock(return_value=_mock_db_session())),
+    ):
+        result = await graph.ainvoke(state, config={"configurable": {"thread_id": state["thread_id"]}})
+
+    mock_retrieve.assert_not_called()
+    mock_rerank_client.assert_not_called()
+    mock_get_triage_llm.assert_not_called()
+    llm.ainvoke.assert_not_called()
+    assert result["answer"] == "Lunes a viernes 9-5"
+
+
+@pytest.mark.asyncio
 async def test_greeting_skips_retrieve_and_second_llm_call():
     graph = build_graph(checkpointer=None)
     state = _initial_state("hola buenas")

@@ -179,6 +179,38 @@ async def test_triage_no_human_message_defaults_rag(base_state):
 
 
 @pytest.mark.asyncio
+async def test_triage_canned_answer_shortcut_skips_llm(base_state):
+    """A message matching a tenant's canned trigger short-circuits to
+    triage_decision="canned" + the matched text, no LLM call (#50)."""
+    base_state["messages"] = [HumanMessage(content="cual es su horario")]
+
+    with (
+        patch("app.graph.nodes.triage.match_canned_answer", AsyncMock(return_value="Lunes a viernes 9-5")),
+        patch("app.graph.nodes.triage.get_triage_llm") as mock_get_llm,
+    ):
+        result = await triage(base_state)
+
+    mock_get_llm.assert_not_called()
+    assert result == {"triage_decision": "canned", "canned_answer": "Lunes a viernes 9-5"}
+
+
+@pytest.mark.asyncio
+async def test_triage_no_canned_match_falls_through_to_llm(base_state):
+    """No canned trigger matches -> unaffected, existing LLM classification
+    path runs exactly as before (#50's "tenant with no canned answers is
+    entirely unaffected" requirement)."""
+    mock_llm = _mock_triage_llm(decision="rag")
+
+    with (
+        patch("app.graph.nodes.triage.match_canned_answer", AsyncMock(return_value=None)),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm),
+    ):
+        result = await triage(base_state)
+
+    assert result == {"triage_decision": "rag"}
+
+
+@pytest.mark.asyncio
 async def test_triage_prompt_includes_pack_vocabulary_when_set(base_state):
     """A tenant with a non-default vertical's pack content appears in the
     prompt reaching the triage LLM (#48)."""
@@ -726,6 +758,29 @@ async def test_generate_greeting_falls_back_to_generic_vertical_neutral_message(
     assert "SP UNIDAD" not in result["answer"]
     assert "04148050764" not in result["answer"]
     assert result["answer"] == "Gracias por comunicarse con nosotros. ¿Cómo podemos ayudarle?"
+
+
+@pytest.mark.asyncio
+async def test_generate_canned_decision_returns_verbatim_text_no_llm_call(base_state):
+    """decision="canned" returns state["canned_answer"] verbatim with zero
+    LLM calls, same short-circuit shape as the greeting branch (#50)."""
+    base_state["triage_decision"] = "canned"
+    base_state["canned_answer"] = "Lunes a viernes 9-5"
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock()
+
+    with (
+        patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value={
+            "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
+        })),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+    ):
+        result = await generate(base_state, runtime=runtime)
+
+    mock_llm.ainvoke.assert_not_called()
+    assert result["answer"] == "Lunes a viernes 9-5"
+    assert result["awaiting_confirmation"] is False
 
 
 @pytest.mark.asyncio

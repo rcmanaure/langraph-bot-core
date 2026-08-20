@@ -7,6 +7,7 @@ from langchain_core.messages import SystemMessage, trim_messages
 from app.config import settings
 from app.graph.nodes.retrieve import LOCATION_RE, is_bare_rejection, last_human_text
 from app.schemas.triage import TriageDecision
+from app.services.canned import match_canned_answer
 from app.services.llm import get_triage_llm
 from app.services.prompt_pack import get_rag_examples
 from app.services.rag import token_counter
@@ -135,6 +136,11 @@ async def triage(state: AgentState) -> dict:
     if _GREETING_RE.match(last_human):
         logger.info("triage_regex_greeting_shortcut")
         return {"triage_decision": "greeting"}
+
+    canned = await match_canned_answer(state["tenant_id"], last_human)
+    if canned is not None:
+        logger.info("triage_canned_answer_shortcut")
+        return {"triage_decision": "canned", "canned_answer": canned}
 
     if LOCATION_RE.search(last_human):
         logger.info("triage_regex_location_shortcut")

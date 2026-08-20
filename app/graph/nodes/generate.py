@@ -276,6 +276,14 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         msg = AIMessage(content=content)
         return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
 
+    if decision == "canned":
+        # Verbatim tenant-authored reply, matched in triage.py before any
+        # model call (#50) -- same zero-LLM short-circuit shape as the
+        # greeting branch above.
+        content = state.get("canned_answer", "")
+        msg = AIMessage(content=content)
+        return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
+
     if is_catalog and not chunks:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
