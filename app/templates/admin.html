@@ -1022,10 +1022,17 @@ function renderExpandPanel(t) {
           <span class="toggle-label">${t.active?'Active':'Inactive'}</span>
         </div>
       </div>
+      <div class="field"><label>Catalog is closed <span class="hint">a study not in the catalog gets an automatic "we don't offer that" instead of escalating — see ADR-010 before enabling</span></label>
+        <div class="toggle-row" style="padding-top:6px">
+          <label class="toggle"><input type="checkbox" data-field="catalog_is_closed" ${t.catalog_is_closed?'checked':''}><span class="track"></span><span class="thumb"></span></label>
+          <span class="toggle-label">${t.catalog_is_closed?'Closed':'Open'}</span>
+        </div>
+      </div>
       <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea data-field="specialization_context" maxlength="8000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer...">${esc(t.specialization_context)}</textarea></div>
       <div class="field full"><label>Tone description</label><textarea data-field="tone_description" placeholder="e.g. warm and casual, or professional and clinical">${esc(t.tone_description)}</textarea></div>
       <div class="field full"><label>Greeting message <span class="hint">exact canned reply to a bare "hola" — blank uses the default. *bold* and _italic_ work on both WhatsApp and Telegram</span></label><textarea data-field="greeting_message" placeholder="Gracias por comunicarte con...">${esc(t.greeting_message)}</textarea></div>
       <div class="field full"><label>Results turnaround <span class="hint">appended to any priced reply — blank omits the note entirely</span></label><input type="text" data-field="results_turnaround" placeholder="3 a 5 días hábiles" value="${esc(t.results_turnaround)}"></div>
+      <div class="field full"><label>Not-offered message <span class="hint">reply used when catalog is closed and a study isn't offered — blank uses a generic default</span></label><textarea data-field="not_offered_message" placeholder="Lo sentimos, no realizamos ese estudio.">${esc(t.not_offered_message)}</textarea></div>
     </div>
   </div>
   <details class="collapsible">
@@ -1495,6 +1502,8 @@ async function saveTenant(slug) {
     tone_description: get('tone_description').value.trim(),
     greeting_message: get('greeting_message').value.trim(),
     results_turnaround: get('results_turnaround').value.trim(),
+    catalog_is_closed: get('catalog_is_closed').checked,
+    not_offered_message: get('not_offered_message').value.trim(),
     active: get('active').checked,
   };
   const botToken = get('bot_token').value.trim();
@@ -1524,6 +1533,7 @@ async function saveTenant(slug) {
       plan: data.plan, expertise_area: data.expertise_area, specialization_context: data.specialization_context,
       contact_url: data.contact_url, tone_description: data.tone_description, active: data.active,
       greeting_message: data.greeting_message, results_turnaround: data.results_turnaround,
+      catalog_is_closed: data.catalog_is_closed, not_offered_message: data.not_offered_message,
     });
     state.saveLoading.delete(slug);
     state.expandedTenant = null;

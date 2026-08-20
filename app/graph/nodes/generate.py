@@ -16,6 +16,7 @@ from app.messages import HUMAN_HANDOFF
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.services import human_control
 from app.services.llm import get_chat_llm
+from app.services.not_offered import record_denial
 from app.services.rag import cap_chunks_to_tokens, token_counter
 from app.state import AgentState
 
@@ -110,6 +111,10 @@ _OFF_TOPIC_MSG = "Lo siento, no puedo ayudarle con eso. Soy un asistente especia
 # #46). Every real tenant is expected to set its own `greeting_message`
 # column instead; this only covers a tenant that hasn't.
 _GREETING_MSG = "Gracias por comunicarse con nosotros. ¿Cómo podemos ayudarle?"
+
+# Vertical-neutral fallback for a closed-world denial (#51/ADR-010). Fixed
+# text, zero model calls — tenants.not_offered_message overrides it.
+_NOT_OFFERED_MSG = "Lo sentimos, no ofrecemos eso."
 
 _FALLBACK = "Lo siento, no pude procesar su consulta en este momento. Por favor intente de nuevo."
 
@@ -217,7 +222,7 @@ async def _load_tenant(slug: str) -> dict:
         row = (await db.execute(
             text(
                 "SELECT expertise_area, tone_description, contact_url, specialization_context, "
-                "greeting_message, results_turnaround FROM tenants WHERE slug = :s"
+                "greeting_message, results_turnaround, not_offered_message FROM tenants WHERE slug = :s"
             ),
             {"s": slug},
         )).first()
@@ -229,6 +234,7 @@ async def _load_tenant(slug: str) -> dict:
             "specialization_context": "",
             "greeting_message": None,
             "results_turnaround": None,
+            "not_offered_message": None,
         }
     expertise = row.expertise_area or "este negocio"
     contact_hint = (f"\nSi necesita más ayuda, contacte: {row.contact_url}" if row.contact_url else "")
@@ -239,6 +245,7 @@ async def _load_tenant(slug: str) -> dict:
         "contact_hint": contact_hint,
         "specialization_context": row.specialization_context or "",
         "results_turnaround": row.results_turnaround,
+        "not_offered_message": row.not_offered_message,
     }
 
 
@@ -282,6 +289,26 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         # greeting branch above.
         content = state.get("canned_answer", "")
         msg = AIMessage(content=content)
+        return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
+
+    if not is_catalog and not is_staff and state.get("not_offered_verdict"):
+        # Closed-world denial (#51/ADR-010) -- retrieve() already verified
+        # both signals agree and expansion ran on expansion-grade text.
+        # Fixed reply, zero model calls, and its own audit outcome distinct
+        # from an escalation or a normal answered turn.
+        message = tenant_ctx.get("not_offered_message") or _NOT_OFFERED_MSG
+        nearest_items = [c["content"] for c in chunks[:3] if c.get("content")]
+        content = message
+        if nearest_items:
+            content += "\n\n" + "\n".join(f"- {item}" for item in nearest_items)
+        content += tenant_ctx["contact_hint"]
+        msg = AIMessage(content=content)
+
+        similarities = [c["similarity"] for c in chunks if "similarity" in c]
+        await record_denial(
+            state["tenant_id"], state["thread_id"], last_human_text(state) or "",
+            max(similarities) if similarities else None,
+        )
         return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
 
     if is_catalog and not chunks:

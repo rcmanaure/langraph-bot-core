@@ -42,7 +42,8 @@ async def list_tenants(_: None = Depends(verify_operator_key)):
         rows = await db.execute(
             text("""
                 SELECT id, slug, expertise_area, tone_description, specialization_context,
-                       contact_url, greeting_message, results_turnaround, plan, active, created_at
+                       contact_url, greeting_message, results_turnaround, catalog_is_closed,
+                       not_offered_message, plan, active, created_at
                   FROM tenants ORDER BY created_at DESC
             """)
         )
@@ -65,6 +66,8 @@ class TenantCreate(BaseModel):
     contact_url: str = ""
     greeting_message: str | None = None
     results_turnaround: str | None = None
+    catalog_is_closed: bool = False
+    not_offered_message: str | None = None
     plan: str = "free"
 
 
@@ -86,11 +89,11 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
                 INSERT INTO tenants
                     (slug, api_key_hash, webhook_secret, bot_token, plan,
                      expertise_area, tone_description, specialization_context, contact_url,
-                     greeting_message, results_turnaround, active)
+                     greeting_message, results_turnaround, catalog_is_closed, not_offered_message, active)
                 VALUES
                     (:slug, :api_key_hash, :webhook_secret, :bot_token, :plan,
                      :expertise_area, :tone_description, :specialization_context, :contact_url,
-                     :greeting_message, :results_turnaround, true)
+                     :greeting_message, :results_turnaround, :catalog_is_closed, :not_offered_message, true)
             """),
             {
                 "slug": body.slug,
@@ -104,6 +107,8 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
                 "contact_url": body.contact_url,
                 "greeting_message": body.greeting_message,
                 "results_turnaround": body.results_turnaround,
+                "catalog_is_closed": body.catalog_is_closed,
+                "not_offered_message": body.not_offered_message,
             },
         )
         await db.commit()
@@ -119,6 +124,8 @@ class TenantPatch(BaseModel):
     contact_url: str | None = None
     greeting_message: str | None = None
     results_turnaround: str | None = None
+    catalog_is_closed: bool | None = None
+    not_offered_message: str | None = None
     active: bool | None = None
     # Credential fields — only updated when non-empty string is provided
     bot_token: str | None = None
@@ -163,6 +170,12 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
             # Nullable, same rationale as greeting_message above -- NULL is
             # the meaningful "omit the note" state, not "".
             t.results_turnaround = body.results_turnaround or None
+        if "catalog_is_closed" in fields:
+            t.catalog_is_closed = body.catalog_is_closed
+        if "not_offered_message" in fields:
+            # Nullable -- NULL falls back to generate.py's vertical-neutral
+            # _NOT_OFFERED_MSG constant (#51).
+            t.not_offered_message = body.not_offered_message or None
         if "active" in fields:
             t.active = body.active
         if "webhook_secret" in fields and body.webhook_secret:
@@ -216,6 +229,8 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
         "contact_url": t.contact_url,
         "greeting_message": t.greeting_message,
         "results_turnaround": t.results_turnaround,
+        "catalog_is_closed": t.catalog_is_closed,
+        "not_offered_message": t.not_offered_message,
         "active": t.active,
         "webhook_registered": webhook_registered,
     }

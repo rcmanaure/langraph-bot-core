@@ -232,6 +232,41 @@ async def test_patch_results_turnaround_null_clears_to_none():
 
 
 @pytest.mark.asyncio
+async def test_patch_catalog_is_closed_and_not_offered_message_round_trip():
+    """PATCH with catalog_is_closed/not_offered_message persists and returns
+    both (#51)."""
+    app = make_app()
+    t = _tenant()
+    sess = _session(execute=AsyncMock(return_value=_orm_result(t)))
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)), \
+         patch("app.routes.admin.set_webhook", new_callable=AsyncMock, return_value=None), \
+         patch("app.routes.admin.delete_webhook", new_callable=AsyncMock):
+        r = await req(app, "patch", "/admin/tenants/acme",
+                      json={"catalog_is_closed": True, "not_offered_message": "No lo hacemos."})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["catalog_is_closed"] is True
+    assert body["not_offered_message"] == "No lo hacemos."
+    assert t.catalog_is_closed is True
+    assert t.not_offered_message == "No lo hacemos."
+
+
+@pytest.mark.asyncio
+async def test_patch_not_offered_message_null_clears_to_none():
+    app = make_app()
+    t = _tenant()
+    t.not_offered_message = "vieja"
+    sess = _session(execute=AsyncMock(return_value=_orm_result(t)))
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)), \
+         patch("app.routes.admin.set_webhook", new_callable=AsyncMock, return_value=None), \
+         patch("app.routes.admin.delete_webhook", new_callable=AsyncMock):
+        r = await req(app, "patch", "/admin/tenants/acme", json={"not_offered_message": None})
+    assert r.status_code == 200
+    assert r.json()["not_offered_message"] is None
+    assert t.not_offered_message is None
+
+
+@pytest.mark.asyncio
 async def test_patch_response_never_contains_credentials():
     """Response MUST NOT expose bot_token, webhook_secret, or any WA credential."""
     app = make_app()
