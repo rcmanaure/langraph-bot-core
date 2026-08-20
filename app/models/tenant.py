@@ -36,6 +36,10 @@ class Tenant(Base):
     # Per-tenant override for the canned "greeting" triage reply (generate.py
     # _GREETING_MSG). NULL = fall back to the hardcoded default there.
     greeting_message = Column(Text, nullable=True)
+    # Appended to a priced reply ("Resultados: 3 a 5 días hábiles"). NULL =
+    # omit the note entirely -- no invented turnaround for a tenant that
+    # hasn't set one (see generate.py's _build_results_note_rule, #46).
+    results_turnaround = Column(Text, nullable=True)
     example_questions = Column(JSON, nullable=True)
     web_search_enabled = Column(Boolean, default=False, server_default="false")
     doc_structure_summary = Column(Text, nullable=True)

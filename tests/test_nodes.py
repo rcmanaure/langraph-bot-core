@@ -671,6 +671,75 @@ async def test_generate_omits_specialization_block_when_absent(base_state):
     assert "Contexto de especialización" not in system_content
 
 
+@pytest.mark.asyncio
+async def test_generate_greeting_falls_back_to_generic_vertical_neutral_message(base_state):
+    """A tenant with no greeting_message override gets the code-level
+    default — which must name no specific tenant's business facts (#46)."""
+    base_state["triage_decision"] = "greeting"
+    runtime = _mock_runtime(get_result=None)
+
+    with patch(
+        "app.graph.nodes.generate._load_tenant",
+        AsyncMock(return_value={
+            "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
+            "greeting_message": None,
+        }),
+    ):
+        result = await generate(base_state, runtime=runtime)
+
+    assert "SP UNIDAD" not in result["answer"]
+    assert "04148050764" not in result["answer"]
+    assert result["answer"] == "Gracias por comunicarse con nosotros. ¿Cómo podemos ayudarle?"
+
+
+@pytest.mark.asyncio
+async def test_generate_includes_results_turnaround_when_set(base_state):
+    """Per-tenant results_turnaround appears in the priced-reply note (#46)."""
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_llm.model_name = "test-model"
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="ok"))
+
+    with (
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch(
+            "app.graph.nodes.generate._load_tenant",
+            AsyncMock(return_value={
+                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
+                "results_turnaround": "3 a 5 días hábiles",
+            }),
+        ),
+    ):
+        await generate(base_state, runtime=runtime)
+
+    system_content = mock_llm.ainvoke.await_args.args[0][0].content
+    assert "_Resultados: 3 a 5 días hábiles._" in system_content
+
+
+@pytest.mark.asyncio
+async def test_generate_omits_results_turnaround_when_unset(base_state):
+    """No results_turnaround column set -> no invented turnaround note, and
+    existing mocks without the key must not KeyError (regression guard)."""
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_llm.model_name = "test-model"
+    mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="ok"))
+
+    with (
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch(
+            "app.graph.nodes.generate._load_tenant",
+            AsyncMock(return_value={
+                "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION, "contact_hint": "",
+            }),
+        ),
+    ):
+        await generate(base_state, runtime=runtime)
+
+    system_content = mock_llm.ainvoke.await_args.args[0][0].content
+    assert "Resultados:" not in system_content
+
+
 # ---------------------------------------------------------------------------
 # generate — the match decision (exact vs. approximate) is computed in code
 # from retrieval similarity, never handed to the model as a per-chunk

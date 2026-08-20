@@ -278,7 +278,7 @@ async def test_greeting_skips_retrieve_and_second_llm_call():
     # same include_raw=True structured call instead of a second concurrent
     # llm.ainvoke(), so nothing on this path touches .ainvoke at all.
     llm.ainvoke.assert_not_called()
-    assert "gracias por comunicarte" in result["answer"].lower()
+    assert "gracias por comunicarse" in result["answer"].lower()
 
 
 @pytest.mark.asyncio

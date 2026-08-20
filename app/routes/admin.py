@@ -41,7 +41,7 @@ async def list_tenants(_: None = Depends(verify_operator_key)):
         rows = await db.execute(
             text("""
                 SELECT id, slug, expertise_area, tone_description, specialization_context,
-                       contact_url, greeting_message, plan, active, created_at
+                       contact_url, greeting_message, results_turnaround, plan, active, created_at
                   FROM tenants ORDER BY created_at DESC
             """)
         )
@@ -63,6 +63,7 @@ class TenantCreate(BaseModel):
     specialization_context: str = Field("", max_length=8000)
     contact_url: str = ""
     greeting_message: str | None = None
+    results_turnaround: str | None = None
     plan: str = "free"
 
 
@@ -84,11 +85,11 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
                 INSERT INTO tenants
                     (slug, api_key_hash, webhook_secret, bot_token, plan,
                      expertise_area, tone_description, specialization_context, contact_url,
-                     greeting_message, active)
+                     greeting_message, results_turnaround, active)
                 VALUES
                     (:slug, :api_key_hash, :webhook_secret, :bot_token, :plan,
                      :expertise_area, :tone_description, :specialization_context, :contact_url,
-                     :greeting_message, true)
+                     :greeting_message, :results_turnaround, true)
             """),
             {
                 "slug": body.slug,
@@ -101,6 +102,7 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
                 "specialization_context": body.specialization_context,
                 "contact_url": body.contact_url,
                 "greeting_message": body.greeting_message,
+                "results_turnaround": body.results_turnaround,
             },
         )
         await db.commit()
@@ -115,6 +117,7 @@ class TenantPatch(BaseModel):
     specialization_context: str | None = Field(None, max_length=8000)
     contact_url: str | None = None
     greeting_message: str | None = None
+    results_turnaround: str | None = None
     active: bool | None = None
     # Credential fields — only updated when non-empty string is provided
     bot_token: str | None = None
@@ -155,6 +158,10 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
             # the meaningful "use the hardcoded fallback" state (see
             # generate.py), so clearing to empty should write NULL, not "".
             t.greeting_message = body.greeting_message or None
+        if "results_turnaround" in fields:
+            # Nullable, same rationale as greeting_message above -- NULL is
+            # the meaningful "omit the note" state, not "".
+            t.results_turnaround = body.results_turnaround or None
         if "active" in fields:
             t.active = body.active
         if "webhook_secret" in fields and body.webhook_secret:
@@ -207,6 +214,7 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
         "specialization_context": t.specialization_context,
         "contact_url": t.contact_url,
         "greeting_message": t.greeting_message,
+        "results_turnaround": t.results_turnaround,
         "active": t.active,
         "webhook_registered": webhook_registered,
     }

@@ -198,6 +198,40 @@ async def test_patch_specialization_context_over_max_length_returns_422():
 
 
 @pytest.mark.asyncio
+async def test_patch_results_turnaround_round_trips():
+    """PATCH with results_turnaround persists it and returns it (#46)."""
+    app = make_app()
+    t = _tenant()
+    sess = _session(execute=AsyncMock(return_value=_orm_result(t)))
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)), \
+         patch("app.routes.admin.set_webhook", new_callable=AsyncMock, return_value=None), \
+         patch("app.routes.admin.delete_webhook", new_callable=AsyncMock):
+        r = await req(app, "patch", "/admin/tenants/acme",
+                      json={"results_turnaround": "3 a 5 días hábiles"})
+    assert r.status_code == 200
+    assert r.json()["results_turnaround"] == "3 a 5 días hábiles"
+    assert t.results_turnaround == "3 a 5 días hábiles"
+
+
+@pytest.mark.asyncio
+async def test_patch_results_turnaround_null_clears_to_none():
+    """Nullable column (like greeting_message) — clearing must write NULL, so
+    generate.py omits the note entirely rather than showing an empty string."""
+    app = make_app()
+    t = _tenant()
+    t.results_turnaround = "vieja nota"
+    sess = _session(execute=AsyncMock(return_value=_orm_result(t)))
+    with patch("app.routes.admin.AsyncSessionLocal", return_value=_ctx(sess)), \
+         patch("app.routes.admin.set_webhook", new_callable=AsyncMock, return_value=None), \
+         patch("app.routes.admin.delete_webhook", new_callable=AsyncMock):
+        r = await req(app, "patch", "/admin/tenants/acme",
+                      json={"results_turnaround": None})
+    assert r.status_code == 200
+    assert r.json()["results_turnaround"] is None
+    assert t.results_turnaround is None
+
+
+@pytest.mark.asyncio
 async def test_patch_response_never_contains_credentials():
     """Response MUST NOT expose bot_token, webhook_secret, or any WA credential."""
     app = make_app()
