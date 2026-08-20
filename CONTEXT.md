@@ -6,9 +6,23 @@ Decisions live in [`docs/adr/`](docs/adr/). This file names things; ADRs record 
 
 ## Tenant
 
-One business served by the deployment. Owns a document corpus, per-channel credentials, and optional free-text configuration (`expertise_area`, `tone_description`, `specialization_context`). Identified everywhere by its **slug**, never its database id.
+One business served by the deployment. Owns a document corpus, per-channel credentials, and optional free-text configuration (`expertise_area`, `tone_description`, `specialization_context`). Identified everywhere by its **slug**, never its database id. Belongs to one [vertical](#vertical), which selects the prompt vocabulary it inherits.
 
 One process serves all tenants — see [ADR-002](docs/adr/ADR-002-multi-tenant-thread-id.md).
+
+## Vertical
+
+The line of business a tenant is in: `medical_lab`, `gym`, `bakery`. One vertical serves many tenants — two labs share one — so the count grows with lines of business, never with clients.
+
+It selects a [prompt pack](#prompt-pack) and nothing else. Distinct from `expertise_area`, which is a short label naming the business *to a person* (greetings, off-topic replies, the admin table); a vertical names the vocabulary *to the system*. See [ADR-011](docs/adr/ADR-011-prompt-packs.md).
+
+## Prompt pack
+
+The per-vertical vocabulary the prompts interpolate: triage examples, extraction examples, item-type names.
+
+Vocabulary, never instructions. A pack colours what the model recognizes; it can never change how the model addresses anyone — the instruction skeleton and the register floor stay in code, out of reach of anything a tenant or operator can edit. That property is the whole point of [ADR-007](docs/adr/ADR-007-register-floor.md) and [ADR-011](docs/adr/ADR-011-prompt-packs.md) preserves it.
+
+Sits underneath the per-tenant free text (`tone_description`, `specialization_context`), never replaces it.
 
 ## Operator
 
@@ -56,6 +70,20 @@ The moment a thread stops being the bot's to answer. Three things cause it: the 
 
 An escalation is a decision about a *conversation*, computed in code from what retrieval returned — never a judgement the model narrates about itself. It is not the same as the bot declining to answer: an off-topic message is refused and stays the bot's.
 
+## Canned answer
+
+A tenant-authored reply to a question whose answer does not change: hours, location, payment methods, parking. Matched on operator-authored keyword sets before any model call and returned verbatim.
+
+Never covers prices or availability. A canned answer is a copy of the truth with no expiry — stale hours are an annoyance, a stale price quoted to a patient is not. Anything with a number attached to a service stays [corpus](#chunk)-only.
+
+## Not-offered denial
+
+The reply a tenant gives when asked for a service it does not provide. The tenant's catalog is treated as complete, so absence from it means the tenant does not offer the thing — see [ADR-010](docs/adr/ADR-010-closed-world-denial.md).
+
+Only a tenant marked closed-world can deny, and a denial needs two independent signals to agree; when they disagree, the thread [escalates](#escalation) instead.
+
+Three things that are not the same: an escalation hands a conversation to a person, a refusal turns away a message that was never this business's to answer, and a denial answers the question that was asked with "we do not do that". A denial is recorded under its own name, never as an escalation.
+
 ## Human control
 
 The state a thread is in between an escalation and its explicit return. While it holds, the bot is silent — it neither answers nor observes — and an [operator](#operator) answers in its place, for as many messages as they choose.
@@ -68,7 +96,7 @@ Distinct from the `human` [triage decision](#triage-decision), which classifies 
 
 What the vision module reads out of an image: a literal item or procedure name, or several, or nothing it will vouch for. Never a guess — an unreadable image resolves to uncertainty and the user is asked to type instead.
 
-The prompts are lab-specific today — clinical vocabulary in triage, extraction and generation all assume a diagnostic-lab tenant. See [ADR-007](docs/adr/ADR-007-register-floor.md) for why this wasn't generalized alongside the register floor. `TODOS.md`'s "Fold `tenant.specialization_context` into triage.py's classification prompt" item is the migration path once a second, differently-worded tenant is onboarded.
+The prompts were lab-specific — clinical vocabulary in triage, extraction and generation all assuming a diagnostic-lab tenant. [ADR-007](docs/adr/ADR-007-register-floor.md) records why that wasn't generalized alongside the register floor; [ADR-011](docs/adr/ADR-011-prompt-packs.md) is the generalization, moving that vocabulary into a [prompt pack](#prompt-pack) keyed by [vertical](#vertical).
 
 ## Chunk
 
