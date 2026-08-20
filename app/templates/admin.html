@@ -383,6 +383,8 @@ details.collapsible .details-body { padding: 0 var(--space-4) var(--space-4); }
 .mm-badge { font-size: 10px; font-weight: 590; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 4px; background: rgba(94,106,210,0.14); color: #a7b0ff; }
 .canned-answer-text { font-size: var(--text-sm); color: var(--fg-2); line-height: 1.5; }
 .canned-actions { display: flex; gap: 6px; flex: none; }
+.xlsx-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: var(--space-3); }
+.xlsx-row input[type=file] { font-size: 12px; color: var(--muted); max-width: 220px; }
 
 /* ── Add tenant form ──────────────────────────────────────────────── */
 .add-form { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-5); margin-top: var(--space-5); animation: expandIn var(--motion-base) var(--ease-standard); }
@@ -627,6 +629,16 @@ const state = {
   cannedEditingId: {},
   cannedFormError: {},
   cannedSaving: {},
+
+  notOffered: {},
+  notOfferedLoading: {},
+  notOfferedError: {},
+  notOfferedFormOpen: {},
+  notOfferedEditingId: {},
+  notOfferedFormError: {},
+  notOfferedSaving: {},
+  notOfferedUploading: {},
+  notOfferedUploadError: {},
 
   docsTenant: '',
   docsFile: null,
@@ -1093,6 +1105,9 @@ function renderExpandPanel(t) {
   <div class="panel-section" data-od-id="canned-section-${esc(t.slug)}">
     ${renderCannedSection(t)}
   </div>
+  <div class="panel-section" data-od-id="not-offered-section-${esc(t.slug)}">
+    ${renderNotOfferedSection(t)}
+  </div>
   <div class="panel-actions">
     ${saveErr ? `<div class="inline-error show">${ic('alert')}<span>${esc(saveErr)}</span></div>` : ''}
     <button class="btn btn-ghost" data-action="collapse">Cancel</button>
@@ -1210,6 +1225,62 @@ function renderCannedSection(t) {
     </div>
   </div>` : `
   <button class="btn btn-ghost btn-sm" style="margin-top:var(--space-3)" data-action="canned-add-open" data-slug="${esc(t.slug)}" data-od-id="canned-add-btn-${esc(t.slug)}">${ic('plus')} Add canned answer</button>`}`;
+}
+
+function renderNotOfferedSection(t) {
+  const list = state.notOffered[t.slug] || [];
+  const loading = state.notOfferedLoading[t.slug];
+  const err = state.notOfferedError[t.slug];
+  const formOpen = state.notOfferedFormOpen[t.slug];
+  const editingId = state.notOfferedEditingId[t.slug];
+  const editing = editingId ? list.find(c => c.id === editingId) : null;
+  const formErr = state.notOfferedFormError[t.slug];
+  const saving = state.notOfferedSaving[t.slug];
+  const uploading = state.notOfferedUploading[t.slug];
+  const uploadErr = state.notOfferedUploadError[t.slug];
+  return `
+  <div class="panel-section-title">Not-offered terms <span class="hint">studies/products this tenant never offers — matched before any model call, zero cost, replies with the Not-offered message above</span></div>
+  ${loading ? `<div class="empty-state">Loading not-offered terms…</div>` : ''}
+  ${!loading && err ? `<div class="empty-state">${esc(err)}</div>` : ''}
+  ${!loading && !err && list.length === 0 ? `<div class="empty-state">No not-offered terms yet.</div>` : ''}
+  ${!loading && !err && list.length ? `<div class="canned-list" data-od-id="not-offered-list-${esc(t.slug)}">${list.map(c => `
+    <div class="canned-row" data-od-id="not-offered-row-${c.id}">
+      <div class="canned-body">
+        <div class="canned-kw-row">
+          <span class="mm-badge">${esc((c.match_mode || 'any').toUpperCase())}</span>
+          ${c.keywords.map(k => `<span class="kw-chip">${esc(k)}</span>`).join('')}
+        </div>
+      </div>
+      <div class="canned-actions">
+        <button class="btn btn-ghost btn-sm" data-action="not-offered-edit" data-slug="${esc(t.slug)}" data-id="${c.id}" data-od-id="not-offered-edit-${c.id}">Edit</button>
+        <button class="btn btn-danger-outline btn-sm" data-action="not-offered-remove" data-slug="${esc(t.slug)}" data-id="${c.id}" data-od-id="not-offered-remove-${c.id}">Remove</button>
+      </div>
+    </div>`).join('')}</div>` : ''}
+  ${formOpen ? `
+  <div class="add-form" data-od-id="not-offered-form-${esc(t.slug)}" style="margin-top:var(--space-4)">
+    <h3>${editing ? 'Edit not-offered term' : 'New not-offered term'}</h3>
+    ${formErr ? `<div class="inline-error show">${ic('alert')}<span>${esc(formErr)}</span></div>` : ''}
+    <div class="field-grid" style="grid-template-columns:1fr 140px">
+      <div class="field"><label>Keywords <span class="hint">comma-separated synonyms</span></label><input type="text" class="mono" data-field="not-offered-keywords" value="${esc((editing?.keywords || []).join(', '))}" placeholder="urocultivo, cultivo de orina" ${saving?'disabled':''}></div>
+      <div class="field"><label>Match mode</label>
+        <select data-field="not-offered-match-mode" ${saving?'disabled':''}>
+          <option value="any" ${!editing || editing.match_mode==='any'?'selected':''}>any</option>
+          <option value="all" ${editing && editing.match_mode==='all'?'selected':''}>all</option>
+        </select>
+      </div>
+    </div>
+    <div class="panel-actions" style="padding-top:var(--space-4)">
+      <button class="btn btn-ghost btn-sm" data-action="not-offered-cancel-form" data-slug="${esc(t.slug)}" ${saving?'disabled':''}>Cancel</button>
+      <button class="btn btn-primary btn-sm" data-action="not-offered-save" data-slug="${esc(t.slug)}" data-od-id="not-offered-save-${esc(t.slug)}" ${saving?'disabled':''}>${saving ? (editing?'Saving…':'Adding…') : (editing?'Save':'Add')}</button>
+    </div>
+  </div>` : `
+  <button class="btn btn-ghost btn-sm" style="margin-top:var(--space-3)" data-action="not-offered-add-open" data-slug="${esc(t.slug)}" data-od-id="not-offered-add-btn-${esc(t.slug)}">${ic('plus')} Add not-offered term</button>`}
+  <div class="xlsx-row">
+    <button class="btn btn-ghost btn-sm" data-action="not-offered-download-template" data-slug="${esc(t.slug)}" data-od-id="not-offered-download-${esc(t.slug)}">${ic('upload')} Download Excel template</button>
+    <input type="file" accept=".xlsx" data-field="not-offered-upload-file" data-od-id="not-offered-upload-input-${esc(t.slug)}" ${uploading?'disabled':''}>
+    <button class="btn btn-ghost btn-sm" data-action="not-offered-upload" data-slug="${esc(t.slug)}" data-od-id="not-offered-upload-btn-${esc(t.slug)}" ${uploading?'disabled':''}>${uploading?'Uploading…':'Upload (replaces list)'}</button>
+  </div>
+  ${uploadErr ? `<div class="inline-error show" style="margin-top:8px">${ic('alert')}<span>${esc(uploadErr)}</span></div>` : ''}`;
 }
 
 function renderAddTenantForm() {
@@ -1413,6 +1484,7 @@ function onMainClick(e) {
       render();
       if (opening && !state.staff[rowSlug]) fetchStaff(rowSlug);
       if (opening && !state.canned[rowSlug]) fetchCanned(rowSlug);
+      if (opening && !state.notOffered[rowSlug]) fetchNotOffered(rowSlug);
       break;
     }
     case 'collapse':
@@ -1513,6 +1585,36 @@ function onMainClick(e) {
       break;
     case 'canned-remove':
       removeCannedAnswer(slug, Number(actionEl.dataset.id));
+      break;
+    case 'not-offered-add-open':
+      state.notOfferedFormOpen[slug] = true;
+      state.notOfferedEditingId[slug] = null;
+      delete state.notOfferedFormError[slug];
+      render();
+      break;
+    case 'not-offered-edit':
+      state.notOfferedFormOpen[slug] = true;
+      state.notOfferedEditingId[slug] = Number(actionEl.dataset.id);
+      delete state.notOfferedFormError[slug];
+      render();
+      break;
+    case 'not-offered-cancel-form':
+      state.notOfferedFormOpen[slug] = false;
+      state.notOfferedEditingId[slug] = null;
+      delete state.notOfferedFormError[slug];
+      render();
+      break;
+    case 'not-offered-save':
+      saveNotOfferedTerm(slug);
+      break;
+    case 'not-offered-remove':
+      removeNotOfferedTerm(slug, Number(actionEl.dataset.id));
+      break;
+    case 'not-offered-download-template':
+      downloadNotOfferedTemplate(slug);
+      break;
+    case 'not-offered-upload':
+      uploadNotOfferedTerms(slug);
       break;
     case 'jobs-status-filter':
       state.jobsStatusFilter = actionEl.dataset.value;
@@ -1747,6 +1849,7 @@ async function deleteTenant(slug) {
     delete state.deleteState[slug];
     delete state.staff[slug];
     delete state.canned[slug];
+    delete state.notOffered[slug];
     state.expandedTenant = null;
     render();
     toast(`Tenant "${slug}" deleted.`, 'success');
@@ -1881,6 +1984,120 @@ async function removeCannedAnswer(slug, id) {
   } catch (err) {
     toast(`Remove failed: ${err.message}`, 'error');
   }
+}
+
+/* ── Not-offered terms actions ────────────────────────────────────── */
+async function fetchNotOffered(slug) {
+  state.notOfferedLoading[slug] = true;
+  state.notOfferedError[slug] = '';
+  render();
+  try {
+    state.notOffered[slug] = await api(`/admin/tenants/${encodeURIComponent(slug)}/not-offered-terms`);
+  } catch (err) {
+    state.notOfferedError[slug] = err.message;
+    state.notOffered[slug] = [];
+  }
+  state.notOfferedLoading[slug] = false;
+  render();
+}
+
+async function saveNotOfferedTerm(slug) {
+  const panel = document.querySelector(`[data-od-id="not-offered-form-${CSS.escape(slug)}"]`);
+  const keywords = panel.querySelector('[data-field="not-offered-keywords"]').value
+    .split(',').map(k => k.trim()).filter(Boolean);
+  const matchMode = panel.querySelector('[data-field="not-offered-match-mode"]').value;
+  if (keywords.length === 0) {
+    state.notOfferedFormError[slug] = 'Add at least one keyword.';
+    render();
+    return;
+  }
+
+  const editingId = state.notOfferedEditingId[slug];
+  state.notOfferedSaving[slug] = true;
+  delete state.notOfferedFormError[slug];
+  render();
+  try {
+    if (editingId) {
+      await api(`/admin/tenants/${encodeURIComponent(slug)}/not-offered-terms/${editingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords, match_mode: matchMode }),
+      });
+    } else {
+      await api(`/admin/tenants/${encodeURIComponent(slug)}/not-offered-terms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords, match_mode: matchMode }),
+      });
+    }
+    await fetchNotOffered(slug);
+    state.notOfferedFormOpen[slug] = false;
+    state.notOfferedEditingId[slug] = null;
+    toast(editingId ? 'Not-offered term updated.' : 'Not-offered term added.', 'success');
+  } catch (err) {
+    state.notOfferedFormError[slug] = err.message;
+  }
+  state.notOfferedSaving[slug] = false;
+  render();
+}
+
+async function removeNotOfferedTerm(slug, id) {
+  try {
+    await api(`/admin/tenants/${encodeURIComponent(slug)}/not-offered-terms/${id}`, { method: 'DELETE' });
+    state.notOffered[slug] = (state.notOffered[slug] || []).filter(c => c.id !== id);
+    render();
+    toast('Not-offered term removed.', 'success');
+  } catch (err) {
+    toast(`Remove failed: ${err.message}`, 'error');
+  }
+}
+
+async function downloadNotOfferedTemplate(slug) {
+  try {
+    const res = await fetch(`/admin/tenants/${encodeURIComponent(slug)}/not-offered-terms/template`, {
+      headers: { 'X-Operator-Key': operatorKey() },
+    });
+    if (!res.ok) throw new Error(`Request failed (${res.status})`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `not-offered-terms-${slug}-template.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    toast(`Download failed: ${err.message}`, 'error');
+  }
+}
+
+async function uploadNotOfferedTerms(slug) {
+  const input = document.querySelector(`[data-od-id="not-offered-upload-input-${CSS.escape(slug)}"]`);
+  const file = input.files[0];
+  if (!file) {
+    toast('Choose an .xlsx file first.', 'error');
+    return;
+  }
+
+  state.notOfferedUploading[slug] = true;
+  state.notOfferedUploadError[slug] = '';
+  render();
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const data = await api(`/admin/tenants/${encodeURIComponent(slug)}/not-offered-terms/upload`, {
+      method: 'POST',
+      body: form,
+    });
+    input.value = '';
+    await fetchNotOffered(slug);
+    toast(`Imported ${data.imported} not-offered term(s), replacing the previous list.`, 'success');
+  } catch (err) {
+    state.notOfferedUploadError[slug] = err.message;
+  }
+  state.notOfferedUploading[slug] = false;
+  render();
 }
 
 /* ── Documents actions ────────────────────────────────────────────── */

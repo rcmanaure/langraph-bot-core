@@ -39,14 +39,16 @@ def mock_under_human_control():
 
 @pytest.fixture(autouse=True)
 def mock_triage_tenant_lookups():
-    """triage() unconditionally checks canned answers and the tenant's
-    prompt-pack vertical before calling the LLM (#47/#48). Same rationale as
-    mock_resolve_staff above: default every test to "no canned match, no
-    vertical" so tests that don't care don't need their own DB mock; tests
-    that do care (tests/test_nodes.py) patch these targets themselves,
-    which overrides this default within their own `with patch(...)` block."""
+    """triage() unconditionally checks canned answers, not-offered terms, and
+    the tenant's prompt-pack vertical before calling the LLM (#47/#48/#53).
+    Same rationale as mock_resolve_staff above: default every test to "no
+    canned match, no not-offered match, no vertical" so tests that don't
+    care don't need their own DB mock; tests that do care
+    (tests/test_nodes.py) patch these targets themselves, which overrides
+    this default within their own `with patch(...)` block."""
     with (
         patch("app.graph.nodes.triage.match_canned_answer", new_callable=AsyncMock, return_value=None),
+        patch("app.graph.nodes.triage.match_not_offered_term", new_callable=AsyncMock, return_value=False),
         patch("app.graph.nodes.triage.get_tenant_vertical", new_callable=AsyncMock, return_value=None),
     ):
         yield
