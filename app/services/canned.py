@@ -74,8 +74,15 @@ async def match_canned_answer(tenant_slug: str, message: str) -> str | None:
     normalizer improvement applies retroactively without a backfill.
     Word-boundary match, not raw substring — a keyword like "hora" must
     match "a que hora abren" but not "hablar ahora" (found in /code-review);
-    still matches a multi-word phrase like "clases grupales" as a unit,
-    since \\b anchors on both ends of the whole keyword string."""
+    still matches a multi-word phrase like "clases grupales" as a unit.
+    Uses (?<!\\w)/(?!\\w) lookaround, not \\b, on both ends of the whole
+    keyword string -- \\b only fires on a \\w/\\W transition, so a keyword
+    that starts or ends with punctuation (an operator pasting a full
+    Spanish question, "¿Cuántos...laboratorio?") never matched: \\b right
+    after a trailing "?" needs a word char on one side, but both the "?"
+    and end-of-string are non-word, so it silently never fired (found live,
+    #53 follow-up -- a canned answer keyed on a full question never
+    triggered, LLM fell through to its own off-topic refusal instead)."""
     answers = await get_canned_answers(tenant_slug)
     if not answers:
         return None
@@ -85,7 +92,7 @@ async def match_canned_answer(tenant_slug: str, message: str) -> str | None:
         keywords = [normalize_for_comparison(k) for k in (row["keywords"] or []) if k]
         if not keywords:
             continue
-        hits = (re.search(rf"\b{re.escape(kw)}\b", normalized_message) is not None for kw in keywords)
+        hits = (re.search(rf"(?<!\w){re.escape(kw)}(?!\w)", normalized_message) is not None for kw in keywords)
         matched = all(hits) if row["match_mode"] == "all" else any(hits)
         if matched:
             return row["answer"]

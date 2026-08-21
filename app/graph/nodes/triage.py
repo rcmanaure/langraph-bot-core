@@ -5,12 +5,17 @@ import re
 from langchain_core.messages import SystemMessage, trim_messages
 
 from app.config import settings
-from app.graph.nodes.retrieve import LOCATION_RE, is_bare_rejection, last_human_text
+from app.graph.nodes.retrieve import (
+    GREETING_PREFIX_RE,
+    LOCATION_RE,
+    is_bare_rejection,
+    last_human_text,
+)
 from app.schemas.triage import TriageDecision
 from app.services.canned import match_canned_answer
 from app.services.llm import get_triage_llm
+from app.services.not_offered_terms import match_not_offered_term
 from app.services.prompt_pack import get_rag_examples
-from app.services.rag import token_counter
 from app.services.tenant_context import get_tenant_vertical
 from app.state import AgentState
 
@@ -142,15 +147,30 @@ async def triage(state: AgentState) -> dict:
         logger.info("triage_canned_answer_shortcut")
         return {"triage_decision": "canned", "canned_answer": canned}
 
+    # Deterministic, zero-LLM denial for a term the tenant has explicitly
+    # declared it never offers (#53) — same shortcut position as the canned
+    # answer check above, checked second so an overlapping canned_answers
+    # keyword keeps winning (unchanged existing behavior). generate.py reads
+    # tenants.not_offered_message fresh, same as the ADR-010 path already
+    # does, so no extra payload is needed here.
+    #
+    # Exempt staff, same rationale as generate.py's ADR-010 branch (#27) --
+    # a staff member IS the business, so their own message asking about a
+    # not-offered term (e.g. checking the catalog) must reach the normal
+    # LLM path, not get auto-denied like a customer (found in /code-review).
+    if not state.get("is_staff") and await match_not_offered_term(state["tenant_id"], last_human):
+        logger.info("triage_not_offered_term_shortcut")
+        return {"triage_decision": "not_offered"}
+
     if LOCATION_RE.search(last_human):
         logger.info("triage_regex_location_shortcut")
         return {"triage_decision": "rag"}
 
     trimmed = trim_messages(
         state["messages"],
-        max_tokens=settings.history_max_tokens,
+        max_tokens=settings.history_max_messages,
         strategy="last",
-        token_counter=token_counter,
+        token_counter=len,
         allow_partial=False,
         include_system=True,
     )
@@ -218,6 +238,22 @@ async def triage(state: AgentState) -> dict:
     # of being punished for not fitting the single-phrase _GREETING_RE.
     if decision == "greeting" and not _GREETING_CHAIN_RE.match(last_human):
         logger.info("triage_greeting_override_mixed_message")
+        decision = "rag"
+
+    # Found live (2026-08-20): a customer opening with a greeting and then
+    # asking about a study the model doesn't recognize as obviously
+    # in-domain ("Urocultivo", "muestra de pelo") got "off_topic" from
+    # llama-3.1-8b-instruct in 1/8 direct-sampled repeats, despite
+    # _TRIAGE_PROMPT's own "medical terms, lab tests... ALWAYS rag" rule --
+    # same "classifier ignores its own instruction on the easy pattern"
+    # failure as the greeting override above and LOCATION_RE's off_topic
+    # case in retrieve.py. Reusing GREETING_PREFIX_RE (retrieve.py) rather
+    # than inventing new vocabulary: a message that opens with a greeting
+    # and has real content after it is, by definition, not off_topic --
+    # nobody says "hola, ¿me indican el costo de X?" to ask something
+    # unrelated to the business on the other end of the line.
+    if decision == "off_topic" and GREETING_PREFIX_RE.match(last_human):
+        logger.info("triage_off_topic_override_greeting_prefix")
         decision = "rag"
 
     return {"triage_decision": decision}

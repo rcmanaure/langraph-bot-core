@@ -33,13 +33,16 @@ def _route_after_validate(state: AgentState) -> str:
 
 def _route_triage(state: AgentState) -> str:
     # retrieve()+rerank_chunks() are LLM/DB round trips that only pay off when
-    # generate() actually reads retrieved_chunks — off_topic/greeting/canned
-    # return a fixed reply without looking at chunks, and human hands off
-    # before generate() runs at all, so those four skip straight past retrieve.
+    # generate() actually reads retrieved_chunks — off_topic/greeting/canned/
+    # not_offered return a fixed reply without looking at chunks, and human
+    # hands off before generate() runs at all, so those five skip straight
+    # past retrieve. not_offered (#53) is the one that matters most here:
+    # the whole point of a deterministic not-offered term is skipping
+    # retrieve()'s embedding/rerank calls too, not just triage's LLM call.
     d = state.get("triage_decision", "rag")
     if d == "human":
         return "interrupt_node"
-    if d in ("off_topic", "greeting", "canned"):
+    if d in ("off_topic", "greeting", "canned", "not_offered"):
         return "generate"
     return "retrieve"  # "rag" or "catalog"
 

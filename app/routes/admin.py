@@ -1,12 +1,14 @@
 import asyncio
 import hashlib
+import io
 import re
 import secrets
 import uuid
 from typing import Literal
 
+import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, text
@@ -16,10 +18,10 @@ from app.auth import verify_operator_key
 from app.channels.telegram import delete_webhook, get_webhook_info, set_webhook
 from app.config import settings
 from app.db import AsyncSessionLocal
-from app.models import CannedAnswer, IndexJob, IndexJobStatus, StaffMember, Tenant
+from app.models import CannedAnswer, IndexJob, IndexJobStatus, NotOfferedTerm, StaffMember, Tenant
 from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.policies import TenantPolicy
-from app.services import canned
+from app.services import canned, not_offered_terms
 from app.services.indexer import run_index_job
 
 _bg_tasks: set[asyncio.Task] = set()
@@ -43,11 +45,20 @@ async def list_tenants(_: None = Depends(verify_operator_key)):
             text("""
                 SELECT id, slug, expertise_area, tone_description, specialization_context,
                        contact_url, greeting_message, results_turnaround, catalog_is_closed,
-                       not_offered_message, plan, active, created_at
+                       not_offered_message, plan, active, vertical, created_at
                   FROM tenants ORDER BY created_at DESC
             """)
         )
         return [dict(r._mapping) for r in rows.fetchall()]
+
+
+@router.get("/verticals")
+async def list_verticals(_: None = Depends(verify_operator_key)):
+    """Known vertical values -- backs the admin UI's Vertical dropdown so it
+    reflects actual prompt_packs rows instead of a hardcoded guess (#48)."""
+    async with AsyncSessionLocal() as db:
+        rows = await db.execute(text("SELECT vertical FROM prompt_packs ORDER BY vertical"))
+        return [r[0] for r in rows.fetchall()]
 
 
 class TenantCreate(BaseModel):
@@ -69,6 +80,12 @@ class TenantCreate(BaseModel):
     catalog_is_closed: bool = False
     not_offered_message: str | None = None
     plan: str = "free"
+    # Nullable, defaults to None -- NOT the column's server_default of
+    # 'medical_lab'. That server_default exists only to backfill sp-labs
+    # (today's only tenant); a new tenant created through this API always
+    # gets an explicit value here, so it never silently inherits sp-labs's
+    # vocabulary pack by omission (#48).
+    vertical: str | None = None
 
 
 @router.post("/tenants", status_code=201)
@@ -89,11 +106,13 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
                 INSERT INTO tenants
                     (slug, api_key_hash, webhook_secret, bot_token, plan,
                      expertise_area, tone_description, specialization_context, contact_url,
-                     greeting_message, results_turnaround, catalog_is_closed, not_offered_message, active)
+                     greeting_message, results_turnaround, catalog_is_closed, not_offered_message,
+                     vertical, active)
                 VALUES
                     (:slug, :api_key_hash, :webhook_secret, :bot_token, :plan,
                      :expertise_area, :tone_description, :specialization_context, :contact_url,
-                     :greeting_message, :results_turnaround, :catalog_is_closed, :not_offered_message, true)
+                     :greeting_message, :results_turnaround, :catalog_is_closed, :not_offered_message,
+                     :vertical, true)
             """),
             {
                 "slug": body.slug,
@@ -109,6 +128,7 @@ async def create_tenant(body: TenantCreate, _: None = Depends(verify_operator_ke
                 "results_turnaround": body.results_turnaround,
                 "catalog_is_closed": body.catalog_is_closed,
                 "not_offered_message": body.not_offered_message,
+                "vertical": body.vertical or None,
             },
         )
         await db.commit()
@@ -126,6 +146,7 @@ class TenantPatch(BaseModel):
     results_turnaround: str | None = None
     catalog_is_closed: bool | None = None
     not_offered_message: str | None = None
+    vertical: str | None = None
     active: bool | None = None
     # Credential fields — only updated when non-empty string is provided
     bot_token: str | None = None
@@ -181,6 +202,11 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
             # Nullable -- NULL falls back to generate.py's vertical-neutral
             # _NOT_OFFERED_MSG constant (#51).
             t.not_offered_message = body.not_offered_message or None
+        if "vertical" in fields:
+            # Nullable, same clear-to-NULL rationale as greeting_message
+            # above -- NULL means "no prompt pack" (get_rag_examples degrades
+            # to []), not the string "medical_lab" (#48).
+            t.vertical = body.vertical or None
         if "active" in fields:
             t.active = body.active
         if "webhook_secret" in fields and body.webhook_secret:
@@ -236,6 +262,7 @@ async def patch_tenant(slug: str, body: TenantPatch, _: None = Depends(verify_op
         "results_turnaround": t.results_turnaround,
         "catalog_is_closed": t.catalog_is_closed,
         "not_offered_message": t.not_offered_message,
+        "vertical": t.vertical,
         "active": t.active,
         "webhook_registered": webhook_registered,
     }
@@ -519,6 +546,195 @@ async def delete_canned_answer(slug: str, answer_id: int, _: None = Depends(veri
         await db.commit()
 
     canned.invalidate(slug)
+
+
+# ── Not-offered terms ────────────────────────────────────────────────────────
+# Tenant-authored, keyword-triggered deterministic "we don't offer this"
+# denial -- matched in triage.py before any model call, same zero-cost
+# shortcut position canned_answers already occupies (#53). No `answer`
+# field: every match replies with the tenant's own `not_offered_message`.
+
+_NOT_OFFERED_TEMPLATE_HEADER = "Términos que NO ofrece (uno por fila; sinónimos separados por coma)"
+# A term list is a handful of rows -- generous headroom for a real one
+# without letting an operator-key holder force a large in-memory buffer +
+# openpyxl parse (found in /code-review; MAX_MEDIA_BYTES is this
+# codebase's existing precedent for bounding an upload's size before
+# anything touches it, but this file is expected to be far smaller than
+# inbound customer media).
+_NOT_OFFERED_UPLOAD_MAX_BYTES = 1 * 1024 * 1024  # 1 MB
+# Prefixed and deliberately not real medical vocabulary -- the upload
+# endpoint has no way to tell an example row from a real one, so an
+# operator who re-uploads the template without deleting these rows must not
+# end up denying a real customer term (found in /code-review). The prefix
+# means even an accidental upload creates a keyword no real customer would
+# ever type, rather than a plausible-looking denial.
+_NOT_OFFERED_TEMPLATE_EXAMPLES = [
+    "EJEMPLO - BORRE ESTA FILA - ejemplo-de-termino-uno, ejemplo-de-sinonimo",
+    "EJEMPLO - BORRE ESTA FILA - ejemplo-de-termino-dos",
+]
+
+
+class NotOfferedTermCreate(BaseModel):
+    keywords: list[str] = Field(min_length=1)
+    match_mode: Literal["any", "all"] = "any"
+
+
+class NotOfferedTermPatch(BaseModel):
+    keywords: list[str] | None = Field(None, min_length=1)
+    match_mode: Literal["any", "all"] | None = None
+
+
+@router.get("/tenants/{slug}/not-offered-terms")
+async def list_not_offered_terms(slug: str, _: None = Depends(verify_operator_key)):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        rows = await db.execute(
+            select(NotOfferedTerm).where(NotOfferedTerm.tenant_id == tenant_id).order_by(NotOfferedTerm.id)
+        )
+        return [
+            {"id": r.id, "keywords": r.keywords, "match_mode": r.match_mode}
+            for r in rows.scalars().all()
+        ]
+
+
+@router.post("/tenants/{slug}/not-offered-terms", status_code=201)
+async def create_not_offered_term(slug: str, body: NotOfferedTermCreate, _: None = Depends(verify_operator_key)):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        row = NotOfferedTerm(tenant_id=tenant_id, keywords=body.keywords, match_mode=body.match_mode)
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+
+    not_offered_terms.invalidate(slug)
+    return {"id": row.id, "keywords": row.keywords, "match_mode": row.match_mode}
+
+
+@router.patch("/tenants/{slug}/not-offered-terms/{term_id}")
+async def patch_not_offered_term(
+    slug: str, term_id: int, body: NotOfferedTermPatch, _: None = Depends(verify_operator_key),
+):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        # Scoped by tenant_id, not just term_id -- same guard as canned
+        # answers/staff above: one tenant's numeric id must not reach
+        # another's row.
+        row = (await db.execute(
+            select(NotOfferedTerm).where(NotOfferedTerm.id == term_id, NotOfferedTerm.tenant_id == tenant_id)
+        )).scalar_one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Not-offered term not found")
+
+        fields = body.model_fields_set
+        if "keywords" in fields:
+            row.keywords = body.keywords
+        if "match_mode" in fields:
+            row.match_mode = body.match_mode
+
+        await db.commit()
+        await db.refresh(row)
+
+    not_offered_terms.invalidate(slug)
+    return {"id": row.id, "keywords": row.keywords, "match_mode": row.match_mode}
+
+
+@router.delete("/tenants/{slug}/not-offered-terms/{term_id}", status_code=204)
+async def delete_not_offered_term(slug: str, term_id: int, _: None = Depends(verify_operator_key)):
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        result = await db.execute(
+            text("DELETE FROM not_offered_terms WHERE id = :id AND tenant_id = :tid"),
+            {"id": term_id, "tid": tenant_id},
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Not-offered term not found")
+        await db.commit()
+
+    not_offered_terms.invalidate(slug)
+
+
+@router.get("/tenants/{slug}/not-offered-terms/template")
+async def download_not_offered_terms_template(slug: str, _: None = Depends(verify_operator_key)):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Términos"
+    ws.append([_NOT_OFFERED_TEMPLATE_HEADER])
+    for example in _NOT_OFFERED_TEMPLATE_EXAMPLES:
+        ws.append([example])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="not-offered-terms-{slug}-template.xlsx"'},
+    )
+
+
+@router.post("/tenants/{slug}/not-offered-terms/upload")
+async def upload_not_offered_terms(
+    slug: str, file: UploadFile = File(...), _: None = Depends(verify_operator_key),
+):
+    content = await file.read()
+    if len(content) > _NOT_OFFERED_UPLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large ({len(content)} bytes) -- max {_NOT_OFFERED_UPLOAD_MAX_BYTES} bytes",
+        )
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        ws = wb.active
+        # Column A only, skip the header row -- one exclusion entry per row,
+        # synonyms comma-separated within the cell (same shape as the
+        # downloadable template and as canned_answers.keywords).
+        keyword_rows: list[list[str]] = []
+        for row in ws.iter_rows(min_row=2, max_col=1, values_only=True):
+            cell = row[0]
+            if cell is None or not str(cell).strip():
+                continue
+            keywords = [k.strip() for k in str(cell).split(",") if k.strip()]
+            if keywords:
+                keyword_rows.append(keywords)
+    except Exception as exc:
+        # Parsed BEFORE any DB write below -- a bad file never touches the
+        # existing list (#53's "leave my existing list untouched" requirement).
+        raise HTTPException(status_code=400, detail=f"Could not read Excel file: {exc}") from None
+
+    if not keyword_rows:
+        # A structurally valid file with nothing usable past the header
+        # (the template re-uploaded unedited, data in the wrong column) is
+        # just as much "a bad file" as one openpyxl can't open -- must not
+        # silently wipe the existing list either (found in /code-review).
+        raise HTTPException(status_code=400, detail="No valid rows found in the uploaded file")
+
+    async with AsyncSessionLocal() as db:
+        tenant_id = await db.scalar(text("SELECT id FROM tenants WHERE slug = :slug"), {"slug": slug})
+        if not tenant_id:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        # Replace-all, same shape as app/services/indexer.py's replace_all
+        # handling -- the uploaded file IS the list now, not a merge, so a
+        # re-upload never silently accumulates duplicates/stale rows.
+        await db.execute(text("DELETE FROM not_offered_terms WHERE tenant_id = :tid"), {"tid": tenant_id})
+        for keywords in keyword_rows:
+            db.add(NotOfferedTerm(tenant_id=tenant_id, keywords=keywords, match_mode="any"))
+        await db.commit()
+
+    not_offered_terms.invalidate(slug)
+    return {"imported": len(keyword_rows)}
 
 
 # ── API key rotation ─────────────────────────────────────────────────────────

@@ -276,7 +276,7 @@ async def test_retrieve_rewrites_query_when_specialization_set():
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="Patología")),
         patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
-        patch("app.graph.nodes.retrieve.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.retrieve.get_triage_llm", return_value=mock_llm),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
         patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
@@ -284,6 +284,42 @@ async def test_retrieve_rewrites_query_when_specialization_set():
         await retrieve(state)
 
     assert mock_retrieve.await_args[0][1] == "cuanto cuesta la biopsia antro gástrico"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_rewrite_uses_triage_llm_not_chat_llm():
+    """Regression: found live (2026-08-20) -- get_chat_llm()'s model
+    (OPENAI_MODEL) hung indefinitely on _rewrite_query's real prompt once
+    specialization_context was long/real, so expansion_ran was False on
+    every call for a configured closed-world tenant and ADR-010's
+    not_offered_message was dead code from day one. get_triage_llm() proved
+    reliable (0.3-1.5s) on the identical prompt in direct reproduction.
+    retrieve.py no longer even imports get_chat_llm (asserted below) --
+    a future edit reintroducing it here would be the regression this test
+    exists to catch."""
+    import app.graph.nodes.retrieve as retrieve_mod
+    from app.schemas.retrieve import RewrittenQuery
+
+    assert not hasattr(retrieve_mod, "get_chat_llm")
+
+    state = _state()
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(
+        return_value=RewrittenQuery(query="antro gástrico")
+    )
+
+    with (
+        patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
+        patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="Patología")),
+        patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
+        patch("app.graph.nodes.retrieve.get_triage_llm", return_value=mock_llm) as mock_get_triage_llm,
+        patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])),
+        patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
+        patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
+    ):
+        await retrieve(state)
+
+    mock_get_triage_llm.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -303,7 +339,7 @@ async def test_retrieve_rewrite_echoing_raw_query_does_not_duplicate_it():
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="Patología")),
         patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
-        patch("app.graph.nodes.retrieve.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.retrieve.get_triage_llm", return_value=mock_llm),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
         patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
@@ -325,7 +361,7 @@ async def test_retrieve_rewrite_failure_falls_back_to_raw_query():
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="Patología")),
         patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
-        patch("app.graph.nodes.retrieve.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.retrieve.get_triage_llm", return_value=mock_llm),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),
         patch("app.graph.nodes.retrieve.cap_chunks_to_tokens", MagicMock(return_value=[])),
@@ -356,7 +392,7 @@ async def test_retrieve_rewrite_timeout_falls_back_to_raw_query():
         patch("app.graph.nodes.retrieve.AsyncSessionLocal", MagicMock(return_value=_mock_db())),
         patch("app.graph.nodes.retrieve.get_tenant_specialization", AsyncMock(return_value="Patología")),
         patch("app.graph.nodes.retrieve.get_tenant_closed_world_context", AsyncMock(return_value={"expertise_area": "", "catalog_is_closed": False})),
-        patch("app.graph.nodes.retrieve.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.retrieve.get_triage_llm", return_value=mock_llm),
         patch("app.graph.nodes.retrieve._REWRITE_TIMEOUT_SECONDS", 0.05),
         patch("app.graph.nodes.retrieve.retrieve_chunks", AsyncMock(return_value=[])) as mock_retrieve,
         patch("app.graph.nodes.retrieve.rerank_chunks", AsyncMock(return_value=[])),

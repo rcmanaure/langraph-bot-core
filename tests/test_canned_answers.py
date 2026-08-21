@@ -300,6 +300,22 @@ async def test_match_does_not_fire_on_a_keyword_embedded_in_another_word():
 
 
 @pytest.mark.asyncio
+async def test_match_fires_when_keyword_starts_and_ends_with_punctuation():
+    """A keyword that's a whole pasted Spanish question ("¿...?") starts and
+    ends with punctuation, not a word character -- \\b never fires there
+    (no \\w/\\W transition at either edge), so this silently never matched
+    in production (found live: a canned answer keyed on a full question
+    never triggered, the LLM fell through to its own off-topic refusal)."""
+    kw = "¿cuántos días puede pasar una muestra en formol antes de llevarla al laboratorio?"
+    sess = _session(execute=AsyncMock(
+        return_value=_fetch_result([_row(1, [kw], "any", "Respuesta sobre formol")])
+    ))
+    with patch("app.services.canned.AsyncSessionLocal", return_value=_ctx(sess)):
+        result = await canned.match_canned_answer("acme", kw)
+    assert result == "Respuesta sobre formol"
+
+
+@pytest.mark.asyncio
 async def test_match_ignores_accents_and_case():
     sess = _session(execute=AsyncMock(
         return_value=_fetch_result([_row(1, ["ubicación"], "any", "Av. Siempre Viva 742")])

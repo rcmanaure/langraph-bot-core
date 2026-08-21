@@ -211,6 +211,78 @@ async def test_triage_no_canned_match_falls_through_to_llm(base_state):
 
 
 @pytest.mark.asyncio
+async def test_triage_not_offered_term_shortcut_skips_llm(base_state):
+    """A message matching a tenant's not-offered term short-circuits to
+    triage_decision="not_offered", no LLM call (#53)."""
+    base_state["messages"] = [HumanMessage(content="cuanto cuesta un urocultivo")]
+
+    with (
+        patch("app.graph.nodes.triage.match_canned_answer", AsyncMock(return_value=None)),
+        patch("app.graph.nodes.triage.match_not_offered_term", AsyncMock(return_value=True)),
+        patch("app.graph.nodes.triage.get_triage_llm") as mock_get_llm,
+    ):
+        result = await triage(base_state)
+
+    mock_get_llm.assert_not_called()
+    assert result == {"triage_decision": "not_offered"}
+
+
+@pytest.mark.asyncio
+async def test_triage_not_offered_term_shortcut_does_not_fire_for_staff(base_state):
+    """A staff member's own message must reach the normal LLM path even if
+    it happens to contain a not-offered keyword -- staff IS the business
+    (same exemption generate.py's ADR-010 branch already has at line 309),
+    not a customer to auto-deny (#53 code review finding)."""
+    base_state["is_staff"] = True
+    base_state["messages"] = [HumanMessage(content="tenemos algun urocultivo pendiente de entregar?")]
+    mock_llm = _mock_triage_llm(decision="rag")
+
+    with (
+        patch("app.graph.nodes.triage.match_canned_answer", AsyncMock(return_value=None)),
+        patch("app.graph.nodes.triage.match_not_offered_term", AsyncMock(return_value=True)) as mock_not_offered,
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm),
+    ):
+        result = await triage(base_state)
+
+    mock_not_offered.assert_not_called()
+    assert result == {"triage_decision": "rag"}
+
+
+@pytest.mark.asyncio
+async def test_triage_no_not_offered_match_falls_through_to_llm(base_state):
+    """No not-offered term matches -> unaffected, existing LLM
+    classification path runs exactly as before."""
+    mock_llm = _mock_triage_llm(decision="rag")
+
+    with (
+        patch("app.graph.nodes.triage.match_canned_answer", AsyncMock(return_value=None)),
+        patch("app.graph.nodes.triage.match_not_offered_term", AsyncMock(return_value=False)),
+        patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm),
+    ):
+        result = await triage(base_state)
+
+    assert result == {"triage_decision": "rag"}
+
+
+@pytest.mark.asyncio
+async def test_triage_canned_answer_wins_over_not_offered_term(base_state):
+    """A message matching BOTH a canned answer and a not-offered term ->
+    canned answer wins (checked first, unchanged priority) (#53)."""
+    base_state["messages"] = [HumanMessage(content="cual es su horario")]
+
+    with (
+        patch("app.graph.nodes.triage.match_canned_answer", AsyncMock(return_value="Lunes a viernes 9-5")),
+        patch("app.graph.nodes.triage.match_not_offered_term", AsyncMock(return_value=True)) as mock_not_offered,
+        patch("app.graph.nodes.triage.get_triage_llm") as mock_get_llm,
+    ):
+        result = await triage(base_state)
+
+    mock_get_llm.assert_not_called()
+    mock_not_offered.assert_not_called()  # short-circuited before ever reaching this check
+    assert result == {"triage_decision": "canned", "canned_answer": "Lunes a viernes 9-5"}
+
+
+@pytest.mark.asyncio
 async def test_triage_prompt_includes_pack_vocabulary_when_set(base_state):
     """A tenant with a non-default vertical's pack content appears in the
     prompt reaching the triage LLM (#48)."""
@@ -298,6 +370,39 @@ async def test_triage_overrides_llm_greeting_verdict_on_mixed_message(base_state
         result = await triage(base_state)
 
     assert result == {"triage_decision": "rag"}
+
+
+# Found live (2026-08-20): "Hola buenas, ¿me indican el costo de un
+# Urocultivo?" and "... de una muestra de pelo?" -- real vocabulary the
+# triage LLM (llama-3.1-8b-instruct) doesn't confidently recognize as
+# in-domain -- got "off_topic" in 1/8 direct-sampled repeats, despite
+# _TRIAGE_PROMPT's own "medical terms, lab tests... ALWAYS rag" rule.
+# Reproduced via direct repeated sampling against the real model before
+# writing this fix (not guessed). Same class of bug as the greeting
+# override above; reuses GREETING_PREFIX_RE rather than inventing a
+# lab-vocabulary list, which wouldn't generalize anyway.
+@pytest.mark.asyncio
+async def test_triage_overrides_llm_off_topic_verdict_on_greeting_prefixed_message(base_state):
+    base_state["messages"] = [HumanMessage(content="Hola buenas, ¿me indican el costo de un Urocultivo?")]
+    mock_llm = _mock_triage_llm(decision="off_topic")
+
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
+        result = await triage(base_state)
+
+    assert result == {"triage_decision": "rag"}
+
+
+@pytest.mark.asyncio
+async def test_triage_does_not_override_a_genuine_off_topic_message(base_state):
+    # No greeting prefix -- a real off_topic verdict (weather, sports, jokes,
+    # unrelated businesses) must not be silently rewritten to "rag".
+    base_state["messages"] = [HumanMessage(content="quien gano el partido de futbol ayer")]
+    mock_llm = _mock_triage_llm(decision="off_topic")
+
+    with patch("app.graph.nodes.triage.get_triage_llm", return_value=mock_llm):
+        result = await triage(base_state)
+
+    assert result == {"triage_decision": "off_topic"}
 
 
 @pytest.mark.asyncio
@@ -826,6 +931,55 @@ async def test_generate_not_offered_verdict_denies_with_zero_llm_call_and_audits
 @pytest.mark.asyncio
 async def test_generate_not_offered_message_override_used_when_set(base_state):
     base_state["not_offered_verdict"] = True
+    runtime = _mock_runtime(get_result=None)
+
+    with (
+        patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value={
+            "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION,
+            "contact_hint": "", "not_offered_message": "No realizamos ese estudio.",
+        })),
+        patch("app.graph.nodes.generate.record_denial", AsyncMock()),
+    ):
+        result = await generate(base_state, runtime=runtime)
+
+    assert "No realizamos ese estudio." in result["answer"]
+    assert "Lo sentimos, no ofrecemos eso." not in result["answer"]
+
+
+@pytest.mark.asyncio
+async def test_generate_not_offered_term_decision_denies_with_zero_llm_call_and_audits(base_state):
+    """triage_decision="not_offered" (a deterministic term-list match, #53)
+    -> fixed denial reply, zero LLM calls, and an audit write with
+    max_similarity=None (no retrieve() ever ran on this path, so there's no
+    similarity to log and no nearest-items block to append)."""
+    base_state["triage_decision"] = "not_offered"
+    runtime = _mock_runtime(get_result=None)
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock()
+
+    with (
+        patch("app.graph.nodes.generate._load_tenant", AsyncMock(return_value={
+            "expertise": "labs", "tone_description": DEFAULT_TONE_DESCRIPTION,
+            "contact_hint": "\nContacte: +58 000", "not_offered_message": None,
+        })),
+        patch("app.graph.nodes.generate.get_chat_llm", return_value=mock_llm),
+        patch("app.graph.nodes.generate.record_denial", AsyncMock()) as mock_record,
+    ):
+        result = await generate(base_state, runtime=runtime)
+
+    mock_llm.ainvoke.assert_not_called()
+    assert "Lo sentimos, no ofrecemos eso." in result["answer"]
+    assert "Contacte: +58 000" in result["answer"]
+    assert result["awaiting_confirmation"] is False
+    mock_record.assert_awaited_once()
+    call_args = mock_record.await_args.args
+    assert call_args[0] == base_state["tenant_id"]
+    assert call_args[3] is None  # nothing was retrieved, so nothing was computed
+
+
+@pytest.mark.asyncio
+async def test_generate_not_offered_term_decision_uses_tenant_message_override(base_state):
+    base_state["triage_decision"] = "not_offered"
     runtime = _mock_runtime(get_result=None)
 
     with (

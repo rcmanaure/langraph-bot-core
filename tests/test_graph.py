@@ -19,12 +19,15 @@ def test_route_after_validate_clean(base_state):
     ("human", "interrupt_node"),
     ("off_topic", "generate"),
     ("greeting", "generate"),
+    ("canned", "generate"),
+    ("not_offered", "generate"),
 ])
 def test_route_triage(base_state, decision, expected):
     """rag/catalog need retrieved_chunks, so they route through retrieve.
-    human hands off before generate() runs. off_topic/greeting return a
-    canned reply without ever reading chunks, so they skip retrieve (and
-    its LLM-backed rerank call) entirely — see _route_triage's comment."""
+    human hands off before generate() runs. off_topic/greeting/canned/
+    not_offered return a fixed reply without ever reading chunks, so they
+    skip retrieve (and its LLM-backed rerank call) entirely — see
+    _route_triage's comment."""
     base_state["triage_decision"] = decision
     assert _route_triage(base_state) == expected
 

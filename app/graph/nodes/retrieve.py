@@ -8,7 +8,7 @@ from sqlalchemy import text as sql_text
 from app.config import settings
 from app.db import AsyncSessionLocal
 from app.schemas.retrieve import RewrittenQuery
-from app.services.llm import get_chat_llm
+from app.services.llm import get_triage_llm
 from app.services.rag import cap_chunks_to_tokens, retrieve_chunks
 from app.services.rerank import rerank_chunks
 from app.services.tenant_context import get_tenant_closed_world_context, get_tenant_specialization
@@ -179,17 +179,26 @@ async def _rewrite_query(query: str, specialization: str) -> tuple[str, bool]:
     nothing" and "expansion never ran" look identical from the returned
     query alone, but only the former is safe to treat as "the model looked
     and found nothing" — the latter must block a denial and fall through to
-    escalation instead."""
-    llm = get_chat_llm()
+    escalation instead.
+
+    Uses get_triage_llm(), not get_chat_llm() -- found live (2026-08-20):
+    get_chat_llm()'s model (OPENAI_MODEL) hung indefinitely (3+ minutes, no
+    exception, no timeout) on this exact prompt once specialization_context
+    was long/real rather than a short synthetic one, meaning expansion_ran
+    was False on effectively every call for a configured closed-world
+    tenant -- the ADR-010 denial gate (`expansion_ran and expansion_grade`
+    below) never actually opened, so sp-labs's not_offered_message was dead
+    code from the moment ADR-010 shipped. The identical prompt against
+    get_triage_llm() (already the "cheap/structured-output" model per
+    app/services/llm.py) returned in 0.3-1.5s across repeated direct
+    reproduction. This is a structured-output/long-prompt interaction
+    specific to OPENAI_MODEL, not a rewrite-specific need for its
+    Spanish-fluency strengths -- the output here is a short synonym list fed
+    back into retrieval, never shown to a user."""
+    llm = get_triage_llm()
     prompt = _REWRITE_PROMPT.format(specialization=specialization, query=query)
     try:
-        # get_chat_llm()'s client-level timeout=60 does NOT bound total call
-        # duration for reasoning-capable models (found live: OPENAI_MODEL is
-        # a free reasoning model that streamed tokens continuously for ~9
-        # minutes before failing -- no single read gap exceeded 60s, so the
-        # client timeout never fired). Rewrite is a pure enhancement, not
-        # critical path, so fail fast and fall back to the raw query rather
-        # than block the whole user turn on a slow/stuck reasoning chain.
+        # Defense in depth, not the primary guard anymore (see docstring) --
         result: RewrittenQuery = await asyncio.wait_for(
             llm.with_structured_output(RewrittenQuery).ainvoke([HumanMessage(content=prompt)]),
             timeout=_REWRITE_TIMEOUT_SECONDS,

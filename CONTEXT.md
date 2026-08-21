@@ -76,9 +76,15 @@ A tenant-authored reply to a question whose answer does not change: hours, locat
 
 Never covers prices or availability. A canned answer is a copy of the truth with no expiry — stale hours are an annoyance, a stale price quoted to a patient is not. Anything with a number attached to a service stays [corpus](#chunk)-only.
 
+## Not-offered term
+
+An operator-declared keyword/synonym group naming something a tenant is known, with certainty, not to offer — edited one at a time or uploaded in bulk via Excel, per tenant. Matched before any model call, same shortcut position as a [canned answer](#canned-answer); a match produces a [not-offered denial](#not-offered-denial) at zero model/embedding cost.
+
+Deliberately allowed to be incomplete. It is a fast path in front of the [not-offered denial](#not-offered-denial) mechanism, not a replacement for it — everything the list doesn't cover still falls through to that mechanism (or the normal turn) unchanged. See [ADR-012](docs/adr/ADR-012-not-offered-terms.md), including why this doesn't reopen the completeness problem [ADR-010](docs/adr/ADR-010-closed-world-denial.md) rejected.
+
 ## Not-offered denial
 
-The reply a tenant gives when asked for a service it does not provide. The tenant's catalog is treated as complete, so absence from it means the tenant does not offer the thing — see [ADR-010](docs/adr/ADR-010-closed-world-denial.md).
+The reply a tenant gives when asked for a service it does not provide. Reached either deterministically, via a [not-offered term](#not-offered-term) match, or from the tenant's catalog treated as complete — absence from it means the tenant does not offer the thing — see [ADR-010](docs/adr/ADR-010-closed-world-denial.md).
 
 Only a tenant marked closed-world can deny, and a denial needs two independent signals to agree; when they disagree, the thread [escalates](#escalation) instead.
 
@@ -104,7 +110,7 @@ An indexed slice of a tenant's corpus, embedded for retrieval. Stored in Postgre
 
 ## Triage decision
 
-The classification the graph assigns an incoming message before doing any work: `greeting`, `catalog`, `rag`, `off_topic`. It decides which nodes run.
+The classification the graph assigns an incoming message before doing any work: `greeting`, `catalog`, `rag`, `off_topic`, `human`, `canned`, `not_offered`. It decides which nodes run.
 
 ## Staff member
 
