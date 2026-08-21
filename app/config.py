@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     chunk_size: int = 768
     chunk_overlap: int = 128
     top_k_results: int = 10
-    history_max_tokens: int = 8000
+    # Message-count cap (not tokens) -- trim_messages with token_counter=len
+    # counts messages instead of tokens, per LangChain docs.
+    history_max_messages: int = 7
     retrieval_max_tokens: int = 3000
     hnsw_ef_search: int = 160
     hnsw_iterative_scan: str = "relaxed_order"

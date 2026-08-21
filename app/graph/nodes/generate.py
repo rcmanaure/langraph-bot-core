@@ -17,7 +17,7 @@ from app.models.tenant import DEFAULT_TONE_DESCRIPTION
 from app.services import human_control
 from app.services.llm import get_chat_llm
 from app.services.not_offered import record_denial
-from app.services.rag import cap_chunks_to_tokens, token_counter
+from app.services.rag import cap_chunks_to_tokens
 from app.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -291,6 +291,21 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
         msg = AIMessage(content=content)
         return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
 
+    if decision == "not_offered":
+        # Deterministic not-offered term match, matched in triage.py before
+        # any model call (#53) -- same zero-LLM short-circuit shape as the
+        # canned branch above. retrieve() never ran on this path (see
+        # builder.py's _route_triage), so there are no retrieved chunks and
+        # no similarity score -- unlike the ADR-010 verdict branch below,
+        # this reply never appends a nearest-items block, and the audit
+        # write logs max_similarity=None (nothing was computed, not "found
+        # nothing").
+        message = tenant_ctx.get("not_offered_message") or _NOT_OFFERED_MSG
+        content = message + tenant_ctx["contact_hint"]
+        msg = AIMessage(content=content)
+        await record_denial(state["tenant_id"], state["thread_id"], last_human_text(state) or "", None)
+        return {"answer": content, "messages": [msg], "awaiting_confirmation": False}
+
     if not is_catalog and not is_staff and state.get("not_offered_verdict"):
         # Closed-world denial (#51/ADR-010) -- retrieve() already verified
         # both signals agree and expansion ran on expansion-grade text.
@@ -403,9 +418,9 @@ async def generate(state: AgentState, runtime: Runtime | None = None) -> dict:
 
     trimmed = trim_messages(
         state["messages"],
-        max_tokens=settings.history_max_tokens,
+        max_tokens=settings.history_max_messages,
         strategy="last",
-        token_counter=token_counter,
+        token_counter=len,
         allow_partial=False,
         include_system=True,
     )

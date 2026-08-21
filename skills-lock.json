@@ -53,6 +53,12 @@
       "skillPath": "skills/caveman-stats/SKILL.md",
       "computedHash": "331f720e2fa97b68cacdae44384878071e8cac6013479edea68f4c8eca308852"
     },
+    "fastapi": {
+      "source": "fastapi/fastapi",
+      "sourceType": "github",
+      "skillPath": "fastapi/.agents/skills/fastapi/SKILL.md",
+      "computedHash": "e85d9e223fbc3183b1a599bbe8b02d2edf275d046ff5bcfd14352c92cdff52b3"
+    },
     "fastapi-python": {
       "source": "mindrally/skills",
       "sourceType": "autoskills-registry",
@@ -77,6 +83,12 @@
       "source": "inferen-sh/skills",
       "sourceType": "autoskills-registry",
       "computedHash": "bd2d874c27788964fadf03c0840049de0409407f06f883ee90886164cb22ef69"
+    },
+    "python-performance-optimization": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/python-development/skills/python-performance-optimization/SKILL.md",
+      "computedHash": "5a0e5ccd00cd8e850e1068707e042339e182190eb89f8a300f58c18f53876059"
     },
     "python-testing-patterns": {
       "source": "wshobson/agents",

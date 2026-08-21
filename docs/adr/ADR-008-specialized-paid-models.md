@@ -85,3 +85,11 @@ Standing review rule going forward: **any candidate must be < $0.50 per 1M token
 | Triage | `triage_model` | `meta-llama/llama-3.1-8b-instruct` | $0.05 / $0.08 |
 | Generate | `openai_model` | `mistralai/mistral-small-3.2-24b-instruct` | $0.094 / $0.25 |
 | Vision | `openai_vision_model` | `qwen/qwen3-vl-32b-instruct` | $0.104 / $0.416 |
+
+## Update (2026-08-20): `retrieve.py`'s query-expansion rewrite moved to `get_triage_llm()`
+
+This is the revisit this ADR's Decision section explicitly left open ("stayed on the general `get_chat_llm()` model — splitting them out wasn't part of this decision and can be revisited separately if their cost becomes worth optimizing"). It landed as a correctness fix, not a cost optimization: found live, `_rewrite_query()`'s call to `get_chat_llm()`'s model (`mistralai/mistral-small-3.2-24b-instruct`) hung indefinitely — 3+ minutes, no exception, no timeout, reproduced directly — once the prompt included a real (long, ~1900-char) `specialization_context`, whereas a short synthetic prompt against the same model returned in 1.6s. `retrieve.py`'s own `asyncio.wait_for(..., timeout=10)` guard caught this as a silent `TimeoutError` on effectively every call for a tenant with real specialization content, which meant the ADR-010 closed-world denial gate (`expansion_ran and expansion_grade`) never opened in production.
+
+The identical real prompt against `get_triage_llm()` (`meta-llama/llama-3.1-8b-instruct`) returned in 0.3-1.5s across repeated runs. No formal accuracy benchmark was run for this specific swap — unlike this ADR's other model changes, the baseline being replaced was not "slower" but "non-functional" (100% timeout rate on real tenant data), so the standard evidence bar (bigger side-by-side sample before switching) doesn't apply the same way here: any model that reliably returns beats one that reliably doesn't. The output only feeds retrieval as extra search terms (never shown to a user), which is the same low-stakes-output shape this ADR already accepted for triage's classification calls. Worth a real quality comparison if retrieval recall for closed-world tenants is ever suspected of regressing, but not blocking on one now given the alternative was a permanently broken feature.
+
+`retrieve.py` no longer imports `get_chat_llm` at all.
