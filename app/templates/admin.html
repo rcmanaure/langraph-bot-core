@@ -312,6 +312,13 @@ select.field-select { background: rgba(255,255,255,0.02); border: 1px solid var(
 /* ── Expand panel (inspector) ─────────────────────────────────────── */
 .expand-wrap { grid-column: 1 / -1; background: #101112; border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); padding: var(--space-6); animation: expandIn var(--motion-base) var(--ease-standard); }
 @keyframes expandIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.tabs-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: var(--space-5); }
+.tab-btn { padding: 10px 4px; margin-right: 22px; font-size: 13px; font-weight: 510; color: var(--muted); background: transparent; border: none; border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 7px; }
+.tab-btn:hover { color: var(--fg-2); }
+.tab-btn.active { color: var(--fg); border-bottom-color: var(--accent); }
+.tab-count { font-family: var(--font-mono); font-size: 11px; color: var(--meta); background: rgba(255,255,255,0.05); border-radius: var(--radius-pill); padding: 1px 7px; }
+.tab-btn.active .tab-count { color: #a7b0ff; background: rgba(94,106,210,0.16); }
+.tab-body { min-height: 160px; }
 .panel-section { padding-bottom: var(--space-5); margin-bottom: var(--space-5); border-bottom: 1px solid var(--border-soft); }
 .panel-section:last-of-type { border-bottom: none; }
 .panel-section-title { font-size: var(--text-xs); font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-2); margin-bottom: var(--space-4); display: flex; align-items: center; gap: 8px; }
@@ -338,14 +345,6 @@ select.field-select { background: rgba(255,255,255,0.02); border: 1px solid var(
 .toggle input:checked + .track { background: rgba(39,166,68,0.25); border-color: rgba(39,166,68,0.4); }
 .toggle input:checked + .track + .thumb { transform: translateX(16px); background: var(--success); }
 .toggle-label { font-size: var(--text-sm); color: var(--fg-2); }
-
-details.collapsible { border: 1px solid var(--border-soft); border-radius: var(--radius-md); margin-bottom: var(--space-5); background: rgba(255,255,255,0.012); }
-details.collapsible summary { list-style: none; cursor: pointer; padding: var(--space-3) var(--space-4); display: flex; align-items: center; justify-content: space-between; font-size: var(--text-xs); font-weight: 590; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-2); }
-details.collapsible summary::-webkit-details-marker { display: none; }
-details.collapsible summary .sub { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--meta); font-size: 11px; }
-details.collapsible summary .chev { transition: transform var(--motion-fast) var(--ease-standard); color: var(--meta); }
-details.collapsible[open] summary .chev { transform: rotate(180deg); }
-details.collapsible .details-body { padding: 0 var(--space-4) var(--space-4); }
 
 .panel-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); padding-top: var(--space-2); }
 .panel-actions .inline-error { margin-top: 0; margin-right: auto; }
@@ -601,6 +600,7 @@ const state = {
   tenantsPlanFilter: 'all',
   tenantsStatusFilter: 'all',
   expandedTenant: null,
+  tenantEditTab: {},
   addTenantOpen: false,
   addTenantSaving: false,
   addTenantError: '',
@@ -1046,7 +1046,45 @@ function renderExpandPanel(t) {
   const saveErr = state.saveError[t.slug];
   const regenErr = state.regenError[t.slug];
   const deleteErr = state.deleteError[t.slug];
-  return `
+  const tab = state.tenantEditTab[t.slug] || 'general';
+  const staffCount = (state.staff[t.slug] || []).length;
+  const faqCount = (state.canned[t.slug] || []).length + (state.notOffered[t.slug] || []).length;
+  const tabBtn = (id, label, count) => `<button class="tab-btn ${tab===id?'active':''}" data-action="tenant-tab" data-slug="${esc(t.slug)}" data-tab="${id}">${label}${count!=null?` <span class="tab-count">${count}</span>`:''}</button>`;
+
+  const generalPane = `
+  <div class="field-grid">
+    <div class="field full"><label>Vertical <span class="hint">selects a shared prompt-vocabulary pack from <code class="mono">prompt_packs</code> — blank means no pack. Every tenant defaults to <code class="mono">medical_lab</code> at the database level until this is set explicitly (#48)</span></label>
+      <select class="mono" data-field="vertical">
+        ${verticalOptions(t.vertical).map(v => `<option value="${esc(v)}" ${v===(t.vertical||'')?'selected':''}>${v ? esc(v) : '— no pack —'}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field"><label>Plan</label>
+      <select data-field="plan">
+        ${['free','basic','pro'].map(p=>`<option value="${p}" ${t.plan===p?'selected':''}>${p}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field"><label>Expertise area</label><input type="text" data-field="expertise_area" value="${esc(t.expertise_area)}"></div>
+    <div class="field"><label>Contact URL</label><input type="url" data-field="contact_url" value="${esc(t.contact_url)}"></div>
+    <div class="field"><label>Status</label>
+      <div class="toggle-row" style="padding-top:6px">
+        <label class="toggle"><input type="checkbox" data-field="active" ${t.active?'checked':''}><span class="track"></span><span class="thumb"></span></label>
+        <span class="toggle-label">${t.active?'Active':'Inactive'}</span>
+      </div>
+    </div>
+    <div class="field"><label>Catalog is closed <span class="hint">a study not in the catalog gets an automatic "we don't offer that" instead of escalating — see ADR-010 before enabling</span></label>
+      <div class="toggle-row" style="padding-top:6px">
+        <label class="toggle"><input type="checkbox" data-field="catalog_is_closed" ${t.catalog_is_closed?'checked':''}><span class="track"></span><span class="thumb"></span></label>
+        <span class="toggle-label">${t.catalog_is_closed?'Closed':'Open'}</span>
+      </div>
+    </div>
+    <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea data-field="specialization_context" maxlength="8000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer...">${esc(t.specialization_context)}</textarea></div>
+    <div class="field full"><label>Tone description</label><textarea data-field="tone_description" placeholder="e.g. warm and casual, or professional and clinical">${esc(t.tone_description)}</textarea></div>
+    <div class="field full"><label>Greeting message <span class="hint">exact canned reply to a bare "hola" — blank uses the default. *bold* and _italic_ work on both WhatsApp and Telegram</span></label><textarea data-field="greeting_message" placeholder="Gracias por comunicarte con...">${esc(t.greeting_message)}</textarea></div>
+    <div class="field full"><label>Results turnaround <span class="hint">appended to any priced reply — blank omits the note entirely</span></label><input type="text" data-field="results_turnaround" placeholder="3 a 5 días hábiles" value="${esc(t.results_turnaround)}"></div>
+    <div class="field full"><label>Not-offered message <span class="hint">reply used when catalog is closed and a study isn't offered — blank uses a generic default</span></label><textarea data-field="not_offered_message" placeholder="Lo sentimos, no realizamos ese estudio.">${esc(t.not_offered_message)}</textarea></div>
+  </div>`;
+
+  const channelsPane = `
   <div class="panel-section">
     <div class="panel-section-title">Telegram credentials <span class="hint">leave blank to keep current</span></div>
     <div class="field-grid">
@@ -1055,64 +1093,23 @@ function renderExpandPanel(t) {
     </div>
   </div>
   <div class="panel-section">
-    <div class="panel-section-title">Configuration</div>
+    <div class="panel-section-title">WhatsApp <span class="hint">secondary channel</span></div>
     <div class="field-grid">
-      <div class="field full"><label>Vertical <span class="hint">selects a shared prompt-vocabulary pack from <code class="mono">prompt_packs</code> — blank means no pack. Every tenant defaults to <code class="mono">medical_lab</code> at the database level until this is set explicitly (#48)</span></label>
-        <select class="mono" data-field="vertical">
-          ${verticalOptions(t.vertical).map(v => `<option value="${esc(v)}" ${v===(t.vertical||'')?'selected':''}>${v ? esc(v) : '— no pack —'}</option>`).join('')}
-        </select>
-      </div>
-      <div class="field"><label>Plan</label>
-        <select data-field="plan">
-          ${['free','basic','pro'].map(p=>`<option value="${p}" ${t.plan===p?'selected':''}>${p}</option>`).join('')}
-        </select>
-      </div>
-      <div class="field"><label>Expertise area</label><input type="text" data-field="expertise_area" value="${esc(t.expertise_area)}"></div>
-      <div class="field"><label>Contact URL</label><input type="url" data-field="contact_url" value="${esc(t.contact_url)}"></div>
-      <div class="field"><label>Status</label>
-        <div class="toggle-row" style="padding-top:6px">
-          <label class="toggle"><input type="checkbox" data-field="active" ${t.active?'checked':''}><span class="track"></span><span class="thumb"></span></label>
-          <span class="toggle-label">${t.active?'Active':'Inactive'}</span>
-        </div>
-      </div>
-      <div class="field"><label>Catalog is closed <span class="hint">a study not in the catalog gets an automatic "we don't offer that" instead of escalating — see ADR-010 before enabling</span></label>
-        <div class="toggle-row" style="padding-top:6px">
-          <label class="toggle"><input type="checkbox" data-field="catalog_is_closed" ${t.catalog_is_closed?'checked':''}><span class="track"></span><span class="thumb"></span></label>
-          <span class="toggle-label">${t.catalog_is_closed?'Closed':'Open'}</span>
-        </div>
-      </div>
-      <div class="field full"><label>Specialization context <span class="hint">jargon/glossary for the model</span></label><textarea data-field="specialization_context" maxlength="8000" placeholder="Jerga médica y de laboratorio que el modelo debe reconocer...">${esc(t.specialization_context)}</textarea></div>
-      <div class="field full"><label>Tone description</label><textarea data-field="tone_description" placeholder="e.g. warm and casual, or professional and clinical">${esc(t.tone_description)}</textarea></div>
-      <div class="field full"><label>Greeting message <span class="hint">exact canned reply to a bare "hola" — blank uses the default. *bold* and _italic_ work on both WhatsApp and Telegram</span></label><textarea data-field="greeting_message" placeholder="Gracias por comunicarte con...">${esc(t.greeting_message)}</textarea></div>
-      <div class="field full"><label>Results turnaround <span class="hint">appended to any priced reply — blank omits the note entirely</span></label><input type="text" data-field="results_turnaround" placeholder="3 a 5 días hábiles" value="${esc(t.results_turnaround)}"></div>
-      <div class="field full"><label>Not-offered message <span class="hint">reply used when catalog is closed and a study isn't offered — blank uses a generic default</span></label><textarea data-field="not_offered_message" placeholder="Lo sentimos, no realizamos ese estudio.">${esc(t.not_offered_message)}</textarea></div>
+      <div class="field"><label>Phone number ID</label><input type="text" class="mono" data-field="wa_phone_number_id" placeholder="leave blank to keep current"></div>
+      ${pwField('Access token', 'wa_access_token', t, 'leave blank to keep current')}
+      ${pwField('App secret', 'wa_app_secret', t, 'leave blank to keep current')}
+      <div class="field"><label>Verify token</label><input type="text" class="mono" data-field="wa_verify_token" placeholder="leave blank to keep current"></div>
     </div>
-  </div>
-  <details class="collapsible">
-    <summary><span>WhatsApp settings <span class="sub">secondary channel</span></span><span class="chev">${ic('chevronDown')}</span></summary>
-    <div class="details-body">
-      <div class="field-grid">
-        <div class="field"><label>Phone number ID</label><input type="text" class="mono" data-field="wa_phone_number_id" placeholder="leave blank to keep current"></div>
-        ${pwField('Access token', 'wa_access_token', t, 'leave blank to keep current')}
-        ${pwField('App secret', 'wa_app_secret', t, 'leave blank to keep current')}
-        <div class="field"><label>Verify token</label><input type="text" class="mono" data-field="wa_verify_token" placeholder="leave blank to keep current"></div>
-      </div>
-    </div>
-  </details>
-  <div class="panel-section" data-od-id="staff-section-${esc(t.slug)}">
-    ${renderStaffSection(t)}
-  </div>
-  <div class="panel-section" data-od-id="canned-section-${esc(t.slug)}">
-    ${renderCannedSection(t)}
-  </div>
-  <div class="panel-section" data-od-id="not-offered-section-${esc(t.slug)}">
-    ${renderNotOfferedSection(t)}
-  </div>
-  <div class="panel-actions">
-    ${saveErr ? `<div class="inline-error show">${ic('alert')}<span>${esc(saveErr)}</span></div>` : ''}
-    <button class="btn btn-ghost" data-action="collapse">Cancel</button>
-    <button class="btn btn-primary" data-action="save-tenant" data-slug="${esc(t.slug)}" data-od-id="save-changes-${esc(t.slug)}" ${saving?'disabled':''}>${saving?'Saving…':'Save changes'}</button>
-  </div>
+  </div>`;
+
+  const staffPane = renderStaffSection(t);
+
+  const faqPane = `
+  ${renderCannedSection(t)}
+  <div style="margin-top:var(--space-6)"></div>
+  ${renderNotOfferedSection(t)}`;
+
+  const dangerPane = `
   <div class="danger-zone" data-od-id="danger-zone-${esc(t.slug)}">
     <h4>${ic('alert')} Danger zone</h4>
     <div class="danger-row">
@@ -1144,6 +1141,23 @@ function renderExpandPanel(t) {
         </div>` : ''}
       </div>
     </div>
+  </div>`;
+
+  const panes = { general: generalPane, channels: channelsPane, staff: staffPane, faq: faqPane, danger: dangerPane };
+
+  return `
+  <div class="tabs-bar">
+    ${tabBtn('general', 'General')}
+    ${tabBtn('channels', 'Channels')}
+    ${tabBtn('staff', 'Staff', staffCount)}
+    ${tabBtn('faq', 'FAQ & catalog', faqCount)}
+    ${tabBtn('danger', 'Danger zone')}
+  </div>
+  <div class="tab-body" data-od-id="tenant-tab-body-${esc(t.slug)}">${panes[tab] || panes.general}</div>
+  <div class="panel-actions">
+    ${saveErr ? `<div class="inline-error show">${ic('alert')}<span>${esc(saveErr)}</span></div>` : ''}
+    <button class="btn btn-ghost" data-action="collapse">Cancel</button>
+    <button class="btn btn-primary" data-action="save-tenant" data-slug="${esc(t.slug)}" data-od-id="save-changes-${esc(t.slug)}" ${saving?'disabled':''}>${saving?'Saving…':'Save changes'}</button>
   </div>`;
 }
 
@@ -1210,7 +1224,7 @@ function renderCannedSection(t) {
     <h3>${editing ? 'Edit canned answer' : 'New canned answer'}</h3>
     ${formErr ? `<div class="inline-error show">${ic('alert')}<span>${esc(formErr)}</span></div>` : ''}
     <div class="field-grid" style="grid-template-columns:1fr 140px">
-      <div class="field"><label>Keywords <span class="hint">comma-separated</span></label><input type="text" class="mono" data-field="canned-keywords" value="${esc((editing?.keywords || []).join(', '))}" placeholder="horario, hora, atienden" ${saving?'disabled':''}></div>
+      <div class="field"><label>Keywords <span class="hint">one per line — full questions OK, commas inside a line are kept literally</span></label><textarea class="mono" data-field="canned-keywords" rows="3" placeholder="horario&#10;hora&#10;a que hora abren" ${saving?'disabled':''}>${esc((editing?.keywords || []).join('\n'))}</textarea></div>
       <div class="field"><label>Match mode</label>
         <select data-field="canned-match-mode" ${saving?'disabled':''}>
           <option value="any" ${!editing || editing.match_mode==='any'?'selected':''}>any</option>
@@ -1261,7 +1275,7 @@ function renderNotOfferedSection(t) {
     <h3>${editing ? 'Edit not-offered term' : 'New not-offered term'}</h3>
     ${formErr ? `<div class="inline-error show">${ic('alert')}<span>${esc(formErr)}</span></div>` : ''}
     <div class="field-grid" style="grid-template-columns:1fr 140px">
-      <div class="field"><label>Keywords <span class="hint">comma-separated synonyms</span></label><input type="text" class="mono" data-field="not-offered-keywords" value="${esc((editing?.keywords || []).join(', '))}" placeholder="urocultivo, cultivo de orina" ${saving?'disabled':''}></div>
+      <div class="field"><label>Keywords <span class="hint">one per line — synonyms/variants</span></label><textarea class="mono" data-field="not-offered-keywords" rows="3" placeholder="urocultivo&#10;cultivo de orina" ${saving?'disabled':''}>${esc((editing?.keywords || []).join('\n'))}</textarea></div>
       <div class="field"><label>Match mode</label>
         <select data-field="not-offered-match-mode" ${saving?'disabled':''}>
           <option value="any" ${!editing || editing.match_mode==='any'?'selected':''}>any</option>
@@ -1489,6 +1503,11 @@ function onMainClick(e) {
     }
     case 'collapse':
       state.expandedTenant = null;
+      render();
+      break;
+    case 'tenant-tab':
+      e.stopPropagation();
+      state.tenantEditTab[slug] = actionEl.dataset.tab;
       render();
       break;
     case 'toggle-reveal': {
@@ -1932,7 +1951,7 @@ async function fetchCanned(slug) {
 async function saveCannedAnswer(slug) {
   const panel = document.querySelector(`[data-od-id="canned-form-${CSS.escape(slug)}"]`);
   const keywords = panel.querySelector('[data-field="canned-keywords"]').value
-    .split(',').map(k => k.trim()).filter(Boolean);
+    .split('\n').map(k => k.trim()).filter(Boolean);
   const matchMode = panel.querySelector('[data-field="canned-match-mode"]').value;
   const answer = panel.querySelector('[data-field="canned-answer"]').value.trim();
   if (keywords.length === 0) {
@@ -2004,7 +2023,7 @@ async function fetchNotOffered(slug) {
 async function saveNotOfferedTerm(slug) {
   const panel = document.querySelector(`[data-od-id="not-offered-form-${CSS.escape(slug)}"]`);
   const keywords = panel.querySelector('[data-field="not-offered-keywords"]').value
-    .split(',').map(k => k.trim()).filter(Boolean);
+    .split('\n').map(k => k.trim()).filter(Boolean);
   const matchMode = panel.querySelector('[data-field="not-offered-match-mode"]').value;
   if (keywords.length === 0) {
     state.notOfferedFormError[slug] = 'Add at least one keyword.';
